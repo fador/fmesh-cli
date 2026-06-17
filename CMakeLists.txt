@@ -124,4 +124,9 @@ if(GTEST_FOUND)
     add_test(NAME mesh-cli-tests COMMAND mesh-cli-tests)
 endif()
 
+# Live integration test (requires a real paired device; not part of ctest).
+add_executable(mesh-cli-live tests/test_live_send.cpp src/app/config.cpp)
+target_link_libraries(mesh-cli-live PRIVATE meshcli_tui)
+target_include_directories(mesh-cli-live PRIVATE src ${GENERATED_PROTO_DIR})
+
 install(TARGETS mesh-cli RUNTIME DESTINATION bin)
