@@ -27,7 +27,10 @@ public:
     int ensure_channel(const std::string& device, uint32_t channel_idx,
                        const std::string& name);
     int ensure_dm(const std::string& device, uint32_t peer_node,
-                  const std::string& nick);
+                   const std::string& nick);
+
+    // Ensure a raw-packet capture window exists (used for live hex dump).
+    int ensure_raw(const std::string& device);
 
     // Append a received text message to the right window and bump activity.
     void append_text(const std::string& device, uint32_t from_node,

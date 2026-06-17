@@ -33,6 +33,7 @@ private:
     void process_events();
     void handle_event(const MeshEvent& ev);
     std::string connection_info() const;
+    void maybe_reconnect();    // called every ~1s from the poll loop
 
     MeshService& service_;
     ConcurrentQueue<MeshEvent>& queue_;
@@ -43,6 +44,13 @@ private:
     StatusBar status_bar_;
     bool quit_ = false;
     bool need_redraw_ = true;
+
+    // Auto-reconnect state
+    std::string reconnect_device_id_;
+    int reconnect_attempt_ = 0;
+    int reconnect_delay_s_ = 5;     // seconds between attempts
+    int reconnect_max_attempts_ = 6; // give up after ~30s
+    static constexpr int kReconnectIntervalS = 5;
 };
 
 } // namespace meshcli

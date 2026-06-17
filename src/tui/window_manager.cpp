@@ -111,6 +111,15 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
     return win_idx;
 }
 
+int WindowManager::ensure_raw(const std::string& device) {
+    std::string key = device + "|raw|0";
+    auto it = by_key_.find(key);
+    if (it != by_key_.end()) return it->second;
+    auto w = std::make_unique<Window>(
+        WindowTarget{device, "raw", 0}, "raw");
+    return add_window(std::move(w));
+}
+
 void WindowManager::append_text(const std::string& device, uint32_t from_node,
                                 uint32_t to_node, uint32_t channel_idx,
                                 bool broadcast, const std::string& text,

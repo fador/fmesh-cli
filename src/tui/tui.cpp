@@ -12,7 +12,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <ctime>
 #include <poll.h>
+#include <sstream>
 #include <string>
 #include <unistd.h>
 #include <variant>
@@ -80,6 +82,37 @@ std::string TuiApp::connection_info() const {
         if (!fw.empty()) s += " | fw=" + fw;
     }
     return s;
+}
+
+void TuiApp::maybe_reconnect() {
+    if (reconnect_device_id_.empty()) return;
+
+    static time_t last_attempt = 0;
+    time_t now = std::time(nullptr);
+    if (now - last_attempt < kReconnectIntervalS) return;
+    last_attempt = now;
+
+    ++reconnect_attempt_;
+    if (reconnect_attempt_ > reconnect_max_attempts_) {
+        wm_.append_status("*** Auto-reconnect gave up after " +
+                          std::to_string(reconnect_max_attempts_) + " attempts",
+                          tui_color::ERROR);
+        reconnect_device_id_.clear();
+        reconnect_attempt_ = 0;
+        need_redraw_ = true;
+        return;
+    }
+
+    wm_.append_status("*** Reconnect attempt " +
+                      std::to_string(reconnect_attempt_) + "/" +
+                      std::to_string(reconnect_max_attempts_) + "...",
+                      tui_color::INFO);
+    if (service_.reconnect_device(reconnect_device_id_)) {
+        wm_.append_status("*** Reconnected!", tui_color::INFO);
+        reconnect_device_id_.clear();
+        reconnect_attempt_ = 0;
+    }
+    need_redraw_ = true;
 }
 
 int TuiApp::run() {
@@ -169,6 +202,8 @@ int TuiApp::run() {
                 ch = getch();
             }
         }
+        // Auto-reconnect check (runs on every ~1s poll cycle).
+        maybe_reconnect();
     }
     return 0;
 }
@@ -186,6 +221,14 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             wm_.append_status("*** Connected to " + e.display_name, tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvDisconnected>) {
             wm_.append_status("*** Disconnected: " + e.reason, tui_color::ERROR);
+            // Start auto-reconnect for this device.
+            if (reconnect_device_id_.empty()) {
+                reconnect_device_id_ = e.device;
+                reconnect_attempt_ = 0;
+                wm_.append_status("*** Auto-reconnect in " +
+                                  std::to_string(reconnect_delay_s_) + "s...",
+                                  tui_color::INFO);
+            }
         } else if constexpr (std::is_same_v<T, EvMyInfo>) {
             wm_.append_status("*** My node: " + node_num_to_id(e.my_node_num), tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvMetadata>) {
@@ -233,6 +276,33 @@ void TuiApp::handle_event(const MeshEvent& ev) {
         } else if constexpr (std::is_same_v<T, EvNodeJoined>) {
             wm_.append_status("*** Node joined: " + e.node.long_name +
                               " (" + e.node.node_id + ")", tui_color::INFO);
+        } else if constexpr (std::is_same_v<T, EvRawPacket>) {
+            int idx = wm_.ensure_raw(e.device);
+            Window& w = *wm_.windows()[idx - 1];
+            char tsbuf[16];
+            std::time_t secs = static_cast<std::time_t>(e.ts / 1000);
+            std::tm tm{};
+            ::localtime_r(&secs, &tm);
+            std::snprintf(tsbuf, sizeof(tsbuf), "%02d:%02d:%02d",
+                          tm.tm_hour, tm.tm_min, tm.tm_sec);
+            // Header line.
+            Line header;
+            header.text = "[" + std::string(tsbuf) + "] " + e.summary +
+                          "  " + std::to_string(e.hex.size()) + " bytes";
+            header.is_meta = true;
+            header.color_pair = tui_color::CHANNEL;
+            w.append_line(header);
+            // Hex lines.
+            std::istringstream iss(e.hex);
+            std::string hline;
+            while (std::getline(iss, hline)) {
+                Line hexline;
+                hexline.text = "  " + hline;
+                hexline.color_pair = tui_color::META;
+                w.append_line(hexline);
+            }
+            if (idx != wm_.current_index()) w.bump_activity(1);
+            else w.mark_read();
         }
     }, ev);
 }
