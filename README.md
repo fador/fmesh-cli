@@ -96,6 +96,7 @@ cmake --build build -j$(nproc)
 | `/config` | Show device configuration |
 | `/whois <node\|nick>` | Show detailed node information |
 | `/raw [N]` | Show last N raw packets (hex dump) |
+| `/stats` | Show packet type counts |
 | `/quit` | Exit |
 
 Plain text (without leading `/`) sends to the current window's target: channel broadcast or DM.
