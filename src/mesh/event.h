@@ -95,6 +95,14 @@ struct EvConfigLine {
     std::string line;
 };
 
+// A raw FromRadio packet (hex dump + decoded summary)
+struct EvRawPacket {
+    DeviceId device;
+    std::string hex;       // hex dump of the raw bytes
+    std::string summary;   // short description (e.g. "TEXT_MESSAGE_APP")
+    uint64_t ts = 0;       // unix millis
+};
+
 using MeshEvent = std::variant<
     EvConnected,
     EvDisconnected,
@@ -108,7 +116,8 @@ using MeshEvent = std::variant<
     EvLogLine,
     EvError,
     EvNodeJoined,
-    EvConfigLine
+    EvConfigLine,
+    EvRawPacket
 >;
 
 } // namespace meshcli

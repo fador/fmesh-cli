@@ -66,6 +66,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "me")                      cmd_me(tokens);
     else if (cmd == "config" || cmd == "cfg")  cmd_config();
     else if (cmd == "whois" || cmd == "wi")    cmd_whois(tokens);
+    else if (cmd == "raw")                     cmd_raw(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -88,6 +89,7 @@ void CommandDispatcher::cmd_help() {
     status_("  /reconnect            reconnect the device", tui_color::INFO);
     status_("  /config               show device configuration", tui_color::INFO);
     status_("  /whois <node|nick>    show detailed node information", tui_color::INFO);
+    status_("  /raw [N]              show last N raw packets (default 5)", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", tui_color::INFO);
 }
@@ -241,6 +243,50 @@ void CommandDispatcher::cmd_info() {
                     tui_color::INFO);
             status_("  Channels: " + std::to_string(db->channels().size()),
                     tui_color::INFO);
+        }
+    }
+}
+
+void CommandDispatcher::cmd_raw(const std::vector<std::string>& args) {
+    int count = 5;
+    if (!args.empty()) {
+        try { count = std::stoi(args[0]); }
+        catch (...) { status_("Invalid number", tui_color::ERROR); return; }
+        if (count < 1) count = 1;
+        if (count > 50) count = 50;
+    }
+    auto devices = service_.device_ids();
+    if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
+    for (const auto& id : devices) {
+        auto pkts = service_.raw_packets_for(id);
+        if (pkts.empty()) {
+            status_("Raw packets for " + service_.display_name_for(id)
+                    + ": (none yet)", tui_color::INFO);
+            continue;
+        }
+        // Show last `count` packets from the end.
+        size_t start = (pkts.size() > static_cast<size_t>(count))
+                           ? pkts.size() - count : 0;
+        status_("Raw packets for " + service_.display_name_for(id)
+                + " (" + std::to_string(pkts.size() - start) + " of "
+                + std::to_string(pkts.size()) + "):", tui_color::INFO);
+        for (size_t i = start; i < pkts.size(); ++i) {
+            const auto& p = pkts[i];
+            // Show timestamp + summary header
+            char tsbuf[16];
+            std::time_t secs = static_cast<std::time_t>(p.ts / 1000);
+            std::tm tm{};
+            ::localtime_r(&secs, &tm);
+            std::snprintf(tsbuf, sizeof(tsbuf), "%02d:%02d:%02d",
+                          tm.tm_hour, tm.tm_min, tm.tm_sec);
+            status_(std::string(tsbuf) + " [" + std::to_string(i) + "] "
+                    + p.summary + "  " + std::to_string(p.hex.size()) + " bytes",
+                    tui_color::CHANNEL);
+            // Show hex dump (each line as a separate status line)
+            std::istringstream iss(p.hex);
+            std::string line;
+            while (std::getline(iss, line))
+                status_("    " + line, tui_color::META);
         }
     }
 }

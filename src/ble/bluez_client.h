@@ -88,6 +88,8 @@ private:
     void run_connect_flow();  // synchronous scan/pair/connect/GATT setup
     void emit(MeshEvent ev);
     void emit_error(std::string msg);
+    // Emit a raw-packet hex dump alongside the decoded event.
+    void emit_raw(const std::string& fromradio_bytes);
 
     bool find_adapter();
     // Scan for up to `timeout_s` seconds; returns device object path.

@@ -384,4 +384,69 @@ std::vector<std::string> MeshCodec::decode_config_lines(
     return out;
 }
 
+std::string MeshCodec::hex_dump(const std::string& bytes) {
+    if (bytes.empty()) return "(empty)";
+    std::string out;
+    out.reserve(bytes.size() * 3);
+    for (size_t i = 0; i < bytes.size(); i += 16) {
+        if (i) out += '\n';
+        // Write hex bytes
+        for (size_t j = 0; j < 16; ++j) {
+            if (j == 8) out += ' ';
+            if (i + j < bytes.size()) {
+                char buf[4];
+                std::snprintf(buf, sizeof(buf), "%02x ",
+                              static_cast<unsigned char>(bytes[i + j]));
+                out += buf;
+            } else {
+                out += "   ";
+            }
+        }
+        out += " |";
+        // Write ASCII
+        for (size_t j = 0; j < 16 && i + j < bytes.size(); ++j) {
+            unsigned char c = static_cast<unsigned char>(bytes[i + j]);
+            out += (c >= 0x20 && c < 0x7F) ? static_cast<char>(c) : '.';
+        }
+    }
+    return out;
+}
+
+std::string MeshCodec::from_radio_summary(const std::string& bytes) {
+    meshtastic::FromRadio fr;
+    if (!fr.ParseFromString(bytes)) return "parse failed";
+    switch (fr.payload_variant_case()) {
+        case meshtastic::FromRadio::kMyInfo:
+            return "MyInfo node=" + node_num_to_id(fr.my_info().my_node_num());
+        case meshtastic::FromRadio::kNodeInfo:
+            return "NodeInfo " + node_num_to_id(fr.node_info().num());
+        case meshtastic::FromRadio::kChannel: {
+            auto& ch = fr.channel();
+            return "Channel idx=" + std::to_string(ch.index())
+                 + " \"" + ch.settings().name() + "\"";
+        }
+        case meshtastic::FromRadio::kConfig:
+            return "Config";
+        case meshtastic::FromRadio::kModuleConfig:
+            return "ModuleConfig";
+        case meshtastic::FromRadio::kPacket: {
+            auto& pkt = fr.packet();
+            if (pkt.has_decoded()) {
+                auto pn = pkt.decoded().portnum();
+                return "Packet port=" + meshtastic::PortNum_Name(pn)
+                     + " from=" + node_num_to_id(pkt.from());
+            }
+            return "Packet (encrypted)";
+        }
+        case meshtastic::FromRadio::kMetadata:
+            return "Metadata fw=" + fr.metadata().firmware_version();
+        case meshtastic::FromRadio::kConfigCompleteId:
+            return "ConfigComplete id=" + std::to_string(fr.config_complete_id());
+        case meshtastic::FromRadio::kLogRecord:
+            return "LogRecord \"" + fr.log_record().message() + "\"";
+        default:
+            return "type=" + std::to_string(fr.payload_variant_case());
+    }
+}
+
 } // namespace meshcli

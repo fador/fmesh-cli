@@ -159,6 +159,7 @@ void BluezClient::run_connect_flow() {
             auto bytes = read_char(fromradio_path_);
             LOG_DEBUG() << "initial FROMRADIO poll: " << bytes.size() << " bytes";
             if (!bytes.empty()) {
+                emit_raw(bytes);
                 uint32_t cid = 0;
                 auto ev = MeshCodec::decode_from_radio(bytes, device_id_, cid);
                 if (ev) {
@@ -206,6 +207,16 @@ void BluezClient::emit_error(std::string msg) {
     e.device = device_id_.empty() ? spec_.name : device_id_;
     e.message = std::move(msg);
     emit(e);
+}
+
+void BluezClient::emit_raw(const std::string& fromradio_bytes) {
+    EvRawPacket ev;
+    ev.device = device_id_;
+    ev.ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+    ev.summary = MeshCodec::from_radio_summary(fromradio_bytes);
+    ev.hex = MeshCodec::hex_dump(fromradio_bytes);
+    if (sink_) sink_(std::move(ev));
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +521,7 @@ void BluezClient::drain_from_radio() {
             return;
         }
         ++msgs;
+        emit_raw(bytes);
         uint32_t config_id = 0;
         auto ev = MeshCodec::decode_from_radio(bytes, device_id_, config_id);
         if (ev) {

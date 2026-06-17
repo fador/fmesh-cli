@@ -28,6 +28,12 @@ public:
     static std::vector<std::string> decode_config_lines(const std::string& config_bytes,
                                                         bool is_module);
 
+    // Format raw bytes as a hex dump (16 bytes per line, offset + hex + ASCII).
+    static std::string hex_dump(const std::string& bytes);
+
+    // Return a short summary description for a FromRadio message.
+    static std::string from_radio_summary(const std::string& bytes);
+
     // Build a ToRadio{packet=MeshPacket{...}} carrying a text message.
     //   to_node     : kBroadcastNodeNum for a channel broadcast, else a DM
     //   channel_idx : channel to send on (matters for both broadcast & DM)

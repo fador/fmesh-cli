@@ -29,6 +29,8 @@ struct DeviceRuntime {
     std::string hw_model;
     bool config_complete = false;
     std::vector<std::string> config_lines;   // from /config decoding
+    std::vector<EvRawPacket> raw_packets;    // last N raw FromRadio packets
+    static constexpr size_t kMaxRawPackets = 200;
     // pending outbound messages awaiting ack, keyed by packet_id -> db rowid
     std::map<uint32_t, int64_t> pending_acks;
 };
@@ -75,6 +77,7 @@ public:
     [[nodiscard]] std::string hw_model_for(const std::string& device_id) const;
     [[nodiscard]] std::string display_name_for(const std::string& device_id) const;
     [[nodiscard]] std::vector<std::string> config_lines_for(const std::string& device_id) const;
+    [[nodiscard]] std::vector<EvRawPacket> raw_packets_for(const std::string& device_id) const;
     [[nodiscard]] Database& database() { return db_; }
     [[nodiscard]] bool has_devices() const { return !devices_.empty(); }
 

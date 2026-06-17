@@ -223,6 +223,13 @@ std::vector<std::string> MeshService::config_lines_for(const std::string& device
     return it->second->config_lines;
 }
 
+std::vector<EvRawPacket> MeshService::raw_packets_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = devices_.find(device_id);
+    if (it == devices_.end()) return {};
+    return it->second->raw_packets;
+}
+
 // ---------------------------------------------------------------------------
 // event handling (runs on the BLE thread of whichever device emitted it)
 // ---------------------------------------------------------------------------
@@ -292,6 +299,10 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
             while (std::getline(iss, ln)) {
                 if (!ln.empty()) dst.push_back(ln);
             }
+        } else if constexpr (std::is_same_v<T, EvRawPacket>) {
+            rt->raw_packets.push_back(e);
+            if (rt->raw_packets.size() > DeviceRuntime::kMaxRawPackets)
+                rt->raw_packets.erase(rt->raw_packets.begin());
         } else {
             // EvConnected / EvDisconnected / EvLogLine / EvError: no DB work.
         }
