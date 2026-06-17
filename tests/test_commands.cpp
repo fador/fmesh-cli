@@ -71,6 +71,7 @@ protected:
 TEST_F(CommandTest, Help)       { EXPECT_FALSE(exec("/help").lines.empty()); }
 TEST_F(CommandTest, List)       { wm_.ensure_channel("test_device",0,"EdgeFastLow"); exec("/list"); }
 TEST_F(CommandTest, Nodes)      { exec("/nodes"); }
+TEST_F(CommandTest, Whois)      { exec("/whois Fad3"); }
 TEST_F(CommandTest, Info)       { exec("/info"); }
 TEST_F(CommandTest, Reconnect)  { exec("/reconnect"); }
 TEST_F(CommandTest, Unknown)    { exec("/bogus"); }
@@ -110,6 +111,29 @@ TEST_F(CommandTest, MeStatusBlocked) {
 
 TEST_F(CommandTest, MsgNoMatch) {
     auto c = exec("/msg nobody hello");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("No node matched"), std::string::npos);
+}
+
+// -- /whois ------------------------------------------------------------
+
+TEST_F(CommandTest, WhoisUsage) {
+    auto c = exec("/whois");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("Usage"), std::string::npos);
+}
+
+TEST_F(CommandTest, WhoisMatch) {
+    auto c = exec("/whois Fad3");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("Fador"), std::string::npos);
+}
+
+TEST_F(CommandTest, WhoisNoMatch) {
+    auto c = exec("/whois nobody");
     std::string all;
     for (auto& l : c.lines) all += l;
     EXPECT_NE(all.find("No node matched"), std::string::npos);

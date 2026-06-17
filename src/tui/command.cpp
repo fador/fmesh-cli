@@ -6,6 +6,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <ctime>
 #include <sstream>
 
 namespace meshcli {
@@ -64,6 +65,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "reconnect")               cmd_reconnect();
     else if (cmd == "me")                      cmd_me(tokens);
     else if (cmd == "config" || cmd == "cfg")  cmd_config();
+    else if (cmd == "whois" || cmd == "wi")    cmd_whois(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -85,6 +87,7 @@ void CommandDispatcher::cmd_help() {
     status_("  /me <text>            send an action (italic *nick text*)", tui_color::INFO);
     status_("  /reconnect            reconnect the device", tui_color::INFO);
     status_("  /config               show device configuration", tui_color::INFO);
+    status_("  /whois <node|nick>    show detailed node information", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", tui_color::INFO);
 }
@@ -264,6 +267,70 @@ void CommandDispatcher::cmd_config() {
                 status_("  " + l, tui_color::CHANNEL);
         }
     }
+}
+
+void CommandDispatcher::cmd_whois(const std::vector<std::string>& args) {
+    if (args.empty()) { status_("Usage: /whois <node|nick>", tui_color::ERROR); return; }
+    std::string q = args[0];
+    auto devices = service_.device_ids();
+    if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
+    for (const auto& id : devices) {
+        const NodeDb* db = service_.db_for(id);
+        if (!db) continue;
+        auto n = db->find_fuzzy(q);
+        if (!n) continue;
+
+        status_("Node: " + n->long_name + " (" + n->short_name + ")", tui_color::CHANNEL);
+        status_("  ID:       " + n->node_id, tui_color::INFO);
+        if (!n->hw_model.empty())
+            status_("  HW:       " + n->hw_model, tui_color::INFO);
+        if (!n->role.empty())
+            status_("  Role:     " + n->role, tui_color::INFO);
+        if (n->battery_level)
+            status_("  Battery:  " + std::to_string(*n->battery_level) + "%", tui_color::INFO);
+        if (n->voltage) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.2f", *n->voltage);
+            status_("  Voltage:  " + std::string(buf) + " V", tui_color::INFO);
+        }
+        if (n->snr) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f", *n->snr);
+            status_("  SNR:      " + std::string(buf) + " dB", tui_color::INFO);
+        }
+        if (n->channel_util) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f", *n->channel_util * 100.0f);
+            status_("  Ch util:  " + std::string(buf) + "%", tui_color::INFO);
+        }
+        if (n->air_util_tx) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f", *n->air_util_tx * 100.0f);
+            status_("  Air util: " + std::string(buf) + "%", tui_color::INFO);
+        }
+        if (n->hops_away)
+            status_("  Hops:     " + std::to_string(*n->hops_away), tui_color::INFO);
+        if (n->last_heard) {
+            std::time_t t = static_cast<std::time_t>(*n->last_heard);
+            char buf[32];
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&t));
+            status_("  Heard:    " + std::string(buf), tui_color::INFO);
+        }
+        if (n->latitude && n->longitude) {
+            char buf[80];
+            std::snprintf(buf, sizeof(buf), "  Pos:      %.6f, %.6f  alt=%d m",
+                          *n->latitude, *n->longitude, n->altitude.value_or(0));
+            status_(buf, tui_color::INFO);
+        }
+        status_("  Flags:    " +
+                std::string(n->is_favorite ? "fav " : "") +
+                std::string(n->is_muted ? "muted " : "") +
+                std::string(n->is_key_verified ? "verified " : "") +
+                std::string(n->has_public_key ? "PKI" : ""),
+                tui_color::INFO);
+        return;
+    }
+    status_("No node matched '" + q + "'", tui_color::ERROR);
 }
 
 void CommandDispatcher::cmd_reconnect() {
