@@ -5,10 +5,14 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 ## Features
 
 - **BLE connectivity** via BlueZ D-Bus (sdbus-c++)
-- **irssi-style TUI**: multiple windows, status bar, activity marks, Alt+N switching
+- **irssi-style TUI**: multiple windows, status bar, activity marks, Alt+N switching, colored prompts
 - **Channels + DMs**: broadcast channel windows + direct-message query windows
+- **Message history**: past sessions' messages reload from SQLite on startup
+- **Device config viewer**: `/config` shows LoRa, power, position, network, Bluetooth settings
+- **Raw packet view**: `/raw` displays hex dumps of received FromRadio packets
+- **Node inspection**: `/whois` shows detailed node info (ID, HW, battery, position, SNR, flags)
 - **Auto-pairing**: built-in `org.bluez.Agent1` that supplies the PIN automatically
-- **SQLite persistence**: messages, nodes, and channels survive restarts
+- **SQLite persistence**: messages, nodes, channels, and ACK state survive restarts
 - **Multi-device ready**: `MeshService` supports multiple concurrent BLE connections
 - **PKI DM support**: public-key encryption for direct messages on recent firmware
 
@@ -89,6 +93,9 @@ cmake --build build -j$(nproc)
 | `/info` | Show connection info |
 | `/me <text>` | Send an action |
 | `/reconnect` | Reconnect device |
+| `/config` | Show device configuration |
+| `/whois <node\|nick>` | Show detailed node information |
+| `/raw [N]` | Show last N raw packets (hex dump) |
 | `/quit` | Exit |
 
 Plain text (without leading `/`) sends to the current window's target: channel broadcast or DM.
