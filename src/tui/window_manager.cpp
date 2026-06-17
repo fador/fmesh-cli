@@ -102,7 +102,12 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
                              const std::string& nick) {
     std::string key = device + "|dm|" + std::to_string(peer_node);
     auto it = by_key_.find(key);
-    if (it != by_key_.end()) return it->second;
+    if (it != by_key_.end()) {
+        // Update title if a better nick arrived (e.g. from NodeInfo).
+        if (!nick.empty() && windows_[it->second - 1]->title() != nick)
+            windows_[it->second - 1]->set_title(dm_title(device, peer_node, nick));
+        return it->second;
+    }
     auto w = std::make_unique<Window>(
         WindowTarget{device, "dm", peer_node},
         dm_title(device, peer_node, nick));

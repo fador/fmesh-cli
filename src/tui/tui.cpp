@@ -244,6 +244,10 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                             true, "*** Node updated: " + e.node.long_name +
                             " (" + e.node.node_id + ")",
                             static_cast<uint32_t>(std::time(nullptr)), db);
+            // Refresh the DM window title in case the node's nick changed.
+            std::string nick = e.node.short_name.empty()
+                                   ? e.node.long_name : e.node.short_name;
+            wm_.ensure_dm(e.device, e.node.node_num, nick);
         } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
             std::string name = e.channel.name;
             int idx = wm_.ensure_channel(e.device, e.channel.index, name);

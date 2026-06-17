@@ -69,6 +69,8 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "whois" || cmd == "wi")    cmd_whois(tokens);
     else if (cmd == "raw")                     cmd_raw(tokens);
     else if (cmd == "stats" || cmd == "st")    cmd_stats();
+    else if (cmd == "topic" || cmd == "t")     cmd_topic();
+    else if (cmd == "lastlog" || cmd == "l")   cmd_lastlog(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -93,6 +95,8 @@ void CommandDispatcher::cmd_help() {
     status_("  /whois <node|nick>    show detailed node information", tui_color::INFO);
     status_("  /raw [N]              show last N raw packets (default 5)", tui_color::INFO);
     status_("  /stats                show packet statistics", tui_color::INFO);
+    status_("  /topic                show current channel details", tui_color::INFO);
+    status_("  /lastlog <pattern>    search scrollback for pattern", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", tui_color::INFO);
 }
@@ -324,6 +328,87 @@ void CommandDispatcher::cmd_stats() {
             status_(buf, tui_color::CHANNEL);
         }
     }
+}
+
+void CommandDispatcher::cmd_topic() {
+    const auto* tgt = wm_.current_target();
+    if (!tgt) {
+        status_("No channel selected. Use /channel <n> to switch.",
+                tui_color::ERROR);
+        return;
+    }
+    if (tgt->kind == "dm") {
+        // Show DM peer info
+        const NodeDb* db = service_.db_for(tgt->device);
+        if (db) {
+            auto n = db->get(tgt->target);
+            if (n) {
+                status_("DM with " + n->long_name + " (" + n->node_id + ")",
+                        tui_color::CHANNEL);
+                if (!n->hw_model.empty())
+                    status_("  HW: " + n->hw_model, tui_color::INFO);
+                if (n->battery_level)
+                    status_("  Battery: " + std::to_string(*n->battery_level) + "%",
+                            tui_color::INFO);
+                if (n->snr)
+                    status_("  SNR: " + std::to_string(*n->snr) + " dB",
+                            tui_color::INFO);
+                return;
+            }
+        }
+        status_("DM with node " + node_num_to_id(tgt->target), tui_color::INFO);
+        return;
+    }
+    if (tgt->kind == "channel") {
+        const NodeDb* db = service_.db_for(tgt->device);
+        if (db) {
+            auto ch = db->channel(tgt->target);
+            if (ch) {
+                status_("Channel " + std::to_string(ch->index) + ": " + ch->name,
+                        tui_color::CHANNEL);
+                status_("  Role: " + ch->role, tui_color::INFO);
+                status_("  PSK: " + std::string(ch->has_psk ? "set" : "none"),
+                        tui_color::INFO);
+                return;
+            }
+        }
+        status_("Channel " + std::to_string(tgt->target), tui_color::INFO);
+        return;
+    }
+    status_("Not a channel or DM window.", tui_color::ERROR);
+}
+
+void CommandDispatcher::cmd_lastlog(const std::vector<std::string>& args) {
+    if (args.empty()) {
+        status_("Usage: /lastlog <pattern>", tui_color::ERROR);
+        return;
+    }
+    std::string pattern;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (i) pattern += ' ';
+        pattern += args[i];
+    }
+    Window* w = wm_.current_window();
+    if (!w) return;
+
+    // Case-insensitive search.
+    std::string lower_pat = pattern;
+    std::transform(lower_pat.begin(), lower_pat.end(), lower_pat.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    int matches = 0;
+    const auto& lines = w->lines();
+    for (const auto& line : lines) {
+        std::string lower = line.text;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (lower.find(lower_pat) != std::string::npos) {
+            status_(line.text, line.color_pair);
+            ++matches;
+        }
+    }
+    status_("-- " + std::to_string(matches) + " matches for '" + pattern + "' --",
+            tui_color::INFO);
 }
 
 void CommandDispatcher::cmd_quit(CommandResult& res) {
