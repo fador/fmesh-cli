@@ -12,7 +12,8 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 - **Raw packet view**: `/raw` displays hex dumps of received FromRadio packets, live raw window
 - **Node inspection**: `/whois` shows detailed node info (ID, HW, battery, position, SNR, flags)
 - **TCP + serial**: `--tcp` and `--serial` CLI options for non-BLE connectivity
-- **Auto-reconnect**: automatically reconnects on BLE disconnect (up to 6 attempts)
+- **Auto-reconnect**: automatically reconnects on BLE disconnect (up to 6 attempts, 5s intervals)
+- **Outgoing echo**: sent messages appear immediately in the window (no delay for mesh echo)
 - **Auto-pairing**: built-in `org.bluez.Agent1` that supplies the PIN automatically
 - **SQLite persistence**: messages, nodes, channels, and ACK state survive restarts
 - **Multi-device ready**: `MeshService` supports multiple concurrent BLE connections
@@ -106,6 +107,8 @@ cmake --build build -j$(nproc)
 | `/whois <node\|nick>` | Show detailed node information |
 | `/raw [N]` | Show last N raw packets (hex dump) |
 | `/stats` | Show packet type counts |
+| `/topic` | Show channel/DM details |
+| `/lastlog <pattern>` | Search scrollback |
 | `/quit` | Exit |
 
 Plain text (without leading `/`) sends to the current window's target: channel broadcast or DM.
