@@ -105,6 +105,7 @@ void CommandDispatcher::cmd_list() {
         std::string mark;
         if (w.activity() >= 2) mark = " *";
         else if (w.activity() == 1) mark = " #";
+        if (w.unread() > 0) mark += std::to_string(w.unread());
         int color = tui_color::INFO;
         if (w.target().kind == "channel") color = tui_color::CHANNEL;
         else if (w.target().kind == "dm") color = tui_color::DM;

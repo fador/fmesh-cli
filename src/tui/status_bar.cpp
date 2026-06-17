@@ -52,11 +52,16 @@ void StatusBar::render(WindowManager& wm, int cols, const std::string& connectio
         int act = w.activity();
         if (act >= 2)      mark = '*';    // mention
         else if (act == 1) mark = '#';    // unread message
+        int unread = w.unread();
 
         attron(COLOR_PAIR(color_for(w)) | A_REVERSE);
-        mvprintw(LINES - 1, x, "%d%c%s ", idx, mark, window_label(w).c_str());
-        x += static_cast<int>(std::snprintf(nullptr, 0, "%d%c%s ",
-                                idx, mark, window_label(w).c_str()));
+        if (unread > 0)
+            mvprintw(LINES - 1, x, "%d%c%d%s ", idx, mark, unread, window_label(w).c_str());
+        else
+            mvprintw(LINES - 1, x, "%d%c%s ", idx, mark, window_label(w).c_str());
+        x += static_cast<int>(std::snprintf(nullptr, 0,
+                unread > 0 ? "%d%c%d%s " : "%d%c%s ",
+                idx, mark, unread, window_label(w).c_str()));
         attrset(A_REVERSE);
     }
 

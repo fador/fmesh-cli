@@ -27,20 +27,25 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
             std::printf(
                 "mesh-cli - irssi-style Meshtastic terminal client\n\n"
                 "Usage: mesh-cli [options] [pair]\n\n"
-                "Options:\n"
-                "  --name <name>     BLE device name to connect to (default: %s)\n"
-                "  --addr <mac>      explicit BLE MAC address (skips scan)\n"
-                "  --pin <pin>       pairing PIN (default: %s)\n"
-                "  --tcp <host:port>  connect via TCP (e.g. 192.168.1.50:4403)\n"
-                "  --serial <path>    connect via serial port (e.g. /dev/ttyUSB0)\n"
-                "  --serial-baud <N>  serial baud rate (default: 115200)\n"
+                "Connection options (choose one):\n"
+                "  --name <name>     BLE device name (default: %s)\n"
+                "  --addr <mac>      explicit BLE MAC address\n"
+                "  --tcp <host:port> TCP connection (port 4403 default)\n"
+                "  --serial <path>   serial port (e.g. /dev/ttyUSB0)\n"
+                "  --serial-baud <N> serial baud rate (default: 115200)\n"
+                "  pair              pair with BLE device before connecting\n"
+                "\n"
+                "Other options:\n"
+                "  --pin <pin>       BLE pairing PIN (default: %s)\n"
                 "  --db <path>       SQLite database path\n"
                 "  --log <path>      log file path\n"
                 "  --debug           verbose logging\n"
                 "  --scan            scan for BLE devices and exit\n"
-                "  --headless        connect + dump events to log, no TUI (for testing)\n"
-                "  pair              shorthand for --pair: pair then connect\n"
-                "  -h, --help        show this help\n",
+                "  --headless        connect + dump events to log, no TUI\n"
+                "  -h, --help        show this help\n\n"
+                "TUI commands: /help /list /nodes /query /msg /channel /window\n"
+                "              /close /clear /info /me /reconnect /config /whois\n"
+                "              /raw /stats /quit\n",
                 out.device_name.c_str(), out.pin.c_str());
             return false;
         } else if (a == "--name" && need(v)) {
