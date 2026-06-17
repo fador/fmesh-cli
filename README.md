@@ -64,6 +64,13 @@ cmake --build build -j$(nproc)
 
 # Verbose logging
 ./build/mesh-cli --debug
+
+# Connect via TCP (e.g. Meshtastic device on WiFi, port 4403)
+./build/mesh-cli --tcp 192.168.1.50:4403
+
+# Connect via serial port
+./build/mesh-cli --serial /dev/ttyUSB0
+./build/mesh-cli --serial /dev/ttyACM0 --serial-baud 921600
 ```
 
 ## Key bindings

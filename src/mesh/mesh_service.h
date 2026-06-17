@@ -4,6 +4,7 @@
 #include "mesh/event.h"
 #include "mesh/node_db.h"
 #include "store/database.h"
+#include "stream/stream_client.h"
 #include "util/event_loop.h"
 
 #include <atomic>
@@ -19,7 +20,8 @@ namespace meshcli {
 
 struct DeviceRuntime {
     BleDeviceSpec spec;             // stored for reconnection
-    std::unique_ptr<BluezClient> client;
+    std::unique_ptr<BluezClient> client;       // BLE transport
+    std::unique_ptr<class StreamClient> stream; // TCP/serial transport
     std::unique_ptr<NodeDb> db;
     std::string display_name;
     uint32_t my_node_num = 0;

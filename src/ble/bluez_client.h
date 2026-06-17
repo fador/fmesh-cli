@@ -19,6 +19,10 @@ struct BleDeviceSpec {
     std::string name;        // e.g. "Fad3_0330" (matched case-insensitively)
     std::string address;     // optional explicit MAC "AA:BB:CC:DD:EE:FF"
     std::string pin = "123456";
+    // Stream transport (TCP/serial) — if set, BLE is skipped.
+    std::string tcp_host;    // "host:port"
+    std::string serial_port; // "/dev/ttyUSB0"
+    int serial_baud = 115200;
 };
 
 // A single BLE connection to one Meshtastic device, built on BlueZ over

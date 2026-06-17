@@ -82,6 +82,7 @@ add_library(meshcli_core STATIC
     src/mesh/mesh_service.cpp
     src/ble/bluez_agent.cpp
     src/ble/bluez_client.cpp
+    src/stream/stream_client.cpp
     src/store/database.cpp
 )
 target_include_directories(meshcli_core PUBLIC src ${GENERATED_PROTO_DIR})

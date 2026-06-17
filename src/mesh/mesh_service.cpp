@@ -44,11 +44,42 @@ std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
         dispatch_to_ui(std::move(ev));
     };
 
-    rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
-    std::string id = rt->client->start(pair);
-    if (id.empty()) {
-        // The client pushed an EvError already; just bail.
-        return {};
+    std::string id;
+
+    if (!spec.tcp_host.empty()) {
+        // --- TCP transport ---
+        size_t colon = spec.tcp_host.rfind(':');
+        std::string host = spec.tcp_host.substr(0, colon);
+        uint16_t port = 4403;
+        if (colon != std::string::npos)
+            port = static_cast<uint16_t>(std::stoul(spec.tcp_host.substr(colon + 1)));
+        int fd = tcp_connect(host, port);
+        if (fd < 0) {
+            EvError ev;
+            ev.device = "";
+            ev.message = "TCP connect to " + spec.tcp_host + " failed";
+            dispatch_to_ui(std::move(ev));
+            return {};
+        }
+        rt->stream = std::make_unique<StreamClient>(fd, "tcp:" + spec.tcp_host, std::move(sink));
+        id = rt->stream->start();
+    } else if (!spec.serial_port.empty()) {
+        // --- Serial transport ---
+        int fd = serial_open(spec.serial_port, spec.serial_baud);
+        if (fd < 0) {
+            EvError ev;
+            ev.device = "";
+            ev.message = "Serial open " + spec.serial_port + " failed";
+            dispatch_to_ui(std::move(ev));
+            return {};
+        }
+        rt->stream = std::make_unique<StreamClient>(fd, "serial:" + spec.serial_port, std::move(sink));
+        id = rt->stream->start();
+    } else {
+        // --- BLE transport (default) ---
+        rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
+        id = rt->client->start(pair);
+        if (id.empty()) return {};
     }
 
     std::lock_guard<std::mutex> lock(devices_mu_);
@@ -71,13 +102,11 @@ bool MeshService::reconnect_device(const std::string& device_id) {
         spec = rt->spec;
     }
 
-    // Stop the old BLE client.
-    if (rt->client) {
-        rt->client->stop();
-        rt->client.reset();
-    }
+    // Stop the old transport.
+    if (rt->client) { rt->client->stop(); rt->client.reset(); }
+    if (rt->stream) { rt->stream->stop(); rt->stream.reset(); }
 
-    // Recreate the client with the same event sink.
+    // Recreate the event sink.
     std::weak_ptr<DeviceRuntime> weak_rt = rt;
     auto sink = [this, weak_rt](MeshEvent ev) {
         if (auto r = weak_rt.lock()) {
@@ -86,9 +115,27 @@ bool MeshService::reconnect_device(const std::string& device_id) {
         dispatch_to_ui(std::move(ev));
     };
 
-    rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
-    std::string new_id = rt->client->start(/*pair=*/false);
-    if (new_id.empty()) return false;
+    std::string new_id;
+    if (!spec.tcp_host.empty()) {
+        size_t colon = spec.tcp_host.rfind(':');
+        std::string host = spec.tcp_host.substr(0, colon);
+        uint16_t port = 4403;
+        if (colon != std::string::npos)
+            port = static_cast<uint16_t>(std::stoul(spec.tcp_host.substr(colon + 1)));
+        int fd = tcp_connect(host, port);
+        if (fd < 0) return false;
+        rt->stream = std::make_unique<StreamClient>(fd, "tcp:" + spec.tcp_host, std::move(sink));
+        new_id = rt->stream->start();
+    } else if (!spec.serial_port.empty()) {
+        int fd = serial_open(spec.serial_port, spec.serial_baud);
+        if (fd < 0) return false;
+        rt->stream = std::make_unique<StreamClient>(fd, "serial:" + spec.serial_port, std::move(sink));
+        new_id = rt->stream->start();
+    } else {
+        rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
+        new_id = rt->client->start(/*pair=*/false);
+        if (new_id.empty()) return false;
+    }
 
     // Update the map key if the device path changed.
     if (new_id != device_id) {
@@ -110,9 +157,12 @@ void MeshService::disconnect_all() {
     }
     for (auto& [_, rt] : tmp) {
         if (rt->client) {
-            // Best-effort disconnect notification to the radio.
             rt->client->send_to_radio(MeshCodec::encode_disconnect());
             rt->client->stop();
+        }
+        if (rt->stream) {
+            rt->stream->send_to_radio(MeshCodec::encode_disconnect());
+            rt->stream->stop();
         }
     }
 }
@@ -140,7 +190,9 @@ uint32_t MeshService::send_text(const std::string& device_id,
         if (it == devices_.end()) return 0;
         rt = it->second;
     }
-    if (!rt->client || !rt->client->is_connected()) return 0;
+    if (!rt->client && !rt->stream) return 0;
+    if (rt->client && !rt->client->is_connected()) return 0;
+    if (rt->stream && !rt->stream->is_connected()) return 0;
 
     uint32_t pid = next_packet_id();
     // PKI public key lookup for DMs (if the peer has a known public key).
@@ -151,7 +203,8 @@ uint32_t MeshService::send_text(const std::string& device_id,
     }
     auto bytes = MeshCodec::encode_text_packet(pid, to_node, channel_idx,
                                                text, want_ack, 0, pubkey);
-    if (!rt->client->send_to_radio(bytes)) return 0;
+    if (rt->client && !rt->client->send_to_radio(bytes)) return 0;
+    if (rt->stream && !rt->stream->send_to_radio(bytes)) return 0;
 
     // Persist the outgoing message.
     StoredMessage m;

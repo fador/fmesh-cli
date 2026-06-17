@@ -53,6 +53,9 @@ int run_app(int argc, char** argv, MeshService& service) {
     spec.name = cfg.device_name;
     spec.address = cfg.device_addr;
     spec.pin = cfg.pin;
+    spec.tcp_host = cfg.tcp_host;
+    spec.serial_port = cfg.serial_port;
+    spec.serial_baud = cfg.serial_baud;
     std::string device_id = service.connect_device(spec, cfg.pair);
     if (device_id.empty()) {
         // Drain any error events to stderr so the user sees why.

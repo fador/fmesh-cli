@@ -31,6 +31,9 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
                 "  --name <name>     BLE device name to connect to (default: %s)\n"
                 "  --addr <mac>      explicit BLE MAC address (skips scan)\n"
                 "  --pin <pin>       pairing PIN (default: %s)\n"
+                "  --tcp <host:port>  connect via TCP (e.g. 192.168.1.50:4403)\n"
+                "  --serial <path>    connect via serial port (e.g. /dev/ttyUSB0)\n"
+                "  --serial-baud <N>  serial baud rate (default: 115200)\n"
                 "  --db <path>       SQLite database path\n"
                 "  --log <path>      log file path\n"
                 "  --debug           verbose logging\n"
@@ -47,6 +50,12 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
             out.device_addr = v;
         } else if (a == "--pin" && need(v)) {
             out.pin = v;
+        } else if (a == "--tcp" && need(v)) {
+            out.tcp_host = v;
+        } else if (a == "--serial" && need(v)) {
+            out.serial_port = v;
+        } else if (a == "--serial-baud" && need(v)) {
+            out.serial_baud = std::atoi(v);
         } else if (a == "--db" && need(v)) {
             out.db_path = v;
         } else if (a == "--log" && need(v)) {
