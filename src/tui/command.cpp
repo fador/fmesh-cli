@@ -65,7 +65,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "quit" || cmd == "exit")   cmd_quit(res);
     else if (cmd == "reconnect")               cmd_reconnect();
     else if (cmd == "me")                      cmd_me(tokens);
-    else if (cmd == "config" || cmd == "cfg")  cmd_config();
+    else if (cmd == "config" || cmd == "cfg")  cmd_config(tokens);
     else if (cmd == "whois" || cmd == "wi")    cmd_whois(tokens);
     else if (cmd == "raw")                     cmd_raw(tokens);
     else if (cmd == "stats" || cmd == "st")    cmd_stats();
@@ -89,7 +89,7 @@ void CommandDispatcher::cmd_help() {
     status_("  /info                 show connection info", tui_color::INFO);
     status_("  /me <text>            send an action (italic *nick text*)", tui_color::INFO);
     status_("  /reconnect            reconnect the device", tui_color::INFO);
-    status_("  /config               show device configuration", tui_color::INFO);
+    status_("  /config [section]     show device config (optional filter)", tui_color::INFO);
     status_("  /whois <node|nick>    show detailed node information", tui_color::INFO);
     status_("  /raw [N]              show last N raw packets (default 5)", tui_color::INFO);
     status_("  /stats                show packet statistics", tui_color::INFO);
@@ -330,21 +330,43 @@ void CommandDispatcher::cmd_quit(CommandResult& res) {
     status_("Bye.", tui_color::INFO);
 }
 
-void CommandDispatcher::cmd_config() {
+void CommandDispatcher::cmd_config(const std::vector<std::string>& args) {
     auto devices = service_.device_ids();
     if (devices.empty()) {
         status_("(no devices connected)", tui_color::ERROR);
         return;
     }
+    std::string filter;
+    if (!args.empty()) filter = args[0];
+
     for (const auto& id : devices) {
         status_("Configuration for " + service_.display_name_for(id)
-                + ":", tui_color::INFO);
+                + (filter.empty() ? ":" : " (filter: " + filter + "):"),
+                tui_color::INFO);
         auto lines = service_.config_lines_for(id);
         if (lines.empty()) {
             status_("  (no config data received yet)", tui_color::ERROR);
         } else {
-            for (const auto& l : lines)
-                status_("  " + l, tui_color::CHANNEL);
+            bool in_section = filter.empty();
+            for (const auto& l : lines) {
+                if (l.size() > 4 && l[0] == '-' && l[1] == '-' && l[2] == '-') {
+                    std::string sec = l.substr(4);
+                    auto end = sec.find(" ---");
+                    if (end != std::string::npos) sec = sec.substr(0, end);
+                    in_section = filter.empty();
+                    if (!filter.empty()) {
+                        std::string lower = sec;
+                        std::transform(lower.begin(), lower.end(), lower.begin(),
+                                       [](unsigned char c){ return std::tolower(c); });
+                        if (lower.find(filter) != std::string::npos)
+                            in_section = true;
+                    }
+                    if (in_section)
+                        status_("  " + l, tui_color::INFO);
+                } else if (in_section) {
+                    status_("  " + l, tui_color::CHANNEL);
+                }
+            }
         }
     }
 }

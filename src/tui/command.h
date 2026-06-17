@@ -47,7 +47,7 @@ private:
     void cmd_quit(CommandResult& res);
     void cmd_reconnect();
     void cmd_me(const std::vector<std::string>& args);
-    void cmd_config();
+    void cmd_config(const std::vector<std::string>& args);
     void cmd_whois(const std::vector<std::string>& args);
     void cmd_raw(const std::vector<std::string>& args);
     void cmd_stats();
