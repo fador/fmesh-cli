@@ -68,6 +68,10 @@ public:
     [[nodiscard]] Database& database() { return db_; }
     [[nodiscard]] bool has_devices() const { return !devices_.empty(); }
 
+    // --- test support (tests can inject fake DeviceRuntimes) -----------
+    [[nodiscard]] std::map<std::string, std::shared_ptr<DeviceRuntime>>& devices_for_test() { return devices_; }
+    [[nodiscard]] std::mutex& devices_mu_for_test() { return devices_mu_; }
+
 private:
     void handle_event(const std::shared_ptr<DeviceRuntime>& rt, const MeshEvent& ev);
     void dispatch_to_ui(MeshEvent ev);

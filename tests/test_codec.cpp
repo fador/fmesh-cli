@@ -4,7 +4,7 @@
 #include <meshtastic/mesh.pb.h>
 #include <meshtastic/portnums.pb.h>
 
-#include <gtest/gtest.h>
+#include "minitest.h"
 
 using namespace meshcli;
 

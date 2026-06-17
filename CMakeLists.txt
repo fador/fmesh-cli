@@ -111,18 +111,17 @@ target_link_libraries(mesh-cli PRIVATE meshcli_tui)
 
 # --- tests ------------------------------------------------------------------
 enable_testing()
-find_package(GTest)
-if(GTEST_FOUND)
-    enable_testing()
-    add_executable(mesh-cli-tests
-        tests/test_codec.cpp
-        tests/test_routing.cpp
-        tests/test_window.cpp
-    )
-    target_link_libraries(mesh-cli-tests PRIVATE meshcli_tui GTest::GTest GTest::Main)
-    target_include_directories(mesh-cli-tests PRIVATE src ${GENERATED_PROTO_DIR})
-    add_test(NAME mesh-cli-tests COMMAND mesh-cli-tests)
-endif()
+add_executable(mesh-cli-tests
+    tests/test_main.cpp
+    tests/test_codec.cpp
+    tests/test_routing.cpp
+    tests/test_window.cpp
+    tests/test_database.cpp
+    tests/test_commands.cpp
+)
+target_link_libraries(mesh-cli-tests PRIVATE meshcli_tui)
+target_include_directories(mesh-cli-tests PRIVATE src ${GENERATED_PROTO_DIR} tests)
+add_test(NAME mesh-cli-tests COMMAND mesh-cli-tests)
 
 # Live integration test (requires a real paired device; not part of ctest).
 add_executable(mesh-cli-live tests/test_live_send.cpp src/app/config.cpp)

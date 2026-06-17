@@ -46,7 +46,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
 
     auto tokens = split(line.substr(1));
     if (tokens.empty()) return res;
-    const std::string& cmd = tokens[0];
+    const std::string cmd = tokens[0];
     tokens.erase(tokens.begin());
 
     if (cmd == "help" || cmd == "h")          cmd_help();

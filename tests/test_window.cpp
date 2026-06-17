@@ -2,7 +2,7 @@
 #include "tui/window_manager.h"
 #include "mesh/mesh_service.h"
 
-#include <gtest/gtest.h>
+#include "minitest.h"
 
 using namespace meshcli;
 

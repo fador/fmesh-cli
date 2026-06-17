@@ -1,6 +1,6 @@
 #include "mesh/node_db.h"
 
-#include <gtest/gtest.h>
+#include "minitest.h"
 
 using namespace meshcli;
 
