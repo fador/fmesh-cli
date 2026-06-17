@@ -69,7 +69,7 @@ public:
     [[nodiscard]] bool has_devices() const { return !devices_.empty(); }
 
 private:
-    void handle_event(const MeshEvent& ev);
+    void handle_event(const std::shared_ptr<DeviceRuntime>& rt, const MeshEvent& ev);
     void dispatch_to_ui(MeshEvent ev);
     uint32_t next_packet_id();
 

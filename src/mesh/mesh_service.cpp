@@ -30,10 +30,15 @@ std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
     rt->display_name = spec.name;
 
     // The BluezClient will push events into our handler which forwards to UI.
+    // The runtime is passed directly to handle_event so that events emitted
+    // during the synchronous start() handshake are processed before the device
+    // is registered in the devices_ map (which only happens after start()
+    // returns).
     std::weak_ptr<DeviceRuntime> weak_rt = rt;
     auto sink = [this, weak_rt](MeshEvent ev) {
-        // Stamp the runtime with config/node info before forwarding to UI.
-        handle_event(ev);
+        if (auto rt_locked = weak_rt.lock()) {
+            handle_event(rt_locked, ev);
+        }
         dispatch_to_ui(std::move(ev));
     };
 
@@ -147,93 +152,62 @@ const NodeDb* MeshService::db_for(const std::string& device_id) const {
 // event handling (runs on the BLE thread of whichever device emitted it)
 // ---------------------------------------------------------------------------
 
-void MeshService::handle_event(const MeshEvent& ev) {
-    std::visit([this](const auto& e) {
+void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const MeshEvent& ev) {
+    std::visit([this, &rt](const auto& e) {
         using T = std::decay_t<decltype(e)>;
         if constexpr (std::is_same_v<T, EvMyInfo>) {
             std::lock_guard<std::mutex> lock(devices_mu_);
-            auto it = devices_.find(e.device);
-            if (it != devices_.end()) it->second->my_node_num = e.my_node_num;
+            rt->my_node_num = e.my_node_num;
+            rt->db->set_my_node_num(e.my_node_num);
         } else if constexpr (std::is_same_v<T, EvMetadata>) {
             std::lock_guard<std::mutex> lock(devices_mu_);
-            auto it = devices_.find(e.device);
-            if (it != devices_.end()) {
-                it->second->firmware_version = e.firmware_version;
-                it->second->hw_model = e.hw_model;
-            }
+            rt->firmware_version = e.firmware_version;
+            rt->hw_model = e.hw_model;
         } else if constexpr (std::is_same_v<T, EvConfigComplete>) {
             std::lock_guard<std::mutex> lock(devices_mu_);
-            auto it = devices_.find(e.device);
-            if (it != devices_.end()) {
-                it->second->config_complete = true;
-                // Pull our own long/short name from the node DB now that we
-                // know our node num.
-                auto me = it->second->db->get(it->second->my_node_num);
-                if (me) {
-                    it->second->my_long_name = me->long_name;
-                    it->second->my_short_name = me->short_name;
-                }
+            rt->config_complete = true;
+            // Pull our own long/short name from the node DB now that we
+            // know our node num.
+            auto me = rt->db->get(rt->my_node_num);
+            if (me) {
+                rt->my_long_name = me->long_name;
+                rt->my_short_name = me->short_name;
             }
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
-            std::lock_guard<std::mutex> lock(devices_mu_);
-            auto it = devices_.find(e.device);
-            if (it != devices_.end()) {
-                bool was_new = !it->second->db->get(e.node.node_num).has_value();
-                it->second->db->upsert_node(e.node);
-                db_.upsert_node(e.device, e.node);
-                (void)was_new;
-            }
+            rt->db->upsert_node(e.node);
+            db_.upsert_node(e.device, e.node);
         } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
-            std::lock_guard<std::mutex> lock(devices_mu_);
-            auto it = devices_.find(e.device);
-            if (it != devices_.end()) {
-                it->second->db->upsert_channel(e.channel);
-                db_.upsert_channel(e.device, e.channel);
-            }
+            rt->db->upsert_channel(e.channel);
+            db_.upsert_channel(e.device, e.channel);
         } else if constexpr (std::is_same_v<T, EvTextReceived>) {
             // Persist inbound message.
-            std::shared_ptr<DeviceRuntime> rt;
-            {
-                std::lock_guard<std::mutex> lock(devices_mu_);
-                auto it = devices_.find(e.device);
-                if (it != devices_.end()) rt = it->second;
+            StoredMessage m;
+            m.device = e.device;
+            if (e.broadcast) {
+                m.window_kind = "channel";
+                m.window_target = e.channel_idx;
+            } else {
+                m.window_kind = "dm";
+                m.window_target = e.from_node;
             }
-            if (rt) {
-                StoredMessage m;
-                m.device = e.device;
-                if (e.broadcast) {
-                    m.window_kind = "channel";
-                    m.window_target = e.channel_idx;
-                } else {
-                    m.window_kind = "dm";
-                    m.window_target = e.from_node;
-                }
-                m.direction = "in";
-                m.from_node = e.from_node;
-                m.to_node = e.to_node;
-                m.channel_idx = e.channel_idx;
-                m.text = e.text;
-                m.ts = e.rx_time ? e.rx_time :
-                       std::chrono::duration_cast<std::chrono::seconds>(
-                           std::chrono::system_clock::now().time_since_epoch()).count();
-                m.packet_id = e.packet_id;
-                db_.insert_message(m);
-            }
+            m.direction = "in";
+            m.from_node = e.from_node;
+            m.to_node = e.to_node;
+            m.channel_idx = e.channel_idx;
+            m.text = e.text;
+            m.ts = e.rx_time ? e.rx_time :
+                   std::chrono::duration_cast<std::chrono::seconds>(
+                       std::chrono::system_clock::now().time_since_epoch()).count();
+            m.packet_id = e.packet_id;
+            db_.insert_message(m);
         } else if constexpr (std::is_same_v<T, EvAckReceived>) {
             // Match pending outbound message and update its ack state.
-            std::shared_ptr<DeviceRuntime> rt;
-            {
-                std::lock_guard<std::mutex> lock(devices_mu_);
-                auto it = devices_.find(e.device);
-                if (it != devices_.end()) rt = it->second;
-            }
-            if (rt) {
-                auto pit = rt->pending_acks.find(e.packet_id);
-                if (pit != rt->pending_acks.end()) {
-                    db_.update_ack_state(pit->second,
-                                         e.success ? "acked" : "naked");
-                    rt->pending_acks.erase(pit);
-                }
+            std::lock_guard<std::mutex> lock(devices_mu_);
+            auto pit = rt->pending_acks.find(e.packet_id);
+            if (pit != rt->pending_acks.end()) {
+                db_.update_ack_state(pit->second,
+                                     e.success ? "acked" : "naked");
+                rt->pending_acks.erase(pit);
             }
         } else {
             // EvConnected / EvDisconnected / EvLogLine / EvError: no DB work.
