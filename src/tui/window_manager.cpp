@@ -13,12 +13,13 @@ namespace meshcli {
 namespace {
 
 std::string fmt_time(uint32_t ts) {
-    if (!ts) return "??:??";
+    if (!ts) return "??:??:??";
     std::time_t t = static_cast<std::time_t>(ts);
     std::tm tm{};
     ::localtime_r(&t, &tm);
-    char buf[8];
-    std::snprintf(buf, sizeof(buf), "%02d:%02d", tm.tm_hour, tm.tm_min);
+    char buf[10];
+    std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
+                  tm.tm_hour, tm.tm_min, tm.tm_sec);
     return buf;
 }
 
@@ -200,6 +201,27 @@ void WindowManager::append_meta(const std::string& device,
     line.is_meta = true;
     w.append_line(line);
     if (idx != current_) w.bump_activity(1);
+}
+
+void WindowManager::append_outgoing(const std::string& device,
+                                    const std::string& kind, uint32_t target,
+                                    const std::string& text, const NodeDb* db) {
+    int idx;
+    if (kind == "channel")
+        idx = ensure_channel(device, target, "");
+    else if (kind == "dm")
+        idx = ensure_dm(device, target, "?");
+    else
+        return;
+    Window& w = *windows_[idx - 1];
+    uint32_t me = db ? db->my_node_num() : 0;
+    std::string nick = short_nick(db, me);
+    Line line;
+    line.text = "[" + fmt_time(static_cast<uint32_t>(std::time(nullptr)))
+                + "] <" + nick + "> " + text;
+    line.color_pair = (kind == "dm") ? 3 : 2;
+    w.append_line(line);
+    if (idx == current_) w.mark_read();
 }
 
 void WindowManager::select(int index) {

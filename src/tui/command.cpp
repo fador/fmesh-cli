@@ -44,6 +44,9 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
         } else if (tgt->kind == "dm") {
             service_.send_text(tgt->device, tgt->target, 0, line, true);
         }
+        // Echo the message immediately in the window (before mesh echo).
+        const NodeDb* db = service_.db_for(tgt->device);
+        wm_.append_outgoing(tgt->device, tgt->kind, tgt->target, line, db);
         return res;
     }
 
@@ -179,6 +182,8 @@ void CommandDispatcher::cmd_msg(const std::vector<std::string>& args) {
         auto n = db->find_fuzzy(q);
         if (n) {
             service_.send_text(id, n->node_num, 0, text, true);
+            // Echo immediately in the DM window.
+            wm_.append_outgoing(id, "dm", n->node_num, text, db);
             return;
         }
     }
@@ -549,6 +554,8 @@ void CommandDispatcher::cmd_me(const std::vector<std::string>& args) {
     } else {
         service_.send_text(tgt->device, tgt->target, 0, "* " + text, true);
     }
+    const NodeDb* db = service_.db_for(tgt->device);
+    wm_.append_outgoing(tgt->device, tgt->kind, tgt->target, "* " + text, db);
 }
 
 } // namespace meshcli

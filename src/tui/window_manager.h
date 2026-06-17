@@ -40,6 +40,11 @@ public:
     // Append a status/info/meta line to the status window.
     void append_status(const std::string& text, int color_pair = 0);
 
+    // Append an outgoing message immediately (before mesh echo arrives).
+    void append_outgoing(const std::string& device, const std::string& kind,
+                         uint32_t target, const std::string& text,
+                         const NodeDb* db);
+
     // Append a meta line to a channel or DM window (for ACK routing).
     void append_meta(const std::string& device, const std::string& kind,
                      uint32_t target, const std::string& text, int color_pair);
