@@ -64,6 +64,9 @@ public:
     void update_ack_state(int64_t rowid, const std::string& ack_state);
     std::vector<StoredMessage> recent_messages(const WindowKey& w, int limit = 200);
 
+    // Find a stored message by its ToRadio packet_id (for ACK routing).
+    [[nodiscard]] std::optional<StoredMessage> find_by_packet_id(uint32_t packet_id);
+
     // --- misc -------------------------------------------------------------
     [[nodiscard]] bool ok() const { return db_ != nullptr; }
 

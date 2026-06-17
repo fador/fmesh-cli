@@ -257,4 +257,33 @@ std::vector<StoredMessage> Database::recent_messages(const WindowKey& w, int lim
     return out;
 }
 
+std::optional<StoredMessage> Database::find_by_packet_id(uint32_t packet_id) {
+    if (!db_) return std::nullopt;
+    const char* sql = "SELECT rowid,device,window_kind,window_target,direction,"
+                      "from_node,to_node,channel_idx,text,ts,packet_id,ack_state "
+                      "FROM messages WHERE packet_id=? ORDER BY rowid DESC LIMIT 1";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return std::nullopt;
+    sqlite3_bind_int64(st, 1, packet_id);
+    std::optional<StoredMessage> out;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        StoredMessage m;
+        m.rowid = sqlite3_column_int64(st, 0);
+        m.device = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+        m.window_kind = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+        m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
+        m.direction = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+        m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
+        m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
+        m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
+        if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
+        m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
+        m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
+        if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
+        out = std::move(m);
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
 } // namespace meshcli

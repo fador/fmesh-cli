@@ -37,6 +37,10 @@ public:
     // Append a status/info/meta line to the status window.
     void append_status(const std::string& text, int color_pair = 0);
 
+    // Append a meta line to a channel or DM window (for ACK routing).
+    void append_meta(const std::string& device, const std::string& kind,
+                     uint32_t target, const std::string& text, int color_pair);
+
     // Window selection.
     void select(int index);
     void select_next_active();

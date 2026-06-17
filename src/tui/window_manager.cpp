@@ -167,6 +167,27 @@ void WindowManager::append_status(const std::string& text, int color_pair) {
     if (current_ != 1) w.bump_activity(1);
 }
 
+void WindowManager::append_meta(const std::string& device,
+                                const std::string& kind, uint32_t target,
+                                const std::string& text, int color_pair) {
+    int idx;
+    if (kind == "channel") {
+        idx = ensure_channel(device, target, "");
+    } else if (kind == "dm") {
+        idx = ensure_dm(device, target, "?");
+    } else {
+        append_status(text, color_pair);
+        return;
+    }
+    Window& w = *windows_[idx - 1];
+    Line line;
+    line.text = "[" + fmt_time(static_cast<uint32_t>(std::time(nullptr))) + "] " + text;
+    line.color_pair = color_pair;
+    line.is_meta = true;
+    w.append_line(line);
+    if (idx != current_) w.bump_activity(1);
+}
+
 void WindowManager::select(int index) {
     if (index < 1 || index > static_cast<int>(windows_.size())) return;
     current_ = index;

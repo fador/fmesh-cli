@@ -213,9 +213,17 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             wm_.append_text(e.device, e.from_node, e.to_node, e.channel_idx,
                             e.broadcast, e.text, e.rx_time, db);
         } else if constexpr (std::is_same_v<T, EvAckReceived>) {
-            wm_.append_status("*** ACK " + std::to_string(e.packet_id) +
-                              (e.success ? " OK" : " FAIL: " + e.error_reason),
-                              e.success ? tui_color::INFO : tui_color::ERROR);
+            std::string ack_text = "*** ACK " + std::to_string(e.packet_id) +
+                (e.success ? " OK" : " FAIL: " + e.error_reason);
+            int ack_color = e.success ? tui_color::INFO : tui_color::ERROR;
+            // Route to the window where the message was sent.
+            auto m = service_.database().find_by_packet_id(e.packet_id);
+            if (m && !m->window_kind.empty()) {
+                wm_.append_meta(m->device, m->window_kind, m->window_target,
+                                ack_text, ack_color);
+            }
+            // Also show in status.
+            wm_.append_status(ack_text, ack_color);
         } else if constexpr (std::is_same_v<T, EvLogLine>) {
             // Route device log lines to status as low-priority meta.
             if (!e.message.empty())
