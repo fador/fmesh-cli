@@ -40,15 +40,18 @@ void StatusBar::render(WindowManager& wm, int cols, const std::string& connectio
     x += static_cast<int>(std::snprintf(nullptr, 0, "[%d:%s] ", cur, cur_label.c_str()));
     attrset(A_REVERSE);   // reset to base reversed bar
 
-    // Activity list: N*name ...  (colored per window kind)
+    // Activity list: all windows with color-coded markers.
+    //   active (message)   = N*  (mention = highest priority)
+    //   active (unread)    = N#
+    //   inactive           = N
     const auto& wins = wm.windows();
-    bool any_active = false;
     for (size_t i = 0; i < wins.size(); ++i) {
         int idx = static_cast<int>(i + 1);
         const Window& w = *wins[i];
-        if (w.activity() == 0) continue;
-        any_active = true;
-        char mark = (w.activity() >= 2) ? '*' : '#';
+        char mark = ' ';
+        int act = w.activity();
+        if (act >= 2)      mark = '*';    // mention
+        else if (act == 1) mark = '#';    // unread message
 
         attron(COLOR_PAIR(color_for(w)) | A_REVERSE);
         mvprintw(LINES - 1, x, "%d%c%s ", idx, mark, window_label(w).c_str());
@@ -56,9 +59,11 @@ void StatusBar::render(WindowManager& wm, int cols, const std::string& connectio
                                 idx, mark, window_label(w).c_str()));
         attrset(A_REVERSE);
     }
-    if (!any_active) {
-        mvprintw(LINES - 1, x, "(none)");
-        x += 6;
+
+    // If no windows at all, show placeholder.
+    if (wins.empty()) {
+        mvprintw(LINES - 1, x, "(empty)");
+        x += 7;
     }
 
     // Clock + connection on the right.
