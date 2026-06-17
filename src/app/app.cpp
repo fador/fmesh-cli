@@ -106,6 +106,8 @@ int run_app(int argc, char** argv, MeshService& service) {
                         LOG_ERROR() << "[event] Error: " << e.message;
                     else if constexpr (std::is_same_v<T, EvDisconnected>)
                         LOG_WARN() << "[event] Disconnected: " << e.reason;
+                    else if constexpr (std::is_same_v<T, EvConfigLine>)
+                        LOG_INFO() << "[event] Config: " << e.line.size() << " bytes";
                 }, ev);
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));

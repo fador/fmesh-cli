@@ -47,6 +47,7 @@ private:
     void cmd_quit(CommandResult& res);
     void cmd_reconnect();
     void cmd_me(const std::vector<std::string>& args);
+    void cmd_config();
 };
 
 } // namespace meshcli

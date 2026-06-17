@@ -28,6 +28,7 @@ struct DeviceRuntime {
     std::string firmware_version;
     std::string hw_model;
     bool config_complete = false;
+    std::vector<std::string> config_lines;   // from /config decoding
     // pending outbound messages awaiting ack, keyed by packet_id -> db rowid
     std::map<uint32_t, int64_t> pending_acks;
 };
@@ -73,6 +74,7 @@ public:
     [[nodiscard]] std::string firmware_for(const std::string& device_id) const;
     [[nodiscard]] std::string hw_model_for(const std::string& device_id) const;
     [[nodiscard]] std::string display_name_for(const std::string& device_id) const;
+    [[nodiscard]] std::vector<std::string> config_lines_for(const std::string& device_id) const;
     [[nodiscard]] Database& database() { return db_; }
     [[nodiscard]] bool has_devices() const { return !devices_.empty(); }
 

@@ -23,6 +23,11 @@ public:
     // Build a ToRadio{disconnect=true}. Sent on graceful close.
     static std::string encode_disconnect();
 
+    // Decode Config or ModuleConfig bytes into human-readable "section.key = value"
+    // lines for the /config command.
+    static std::vector<std::string> decode_config_lines(const std::string& config_bytes,
+                                                        bool is_module);
+
     // Build a ToRadio{packet=MeshPacket{...}} carrying a text message.
     //   to_node     : kBroadcastNodeNum for a channel broadcast, else a DM
     //   channel_idx : channel to send on (matters for both broadcast & DM)

@@ -89,6 +89,12 @@ struct EvNodeJoined {
     Node node;   // a brand-new node we hadn't seen before
 };
 
+// A single config line: "section.key = value"
+struct EvConfigLine {
+    DeviceId device;
+    std::string line;
+};
+
 using MeshEvent = std::variant<
     EvConnected,
     EvDisconnected,
@@ -101,7 +107,8 @@ using MeshEvent = std::variant<
     EvAckReceived,
     EvLogLine,
     EvError,
-    EvNodeJoined
+    EvNodeJoined,
+    EvConfigLine
 >;
 
 } // namespace meshcli

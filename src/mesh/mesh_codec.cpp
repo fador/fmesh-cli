@@ -200,10 +200,26 @@ std::optional<MeshEvent> MeshCodec::decode_from_radio(
             ev.channel = channel_from_proto(fr.channel());
             return ev;
         }
-        case FromRadio::kConfig:
-        case FromRadio::kModuleConfig:
-            // Local config / module config; not surfaced to UI for v1.
-            return std::nullopt;
+        case FromRadio::kConfig: {
+            auto lines = decode_config_lines(fr.config().SerializeAsString(), false);
+            EvConfigLine ev;
+            ev.device = device;
+            for (size_t i = 0; i < lines.size(); ++i) {
+                if (i) ev.line += "\n";
+                ev.line += lines[i];
+            }
+            return ev;
+        }
+        case FromRadio::kModuleConfig: {
+            auto lines = decode_config_lines(fr.moduleconfig().SerializeAsString(), true);
+            EvConfigLine ev;
+            ev.device = device;
+            for (size_t i = 0; i < lines.size(); ++i) {
+                if (i) ev.line += "\n";
+                ev.line += lines[i];
+            }
+            return ev;
+        }
         case FromRadio::kPacket:
             return decode_packet(device, fr.packet());
         case FromRadio::kLogRecord: {
@@ -236,6 +252,136 @@ std::optional<MeshEvent> MeshCodec::decode_from_radio(
         default:
             return std::nullopt;
     }
+}
+
+// ---- config decoder --------------------------------------------------
+
+std::vector<std::string> MeshCodec::decode_config_lines(
+    const std::string& bytes, bool is_module) {
+    std::vector<std::string> out;
+    auto add = [&](const std::string& s) { if (!s.empty()) out.push_back(s); };
+    auto add_int  = [&](const char* key, int64_t v) { add(std::string(key) + " = " + std::to_string(v)); };
+    auto add_bool = [&](const char* key, bool v) { add(std::string(key) + " = " + (v ? "ON" : "OFF")); };
+    auto add_str  = [&](const char* key, const std::string& v) {
+        if (!v.empty()) add(std::string(key) + " = " + v); };
+
+    if (is_module) {
+        meshtastic::ModuleConfig mc;
+        if (!mc.ParseFromString(bytes)) return out;
+
+        if (mc.has_mqtt()) {
+            const auto& m = mc.mqtt();
+            add("--- Module: MQTT ---");
+            add_bool("mqtt.enabled", m.enabled());
+            add_str("mqtt.address", m.address());
+            add_str("mqtt.username", m.username());
+            add_bool("mqtt.encryption_enabled", m.encryption_enabled());
+            add_bool("mqtt.json_enabled", m.json_enabled());
+            add_bool("mqtt.tls_enabled", m.tls_enabled());
+            add_str("mqtt.root", m.root());
+            add_bool("mqtt.proxy_to_client_enabled", m.proxy_to_client_enabled());
+            add_bool("mqtt.map_reporting_enabled", m.map_reporting_enabled());
+        }
+        if (mc.has_serial()) {
+            const auto& s = mc.serial();
+            add("--- Module: Serial ---");
+            add_bool("serial.enabled", s.enabled());
+            add_bool("serial.echo", s.echo());
+            add_int("serial.baud", static_cast<int64_t>(s.baud()));
+            add_str("serial.mode", meshtastic::ModuleConfig_SerialConfig_Serial_Mode_Name(s.mode()));
+        }
+        if (mc.has_external_notification()) {
+            const auto& n = mc.external_notification();
+            add("--- Module: ExtNotification ---");
+            add_bool("ext_notif.enabled", n.enabled());
+            add_bool("ext_notif.alert_message", n.alert_message());
+            add_bool("ext_notif.alert_message_buzzer", n.alert_message_buzzer());
+        }
+        if (mc.has_store_forward()) {
+            add_bool("store_forward.enabled", mc.store_forward().enabled());
+        }
+        if (mc.has_range_test()) {
+            add_bool("range_test.enabled", mc.range_test().enabled());
+        }
+        if (mc.has_telemetry()) {
+            add("--- Module: Telemetry ---");
+            add_int("telemetry.device_update_interval",
+                    mc.telemetry().device_update_interval());
+            add_int("telemetry.environment_update_interval",
+                    mc.telemetry().environment_update_interval());
+        }
+        if (mc.has_canned_message()) {
+            add_bool("canned_messages.enabled", mc.canned_message().enabled());
+        }
+    } else {
+        meshtastic::Config cfg;
+        if (!cfg.ParseFromString(bytes)) return out;
+
+        if (cfg.has_device()) {
+            const auto& d = cfg.device();
+            add("--- Device ---");
+            add_str("device.role", meshtastic::Config_DeviceConfig_Role_Name(d.role()));
+            add_bool("device.serial_enabled", d.serial_enabled());
+            add_int("device.node_info_broadcast_secs", d.node_info_broadcast_secs());
+            add_bool("device.double_tap_as_button_press", d.double_tap_as_button_press());
+            add_bool("device.is_managed", d.is_managed());
+            add_str("device.rebroadcast_mode",
+                    meshtastic::Config_DeviceConfig_RebroadcastMode_Name(d.rebroadcast_mode()));
+        }
+        if (cfg.has_position()) {
+            const auto& p = cfg.position();
+            add("--- Position ---");
+            add_int("position.broadcast_secs", p.position_broadcast_secs());
+            add_str("position.gps_mode",
+                    meshtastic::Config_PositionConfig_GpsMode_Name(p.gps_mode()));
+            add_bool("position.fixed_position", p.fixed_position());
+            add_int("position.broadcast_smart_min_interval_secs",
+                    p.broadcast_smart_minimum_interval_secs());
+        }
+        if (cfg.has_power()) {
+            const auto& pw = cfg.power();
+            add("--- Power ---");
+            add_bool("power.is_power_saving", pw.is_power_saving());
+            add_int("power.on_battery_shutdown_after_secs",
+                    pw.on_battery_shutdown_after_secs());
+            add_int("power.wait_bluetooth_secs", pw.wait_bluetooth_secs());
+        }
+        if (cfg.has_network()) {
+            const auto& n = cfg.network();
+            add("--- Network ---");
+            add_bool("network.wifi_enabled", n.wifi_enabled());
+            add_str("network.address_mode",
+                    meshtastic::Config_NetworkConfig_AddressMode_Name(n.address_mode()));
+            add_str("network.ntp_server", n.ntp_server());
+        }
+        if (cfg.has_display()) {
+            const auto& d = cfg.display();
+            add("--- Display ---");
+            add_int("display.screen_on_secs", d.screen_on_secs());
+            add_str("display.display_mode",
+                    meshtastic::Config_DisplayConfig_DisplayMode_Name(d.displaymode()));
+        }
+        if (cfg.has_lora()) {
+            const auto& l = cfg.lora();
+            add("--- LoRa ---");
+            add_bool("lora.use_preset", l.use_preset());
+            add_int("lora.tx_power", l.tx_power());
+            add_int("lora.channel_num", l.channel_num());
+            add_int("lora.frequency_offset", l.frequency_offset());
+            add_int("lora.bandwidth", l.bandwidth());
+            add_int("lora.spread_factor", l.spread_factor());
+            add_int("lora.coding_rate", l.coding_rate());
+        }
+        if (cfg.has_bluetooth()) {
+            const auto& bt = cfg.bluetooth();
+            add("--- Bluetooth ---");
+            add_bool("bluetooth.enabled", bt.enabled());
+            add_int("bluetooth.fixed_pin", static_cast<int64_t>(bt.fixed_pin()));
+            add_str("bluetooth.mode",
+                    meshtastic::Config_BluetoothConfig_PairingMode_Name(bt.mode()));
+        }
+    }
+    return out;
 }
 
 } // namespace meshcli

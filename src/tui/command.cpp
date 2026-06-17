@@ -63,6 +63,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "quit" || cmd == "exit")   cmd_quit(res);
     else if (cmd == "reconnect")               cmd_reconnect();
     else if (cmd == "me")                      cmd_me(tokens);
+    else if (cmd == "config" || cmd == "cfg")  cmd_config();
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -83,6 +84,7 @@ void CommandDispatcher::cmd_help() {
     status_("  /info                 show connection info", tui_color::INFO);
     status_("  /me <text>            send an action (italic *nick text*)", tui_color::INFO);
     status_("  /reconnect            reconnect the device", tui_color::INFO);
+    status_("  /config               show device configuration", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", tui_color::INFO);
 }
@@ -243,6 +245,25 @@ void CommandDispatcher::cmd_info() {
 void CommandDispatcher::cmd_quit(CommandResult& res) {
     res.quit = true;
     status_("Bye.", tui_color::INFO);
+}
+
+void CommandDispatcher::cmd_config() {
+    auto devices = service_.device_ids();
+    if (devices.empty()) {
+        status_("(no devices connected)", tui_color::ERROR);
+        return;
+    }
+    for (const auto& id : devices) {
+        status_("Configuration for " + service_.display_name_for(id)
+                + ":", tui_color::INFO);
+        auto lines = service_.config_lines_for(id);
+        if (lines.empty()) {
+            status_("  (no config data received yet)", tui_color::ERROR);
+        } else {
+            for (const auto& l : lines)
+                status_("  " + l, tui_color::CHANNEL);
+        }
+    }
 }
 
 void CommandDispatcher::cmd_reconnect() {

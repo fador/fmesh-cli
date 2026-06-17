@@ -4,6 +4,7 @@
 #include "util/log.h"
 
 #include <chrono>
+#include <sstream>
 
 namespace meshcli {
 
@@ -215,6 +216,13 @@ std::string MeshService::display_name_for(const std::string& device_id) const {
     return it->second->display_name;
 }
 
+std::vector<std::string> MeshService::config_lines_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = devices_.find(device_id);
+    if (it == devices_.end()) return {};
+    return it->second->config_lines;
+}
+
 // ---------------------------------------------------------------------------
 // event handling (runs on the BLE thread of whichever device emitted it)
 // ---------------------------------------------------------------------------
@@ -275,6 +283,14 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
                 db_.update_ack_state(pit->second,
                                      e.success ? "acked" : "naked");
                 rt->pending_acks.erase(pit);
+            }
+        } else if constexpr (std::is_same_v<T, EvConfigLine>) {
+            auto& dst = rt->config_lines;
+            dst.clear();
+            std::istringstream iss(e.line);
+            std::string ln;
+            while (std::getline(iss, ln)) {
+                if (!ln.empty()) dst.push_back(ln);
             }
         } else {
             // EvConnected / EvDisconnected / EvLogLine / EvError: no DB work.
