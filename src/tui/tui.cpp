@@ -60,24 +60,24 @@ void TuiApp::teardown_ncurses() {
 std::string TuiApp::connection_info() const {
     auto devices = service_.device_ids();
     if (devices.empty()) return "no device";
-    // Show first device's display name + battery if known.
     std::string s;
     for (size_t i = 0; i < devices.size(); ++i) {
         if (i) s += ",";
         const NodeDb* db = service_.db_for(devices[i]);
+        std::string fw = service_.firmware_for(devices[i]);
         if (db) {
             auto me = db->get(db->my_node_num());
             if (me) {
                 s += me->long_name.empty() ? "node" : me->long_name;
-                if (me->battery_level) {
+                if (me->battery_level)
                     s += " " + std::to_string(*me->battery_level) + "%";
-                }
             } else {
                 s += "conn";
             }
         } else {
             s += "conn";
         }
+        if (!fw.empty()) s += " | fw=" + fw;
     }
     return s;
 }
