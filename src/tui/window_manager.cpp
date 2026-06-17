@@ -161,7 +161,10 @@ void WindowManager::append_status(const std::string& text, int color_pair) {
 void WindowManager::select(int index) {
     if (index < 1 || index > static_cast<int>(windows_.size())) return;
     current_ = index;
-    if (auto* w = current_window()) w->mark_read();
+    if (auto* w = current_window()) {
+        w->scroll_to_bottom();
+        w->mark_read();
+    }
 }
 
 void WindowManager::select_next_active() {

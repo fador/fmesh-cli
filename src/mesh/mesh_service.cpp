@@ -172,7 +172,10 @@ uint32_t MeshService::send_text(const std::string& device_id,
     m.packet_id = pid;
     m.ack_state = want_ack ? "pending" : "";
     int64_t rowid = db_.insert_message(m);
-    if (want_ack) rt->pending_acks[pid] = rowid;
+    if (want_ack) {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        rt->pending_acks[pid] = rowid;
+    }
     return pid;
 }
 
