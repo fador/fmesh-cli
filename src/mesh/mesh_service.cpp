@@ -8,6 +8,18 @@
 
 namespace meshcli {
 
+namespace {
+    // Split "host:port" into host and port. Default port is 4403.
+    std::pair<std::string, uint16_t> parse_tcp_host(const std::string& tcp_host) {
+        size_t colon = tcp_host.rfind(':');
+        std::string host = tcp_host.substr(0, colon);
+        uint16_t port = 4403;
+        if (colon != std::string::npos && colon + 1 < tcp_host.size())
+            port = static_cast<uint16_t>(std::stoul(tcp_host.substr(colon + 1)));
+        return {host, port};
+    }
+} // namespace
+
 MeshService::MeshService() {
     // Seed the packet id generator like the python lib does.
     std::uniform_int_distribution<uint32_t> dist(0, 0xFFFFFFFF);
@@ -48,11 +60,7 @@ std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
 
     if (!spec.tcp_host.empty()) {
         // --- TCP transport ---
-        size_t colon = spec.tcp_host.rfind(':');
-        std::string host = spec.tcp_host.substr(0, colon);
-        uint16_t port = 4403;
-        if (colon != std::string::npos)
-            port = static_cast<uint16_t>(std::stoul(spec.tcp_host.substr(colon + 1)));
+        auto [host, port] = parse_tcp_host(spec.tcp_host);
         int fd = tcp_connect(host, port);
         if (fd < 0) {
             EvError ev;
@@ -117,11 +125,7 @@ bool MeshService::reconnect_device(const std::string& device_id) {
 
     std::string new_id;
     if (!spec.tcp_host.empty()) {
-        size_t colon = spec.tcp_host.rfind(':');
-        std::string host = spec.tcp_host.substr(0, colon);
-        uint16_t port = 4403;
-        if (colon != std::string::npos)
-            port = static_cast<uint16_t>(std::stoul(spec.tcp_host.substr(colon + 1)));
+        auto [host, port] = parse_tcp_host(spec.tcp_host);
         int fd = tcp_connect(host, port);
         if (fd < 0) return false;
         rt->stream = std::make_unique<StreamClient>(fd, "tcp:" + spec.tcp_host, std::move(sink));

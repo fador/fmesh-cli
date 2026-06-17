@@ -9,19 +9,23 @@
 #include <mutex>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <thread>
 
 namespace fs = std::filesystem;
 using namespace meshcli;
 
 namespace {
-
 std::mutex g_log_mutex;
 
 std::string default_log_path() {
     const char* home = std::getenv("HOME");
-    if (!home) home = "/tmp";
+    if (!home || !*home) home = "/tmp";
     std::string dir = std::string(home) + "/.local/share/mesh-cli";
+    // mkdir is best-effort; logger init will also try create_directories.
     ::mkdir(dir.c_str(), 0755);
+    try {
+        std::filesystem::create_directories(dir);
+    } catch (...) {}
     return dir + "/mesh-cli.log";
 }
 
@@ -46,7 +50,17 @@ Logger& Logger::instance() {
 }
 
 void Logger::init(std::string path, bool console, LogLevel level) {
+    std::lock_guard<std::mutex> lock(g_log_mutex);
     if (path.empty()) path = default_log_path();
+    // Ensure the parent directory exists.
+    try {
+        fs::path p(path);
+        auto parent = p.parent_path();
+        if (!parent.empty() && !fs::exists(parent)) {
+            std::error_code ec;
+            fs::create_directories(parent, ec);
+        }
+    } catch (...) {}
     path_ = std::move(path);
     console_ = console;
     level_ = level;
@@ -67,13 +81,14 @@ void Logger::write(LogLevel level, std::string_view msg) {
     std::tm tm{};
     ::localtime_r(&t, &tm);
 
-    char ts[32];
-    std::snprintf(ts, sizeof(ts), "%04d-%02d-%02d %02d:%02d:%02d.%03lld",
+    char ts[48];
+    std::snprintf(ts, sizeof(ts), "%04d-%02d-%02d %02d:%02d:%02d.%03d",
                   tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
                   tm.tm_hour, tm.tm_min, tm.tm_sec,
-                  static_cast<long long>(ms.count()));
+                  static_cast<int>(ms.count()));
 
     if (!path_.empty()) {
+        maybe_rotate();
         if (std::ofstream f(path_, std::ios::app); f) {
             f << ts << " [" << level_str(level) << "] " << msg << '\n';
             f.flush();
@@ -83,6 +98,19 @@ void Logger::write(LogLevel level, std::string_view msg) {
         std::fprintf(stderr, "%s [%s] %.*s\n", ts, level_str(level),
                      static_cast<int>(msg.size()), msg.data());
     }
+}
+
+void Logger::maybe_rotate() {
+    if (path_.empty()) return;
+    try {
+        std::error_code ec;
+        auto sz = std::filesystem::file_size(path_, ec);
+        if (ec || sz < kMaxLogSize) return;
+        // Rotate: rename current log to .1, remove old .1 if present.
+        auto rotated = path_ + ".1";
+        std::filesystem::remove(rotated, ec);
+        std::filesystem::rename(path_, rotated, ec);
+    } catch (...) {}
 }
 
 LogStream::LogStream(LogLevel level, const char* file, int line)

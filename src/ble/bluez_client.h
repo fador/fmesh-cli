@@ -8,6 +8,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -78,6 +79,10 @@ private:
     std::string fromnum_path_;
     std::string logradio_path_;
 
+    // Protects proxy/connection access across the event-loop thread and
+    // the main thread (send_to_radio is called from the UI thread).
+    mutable std::mutex proxy_mu_;
+
     // Proxies kept alive for the lifetime of the connection (signal handlers
     // are registered on the notify proxies; the others are cached for speed).
     std::unique_ptr<sdbus::IProxy> toradio_proxy_;
@@ -103,8 +108,11 @@ private:
     // Subscribe to FROMNUM (and LOGRADIO if present). On FROMNUM, drain FROMRADIO.
     void subscribe_notifications();
     void drain_from_radio();
-    // Read a GATT char value (bytes).
+    // Read a GATT char value (bytes). Thread-safe via proxy_mu_.
     std::string read_char(const std::string& path);
+    // Internal helpers: caller must hold proxy_mu_.
+    std::string read_char_locked(const std::string& path);
+    void write_char_locked(const std::string& path, const std::string& bytes);
     void write_char(const std::string& path, const std::string& bytes);
 };
 

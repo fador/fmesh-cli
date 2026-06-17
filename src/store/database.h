@@ -69,10 +69,15 @@ public:
 
     // --- misc -------------------------------------------------------------
     [[nodiscard]] bool ok() const { return db_ != nullptr; }
+    // Periodic WAL checkpoint (keep the WAL file size bounded).
+    void checkpoint();
 
 private:
     sqlite3* db_ = nullptr;
     bool exec(const std::string& sql);
+    // Insert counter for triggering periodic checkpoints.
+    mutable int write_count_ = 0;
+    void maybe_checkpoint();
 };
 
 } // namespace meshcli

@@ -37,7 +37,11 @@ TuiApp::~TuiApp() {
 }
 
 void TuiApp::init_ncurses() {
-    initscr();
+    if (!::initscr()) {
+        ncurses_ok_ = false;
+        return;
+    }
+    ncurses_ok_ = true;
     cbreak();
     noecho();
     keypad(stdscr, TRUE);
@@ -63,7 +67,10 @@ void TuiApp::init_ncurses() {
 }
 
 void TuiApp::teardown_ncurses() {
-    endwin();
+    if (ncurses_ok_) {
+        ::endwin();
+        ncurses_ok_ = false;
+    }
     Logger::instance().set_console(true);
 }
 
@@ -125,6 +132,10 @@ void TuiApp::maybe_reconnect() {
 
 int TuiApp::run() {
     init_ncurses();
+    if (!ncurses_ok_) {
+        LOG_ERROR() << "ncurses initialization failed";
+        return 1;
+    }
 
     while (!quit_) {
         if (need_redraw_) {

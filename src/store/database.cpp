@@ -78,7 +78,7 @@ bool Database::open(const std::string& path) {
 }
 
 void Database::close() {
-    if (db_) { sqlite3_close(db_); db_ = nullptr; }
+    if (db_) { checkpoint(); sqlite3_close(db_); db_ = nullptr; }
 }
 
 bool Database::exec(const std::string& sql) {
@@ -120,6 +120,7 @@ void Database::upsert_node(const std::string& device, const Node& n) {
     sqlite3_bind_int64(st, 12, n.last_heard.value_or(0));
     sqlite3_step(st);
     sqlite3_finalize(st);
+    maybe_checkpoint();
 }
 
 void Database::upsert_channel(const std::string& device, const Channel& c) {
@@ -137,6 +138,7 @@ void Database::upsert_channel(const std::string& device, const Channel& c) {
     sqlite3_bind_int(st, 5, c.has_psk ? 1 : 0);
     sqlite3_step(st);
     sqlite3_finalize(st);
+    maybe_checkpoint();
 }
 
 void Database::load_nodes(const std::string& device, NodeDb& db) {
@@ -149,11 +151,11 @@ void Database::load_nodes(const std::string& device, NodeDb& db) {
     while (sqlite3_step(st) == SQLITE_ROW) {
         Node n;
         n.node_num = static_cast<uint32_t>(sqlite3_column_int64(st, 0));
-        n.node_id  = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
-        n.long_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
-        n.short_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
-        n.hw_model = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
-        n.role = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+        if (auto* p = sqlite3_column_text(st, 1)) n.node_id = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 2)) n.long_name = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 3)) n.short_name = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 4)) n.hw_model = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 5)) n.role = reinterpret_cast<const char*>(p);
         int b = sqlite3_column_int(st, 6);
         if (b >= 0) n.battery_level = static_cast<uint8_t>(b);
         if (sqlite3_column_type(st, 7) != SQLITE_NULL)
@@ -208,6 +210,7 @@ int64_t Database::insert_message(const StoredMessage& m) {
     int64_t rowid = 0;
     if (sqlite3_step(st) == SQLITE_DONE) rowid = sqlite3_last_insert_rowid(db_);
     sqlite3_finalize(st);
+    maybe_checkpoint();
     return rowid;
 }
 
@@ -220,6 +223,7 @@ void Database::update_ack_state(int64_t rowid, const std::string& ack_state) {
     sqlite3_bind_int64(st, 2, rowid);
     sqlite3_step(st);
     sqlite3_finalize(st);
+    maybe_checkpoint();
 }
 
 std::vector<StoredMessage> Database::recent_messages(const WindowKey& w, int limit) {
@@ -284,6 +288,18 @@ std::optional<StoredMessage> Database::find_by_packet_id(uint32_t packet_id) {
     }
     sqlite3_finalize(st);
     return out;
+}
+
+void Database::checkpoint() {
+    if (!db_) return;
+    sqlite3_exec(db_, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr);
+}
+
+void Database::maybe_checkpoint() {
+    if (++write_count_ >= 100) {
+        write_count_ = 0;
+        checkpoint();
+    }
 }
 
 } // namespace meshcli

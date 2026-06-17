@@ -8,7 +8,10 @@ namespace meshcli {
 bool InputLine::handle_key(int ch, std::string& out) {
     if (ch == '\n' || ch == '\r' || ch == KEY_ENTER) {
         if (buf_.empty()) return false;
+        if (buf_.size() > kMaxLineSize)
+            buf_ = buf_.substr(0, kMaxLineSize);
         history_.push_back(buf_);
+        if (history_.size() > kMaxHistory) history_.erase(history_.begin());
         history_pos_ = history_.size();
         out = buf_;
         buf_.clear();
@@ -70,6 +73,7 @@ bool InputLine::handle_key(int ch, std::string& out) {
 
     // Printable ASCII (skip control chars / multibyte for v1).
     if (ch >= 0x20 && ch < 0x7F) {
+        if (buf_.size() >= kMaxLineSize) return false;
         buf_.insert(buf_.begin() + cursor_, static_cast<char>(ch));
         ++cursor_;
     }
@@ -81,7 +85,12 @@ void InputLine::load_history(const std::string& path) {
     if (!f) return;
     std::string line;
     while (std::getline(f, line)) {
-        if (!line.empty()) history_.push_back(line);
+        if (!line.empty()) {
+            if (line.size() > kMaxLineSize)
+                line = line.substr(0, kMaxLineSize);
+            history_.push_back(line);
+            if (history_.size() > kMaxHistory) history_.erase(history_.begin());
+        }
     }
     history_pos_ = history_.size();
 }
@@ -89,7 +98,9 @@ void InputLine::load_history(const std::string& path) {
 void InputLine::save_history(const std::string& path) const {
     std::ofstream f(path, std::ios::trunc);
     if (!f) return;
-    for (const auto& h : history_) f << h << '\n';
+    // Only save the last kMaxHistory entries.
+    size_t start = (history_.size() > kMaxHistory) ? history_.size() - kMaxHistory : 0;
+    for (size_t i = start; i < history_.size(); ++i) f << history_[i] << '\n';
 }
 
 } // namespace meshcli

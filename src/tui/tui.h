@@ -24,6 +24,8 @@ public:
     // Enter the ncurses event loop. Returns when the user quits. Returns an
     // exit code (0 = clean).
     int run();
+    // Returns true if ncurses was successfully initialized.
+    [[nodiscard]] bool ncurses_ok() const { return ncurses_ok_; }
 
 private:
     void init_ncurses();
@@ -44,6 +46,7 @@ private:
     InputLine input_;
     StatusBar status_bar_;
     bool quit_ = false;
+    bool ncurses_ok_ = false;
     bool need_redraw_ = true;
     std::string history_path_;
 

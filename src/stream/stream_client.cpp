@@ -8,6 +8,7 @@
 #include <poll.h>
 #include <random>
 #include <sys/socket.h>
+#include <thread>
 #include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
@@ -137,20 +138,32 @@ void StreamClient::stop() {
 bool StreamClient::send_to_radio(const std::string& bytes) {
     if (!connected_ || fd_ < 0) return false;
     auto framed = frame(bytes);
-    ssize_t n = ::write(fd_, framed.data(), framed.size());
-    if (n < 0) {
-        LOG_WARN() << "stream write error: " << std::strerror(errno);
-        return false;
+    size_t written = 0;
+    int retries = 0;
+    static constexpr int kMaxRetries = 10;
+    while (written < framed.size() && retries < kMaxRetries) {
+        ssize_t n = ::write(fd_, framed.data() + written, framed.size() - written);
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+                ++retries;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+            LOG_WARN() << "stream write error: " << std::strerror(errno);
+            return false;
+        }
+        written += n;
+        retries = 0;
     }
-    if (static_cast<size_t>(n) < framed.size()) {
-        LOG_WARN() << "stream write short: " << n << " of " << framed.size();
+    if (written < framed.size()) {
+        LOG_WARN() << "stream write short after retries: " << written << " of " << framed.size();
         return false;
     }
     return true;
 }
 
 void StreamClient::read_loop() {
-    // Buffer for assembling framed messages.
+    static constexpr size_t kMaxBufBytes = 65536;
     std::string buf;
     buf.reserve(4096);
     enum State { WaitStart1, WaitStart2, ReadLenHi, ReadLenLo, ReadPayload };
@@ -196,8 +209,14 @@ void StreamClient::read_loop() {
                 auto pos = buf.find(static_cast<char>(0x94));
                 if (pos == std::string::npos) {
                     // No START1 in buffer — keep last byte (could be partial 0x94).
-                    if (buf.size() > 1)
+                    if (buf.size() > 1 && buf.size() <= kMaxBufBytes)
                         buf = buf.substr(buf.size() - 1);
+                    else if (buf.size() > kMaxBufBytes) {
+                        LOG_WARN() << "stream buffer overflow (> " << kMaxBufBytes
+                                   << " bytes), discarding";
+                        buf.clear();
+                        state = WaitStart1;
+                    }
                     break;
                 }
                 buf = buf.substr(pos);

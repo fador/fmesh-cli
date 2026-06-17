@@ -13,6 +13,8 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 - **Node inspection**: `/whois` shows detailed node info (ID, HW, battery, position, SNR, flags)
 - **TCP + serial**: `--tcp` and `--serial` CLI options for non-BLE connectivity
 - **Auto-reconnect**: automatically reconnects on BLE disconnect (up to 6 attempts, 5s intervals)
+- **Log rotation**: log file automatically rotates when it exceeds 5 MB
+- **WAL checkpoint**: periodic SQLite WAL checkpoint prevents unbounded file growth
 - **Outgoing echo**: sent messages appear immediately in the window (no delay for mesh echo)
 - **Auto-pairing**: built-in `org.bluez.Agent1` that supplies the PIN automatically
 - **SQLite persistence**: messages, nodes, channels, and ACK state survive restarts
@@ -135,7 +137,7 @@ src/
   store/        SQLite persistence
   tui/          ncurses TUI: windows, input, status bar, commands
   util/         Logging, thread-safe queue, eventfd
-  tests/        GoogleTest unit tests
+  tests/        Custom minitest unit tests (header-only framework)
 ```
 
 The BLE layer talks the Meshtastic wire protocol directly (protobuf over GATT), with no Python dependency. GATT characteristics used:
@@ -172,3 +174,14 @@ and a DM, and verifies the outgoing messages are persisted to SQLite.
 - Meshtastic firmware holds a single bond; if the device is paired to a phone, pairing from mesh-cli will fail with `AuthenticationFailed`. Remove the bond on the phone first, then run `mesh-cli pair`.
 - The `le-connection-abort-by-local` error on first connect is common; the client retries automatically.
 - If GATT operations time out, the device may have dropped the connection. Use `/reconnect` or restart.
+
+## Fault tolerance
+
+- **Write retries**: stream `send_to_radio()` retries on partial writes and transient errors (EAGAIN, EINTR) with backoff, up to 10 attempts.
+- **Buffer protection**: stream read buffer is capped at 64 KB to prevent unbounded growth on corrupt data.
+- **Thread safety**: BLE proxy/connection access between the event-loop thread and the UI thread is protected by a mutex.
+- **Null-safe DB**: all SQLite column reads check for NULL values before conversion; operations on a closed database no-op safely.
+- **Input bounds**: input line buffer is capped at 8 KB; history at 10,000 entries.
+- **Scroll clamp**: window scroll offset is clamped both at zero and at the line count (no overscroll).
+- **Ncurses guard**: ncurses initialization failure is detected and reported before entering the TUI loop.
+- **DB checkpoint**: WAL checkpoint runs periodically (every 100 writes) and on DB close to keep the WAL file bounded.

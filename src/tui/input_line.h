@@ -2,6 +2,7 @@
 
 #include <ncurses.h>
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,8 @@ namespace meshcli {
 // Single-line input editor with cursor + history. Backed by ncurses getch.
 class InputLine {
 public:
+    static constexpr size_t kMaxLineSize = 8192;
+    static constexpr size_t kMaxHistory = 10000;
     InputLine() = default;
 
     // Process one keystroke. Returns true if the input should be submitted

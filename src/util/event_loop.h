@@ -29,7 +29,10 @@ public:
 
     void notify() {
         uint64_t one = 1;
-        ::write(fd_, &one, sizeof(one));
+        ssize_t rc = ::write(fd_, &one, sizeof(one));
+        // If the write fails (e.g. eventfd counter overflow or bad fd),
+        // the wake is lost, but logging here would risk recursion.
+        (void)rc;
     }
     void drain() {
         uint64_t v = 0;

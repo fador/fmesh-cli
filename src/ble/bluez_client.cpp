@@ -182,14 +182,22 @@ void BluezClient::stop() {
     }
     if (loop_thread_.joinable()) loop_thread_.join();
     agent_.reset();
-    conn_.reset();
+    {
+        std::lock_guard<std::mutex> lock(proxy_mu_);
+        toradio_proxy_.reset();
+        fromradio_proxy_.reset();
+        fromnum_proxy_.reset();
+        logradio_proxy_.reset();
+        conn_.reset();
+    }
     connected_ = false;
 }
 
 bool BluezClient::send_to_radio(const std::string& bytes) {
-    if (!connected_ || toradio_path_.empty()) return false;
+    std::lock_guard<std::mutex> lock(proxy_mu_);
+    if (!connected_ || toradio_path_.empty() || !toradio_proxy_ || !conn_) return false;
     try {
-        write_char(toradio_path_, bytes);
+        write_char_locked(toradio_path_, bytes);
         return true;
     } catch (const sdbus::Error& e) {
         LOG_ERROR() << "TORADIO write failed: " << e.what();
@@ -399,7 +407,11 @@ bool BluezClient::ensure_paired_and_connected(bool do_pair) {
                 device->callMethod("Get").onInterface("org.freedesktop.DBus.Properties")
                     .withArguments(std::string("org.bluez.Device1"), std::string("ServicesResolved"))
                     .storeResultsTo(resolved);
-            } catch (...) {}
+        } catch (const std::exception& e) {
+            LOG_WARN() << "agent event loop registration failed: " << e.what();
+        } catch (...) {
+            LOG_WARN() << "agent event loop registration failed (unknown error)";
+        }
             if (resolved) { LOG_DEBUG() << "services resolved"; break; }
             std::this_thread::sleep_for(200ms);
         }
@@ -510,11 +522,15 @@ void BluezClient::drain_from_radio() {
     int msgs = 0;
     while (running_) {
         std::string bytes;
-        try {
-            bytes = read_char(fromradio_path_);
-        } catch (const sdbus::Error& e) {
-            LOG_WARN() << "FROMRADIO read error: " << e.what();
-            return;
+        {
+            std::lock_guard<std::mutex> lock(proxy_mu_);
+            if (!conn_ || fromradio_path_.empty()) return;
+            try {
+                bytes = read_char_locked(fromradio_path_);
+            } catch (const sdbus::Error& e) {
+                LOG_WARN() << "FROMRADIO read error: " << e.what();
+                return;
+            }
         }
         if (bytes.empty()) {
             if (msgs > 0) LOG_DEBUG() << "drained " << msgs << " FromRadio messages";
@@ -534,10 +550,16 @@ void BluezClient::drain_from_radio() {
 }
 
 std::string BluezClient::read_char(const std::string& path) {
-    // Use cached proxy for FROMRADIO, else create a one-shot.
+    std::lock_guard<std::mutex> lock(proxy_mu_);
+    return read_char_locked(path);
+}
+
+std::string BluezClient::read_char_locked(const std::string& path) {
+    // Caller must hold proxy_mu_.
     sdbus::IProxy* ch = nullptr;
     std::unique_ptr<sdbus::IProxy> tmp;
     if (path == fromradio_path_ && fromradio_proxy_) ch = fromradio_proxy_.get();
+    else if (!conn_) return {};
     else { tmp = sdbus::createProxy(*conn_, "org.bluez", path); ch = tmp.get(); }
     std::vector<uint8_t> result;
     ch->callMethod("ReadValue")
@@ -548,15 +570,18 @@ std::string BluezClient::read_char(const std::string& path) {
 }
 
 void BluezClient::write_char(const std::string& path, const std::string& bytes) {
+    std::lock_guard<std::mutex> lock(proxy_mu_);
+    write_char_locked(path, bytes);
+}
+
+void BluezClient::write_char_locked(const std::string& path, const std::string& bytes) {
+    // Caller must hold proxy_mu_.
     sdbus::IProxy* ch = nullptr;
     std::unique_ptr<sdbus::IProxy> tmp;
     if (path == toradio_path_ && toradio_proxy_) ch = toradio_proxy_.get();
+    else if (!conn_) return;
     else { tmp = sdbus::createProxy(*conn_, "org.bluez", path); ch = tmp.get(); }
     std::vector<uint8_t> v(bytes.begin(), bytes.end());
-    // The "type" option tells BlueZ how to perform the GATT write:
-    //   "request" = write with response (reliable)
-    //   "command" = write without response (fast)
-    // Meshtastic's TORADIO uses write-with-response.
     std::map<std::string, sdbus::Variant> opts;
     opts["type"] = sdbus::Variant{std::string{"request"}};
     ch->callMethod("WriteValue")

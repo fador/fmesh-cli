@@ -25,6 +25,8 @@ void Window::clear() {
 void Window::scroll_by(int delta) {
     scroll_offset_ += delta;
     if (scroll_offset_ < 0) scroll_offset_ = 0;
+    int max_offset = static_cast<int>(lines_.size());
+    if (scroll_offset_ > max_offset) scroll_offset_ = max_offset;
 }
 
 void Window::scroll_to_bottom() {

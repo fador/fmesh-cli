@@ -48,13 +48,13 @@ public:
     [[nodiscard]] std::string device_id() const { return device_id_; }
     [[nodiscard]] bool is_connected() const { return connected_; }
 
+    // Frame a protobuf message with the 0x94 0xC3 <len16> header.
+    static std::string frame(const std::string& payload);
+
 private:
     void read_loop();        // runs on background thread
     void emit(MeshEvent ev);
     void emit_error(std::string msg);
-
-    // Frame a protobuf message with the 0x94 0xC3 <len16> header.
-    static std::string frame(const std::string& payload);
 
     int fd_;
     std::string display_name_;

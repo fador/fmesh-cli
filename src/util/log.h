@@ -36,7 +36,9 @@ private:
     std::string path_;
     bool console_ = true;
     LogLevel level_ = LogLevel::Info;
-};
+    // Rotate when log file exceeds this size (default 5 MB).
+    static constexpr size_t kMaxLogSize = 5 * 1024 * 1024;
+    void maybe_rotate();};
 
 class LogStream {
 public:
