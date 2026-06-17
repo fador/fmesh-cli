@@ -16,6 +16,7 @@ public:
 
 private:
     static std::string window_label(const Window& w);
+    static int color_for(const Window& w);
 };
 
 } // namespace meshcli

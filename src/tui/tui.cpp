@@ -1,5 +1,6 @@
 #include "tui.h"
 
+#include "colors.h"
 #include "command.h"
 #include "keybinds.h"
 #include "mesh/event.h"
@@ -20,20 +21,6 @@ namespace meshcli {
 
 namespace {
 
-// Color pair table (init in TuiApp::init_ncurses).
-//   1 = status/meta (cyan)
-//   2 = channel message (white/default)
-//   3 = DM message (green)
-//   4 = mention (yellow, bold)
-//   5 = error (red)
-//   6 = info (cyan)
-constexpr int COLOR_META = 1;
-constexpr int COLOR_CHANNEL = 2;
-constexpr int COLOR_DM = 3;
-constexpr int COLOR_MENTION = 4;
-constexpr int COLOR_ERROR = 5;
-constexpr int COLOR_INFO = 6;
-
 } // namespace
 
 TuiApp::TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake)
@@ -51,12 +38,12 @@ void TuiApp::init_ncurses() {
     if (has_colors()) {
         start_color();
         use_default_colors();
-        init_pair(COLOR_META, COLOR_CYAN, -1);
-        init_pair(COLOR_CHANNEL, -1, -1);
-        init_pair(COLOR_DM, COLOR_GREEN, -1);
-        init_pair(COLOR_MENTION, COLOR_YELLOW, -1);
-        init_pair(COLOR_ERROR, COLOR_RED, -1);
-        init_pair(COLOR_INFO, COLOR_CYAN, -1);
+        init_pair(tui_color::META,    COLOR_CYAN,  -1);
+        init_pair(tui_color::CHANNEL, -1,          -1);
+        init_pair(tui_color::DM,      COLOR_GREEN, -1);
+        init_pair(tui_color::MENTION, COLOR_YELLOW,-1);
+        init_pair(tui_color::ERROR,   COLOR_RED,   -1);
+        init_pair(tui_color::INFO,    COLOR_CYAN,  -1);
     }
     // Disable logging to stderr now that ncurses owns the screen.
     Logger::instance().set_console(false);
@@ -196,18 +183,18 @@ void TuiApp::handle_event(const MeshEvent& ev) {
     std::visit([this](const auto& e) {
         using T = std::decay_t<decltype(e)>;
         if constexpr (std::is_same_v<T, EvConnected>) {
-            wm_.append_status("*** Connected to " + e.display_name, COLOR_INFO);
+            wm_.append_status("*** Connected to " + e.display_name, tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvDisconnected>) {
-            wm_.append_status("*** Disconnected: " + e.reason, COLOR_ERROR);
+            wm_.append_status("*** Disconnected: " + e.reason, tui_color::ERROR);
         } else if constexpr (std::is_same_v<T, EvMyInfo>) {
-            wm_.append_status("*** My node: " + node_num_to_id(e.my_node_num), COLOR_INFO);
+            wm_.append_status("*** My node: " + node_num_to_id(e.my_node_num), tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvMetadata>) {
             wm_.append_status("*** Firmware: " + e.firmware_version +
-                               "  HW: " + e.hw_model, COLOR_INFO);
+                               "  HW: " + e.hw_model, tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvConfigComplete>) {
             wm_.append_status(e.rebooted ? "*** Config complete (device rebooted)"
                                          : "*** Config complete",
-                              COLOR_INFO);
+                              tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
             const NodeDb* db = service_.db_for(e.device);
             wm_.append_text(e.device, e.node.node_num, kBroadcastNodeNum, 0,
@@ -220,7 +207,7 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             (void)idx;
             wm_.append_status("*** Channel " + std::to_string(e.channel.index) +
                               ": " + (name.empty() ? "(unnamed)" : name) +
-                              " [" + e.channel.role + "]", COLOR_INFO);
+                              " [" + e.channel.role + "]", tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvTextReceived>) {
             const NodeDb* db = service_.db_for(e.device);
             wm_.append_text(e.device, e.from_node, e.to_node, e.channel_idx,
@@ -228,16 +215,16 @@ void TuiApp::handle_event(const MeshEvent& ev) {
         } else if constexpr (std::is_same_v<T, EvAckReceived>) {
             wm_.append_status("*** ACK " + std::to_string(e.packet_id) +
                               (e.success ? " OK" : " FAIL: " + e.error_reason),
-                              e.success ? COLOR_INFO : COLOR_ERROR);
+                              e.success ? tui_color::INFO : tui_color::ERROR);
         } else if constexpr (std::is_same_v<T, EvLogLine>) {
             // Route device log lines to status as low-priority meta.
             if (!e.message.empty())
-                wm_.append_status("[" + e.source + "] " + e.message, COLOR_META);
+                wm_.append_status("[" + e.source + "] " + e.message, tui_color::META);
         } else if constexpr (std::is_same_v<T, EvError>) {
-            wm_.append_status("*** Error: " + e.message, COLOR_ERROR);
+            wm_.append_status("*** Error: " + e.message, tui_color::ERROR);
         } else if constexpr (std::is_same_v<T, EvNodeJoined>) {
             wm_.append_status("*** Node joined: " + e.node.long_name +
-                              " (" + e.node.node_id + ")", COLOR_INFO);
+                              " (" + e.node.node_id + ")", tui_color::INFO);
         }
     }, ev);
 }
@@ -334,17 +321,17 @@ void TuiApp::render_input(int row, int width) {
     if (!buf.empty() && buf[0] == '/') {
         // Command mode — always show "cmd" regardless of window.
         prompt = "cmd> ";
-        prompt_color = COLOR_META;     // cyan
+        prompt_color = tui_color::META;     // cyan
     } else if (w && w->target().kind == "channel") {
         prompt = w->title() + "> ";    // e.g. "#EdgeFastLow> "
-        prompt_color = COLOR_CHANNEL;
+        prompt_color = tui_color::CHANNEL;
     } else if (w && w->target().kind == "dm") {
         prompt = w->title() + "> ";    // e.g. "Bob> "
-        prompt_color = COLOR_DM;
+        prompt_color = tui_color::DM;
     } else {
         // Status window: plain text can't be sent.
         prompt = "status> ";
-        prompt_color = COLOR_META;
+        prompt_color = tui_color::META;
     }
 
     if (prompt_color) attron(COLOR_PAIR(prompt_color) | A_BOLD);

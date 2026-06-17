@@ -17,8 +17,4 @@ namespace keybind {
     constexpr int QUIT        = 3;           // Ctrl-C (also /quit)
 } // namespace keybind
 
-// Decode an Alt+<key> sequence given a peeked second char. Returns the
-// 8-bit "Alt+key" code (key | 0x80) or 0 if not an Alt sequence.
-int decode_alt(int second_ch);
-
 } // namespace meshcli

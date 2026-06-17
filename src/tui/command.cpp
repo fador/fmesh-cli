@@ -1,5 +1,6 @@
 #include "command.h"
 
+#include "colors.h"
 #include "mesh/mesh_service.h"
 #include "window_manager.h"
 #include "util/log.h"
@@ -33,7 +34,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
         // Plain text: send to the current window's target.
         const auto* tgt = wm_.current_target();
         if (!tgt) {
-            status_("Cannot send text from the status window. Use /query <node> or /channel <n>.", 5);
+            status_("Cannot send text from the status window. Use /query <node> or /channel <n>.", tui_color::ERROR);
             return res;
         }
         if (tgt->kind == "channel") {
@@ -63,27 +64,27 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "reconnect")               cmd_reconnect();
     else if (cmd == "me")                      cmd_me(tokens);
     else {
-        status_("Unknown command: /" + cmd + " (try /help)", 5);
+        status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
     return res;
 }
 
 void CommandDispatcher::cmd_help() {
-    status_("Commands:", 6);
-    status_("  /help                 this help", 6);
-    status_("  /list                 list windows", 6);
-    status_("  /nodes                list known nodes", 6);
-    status_("  /query <node|nick>    open a DM window with a node", 6);
-    status_("  /msg <node|nick> <text>  send a DM without switching windows", 6);
-    status_("  /channel <n>          switch to / create channel window n", 6);
-    status_("  /window <N>           switch to window N", 6);
-    status_("  /close                close the current (non-status) window", 6);
-    status_("  /clear                clear the current window's scrollback", 6);
-    status_("  /info                 show connection info", 6);
-    status_("  /me <text>            send an action (italic *nick text*)", 6);
-    status_("  /reconnect            reconnect the device", 6);
-    status_("  /quit                 exit mesh-cli", 6);
-    status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", 6);
+    status_("Commands:", tui_color::INFO);
+    status_("  /help                 this help", tui_color::INFO);
+    status_("  /list                 list windows", tui_color::INFO);
+    status_("  /nodes                list known nodes", tui_color::INFO);
+    status_("  /query <node|nick>    open a DM window with a node", tui_color::INFO);
+    status_("  /msg <node|nick> <text>  send a DM without switching windows", tui_color::INFO);
+    status_("  /channel <n>          switch to / create channel window n", tui_color::INFO);
+    status_("  /window <N>           switch to window N", tui_color::INFO);
+    status_("  /close                close the current (non-status) window", tui_color::INFO);
+    status_("  /clear                clear the current window's scrollback", tui_color::INFO);
+    status_("  /info                 show connection info", tui_color::INFO);
+    status_("  /me <text>            send an action (italic *nick text*)", tui_color::INFO);
+    status_("  /reconnect            reconnect the device", tui_color::INFO);
+    status_("  /quit                 exit mesh-cli", tui_color::INFO);
+    status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", tui_color::INFO);
 }
 
 void CommandDispatcher::cmd_list() {
@@ -94,18 +95,21 @@ void CommandDispatcher::cmd_list() {
         std::string mark;
         if (w.activity() >= 2) mark = " *";
         else if (w.activity() == 1) mark = " #";
+        int color = tui_color::INFO;
+        if (w.target().kind == "channel") color = tui_color::CHANNEL;
+        else if (w.target().kind == "dm") color = tui_color::DM;
         status_("  " + std::to_string(idx) + ": " + w.title() +
-                "  [" + w.target().kind + "]" + mark, 6);
+                "  [" + w.target().kind + "]" + mark, color);
     }
 }
 
 void CommandDispatcher::cmd_nodes() {
     auto devices = service_.device_ids();
-    if (devices.empty()) { status_("(no devices connected)", 5); return; }
+    if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
     for (const auto& id : devices) {
         const NodeDb* db = service_.db_for(id);
         if (!db) continue;
-        status_("Nodes on " + id + ":", 6);
+        status_("Nodes on " + id + ":", tui_color::INFO);
         auto nodes = db->all();
         std::sort(nodes.begin(), nodes.end(),
                   [](const Node& a, const Node& b) {
@@ -117,16 +121,16 @@ void CommandDispatcher::cmd_nodes() {
                           n.long_name.c_str(), n.short_name.c_str(),
                           n.node_id.c_str(),
                           n.battery_level.value_or(0));
-            status_(buf, 6);
+            status_(buf, tui_color::CHANNEL);
         }
     }
 }
 
 void CommandDispatcher::cmd_query(const std::vector<std::string>& args) {
-    if (args.empty()) { status_("Usage: /query <node|nick>", 5); return; }
+    if (args.empty()) { status_("Usage: /query <node|nick>", tui_color::ERROR); return; }
     std::string q = args[0];
     auto devices = service_.device_ids();
-    if (devices.empty()) { status_("(no devices connected)", 5); return; }
+    if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
     // Try each device's node DB for a fuzzy match.
     for (const auto& id : devices) {
         const NodeDb* db = service_.db_for(id);
@@ -138,15 +142,15 @@ void CommandDispatcher::cmd_query(const std::vector<std::string>& args) {
             // Better: find the index of the dm window we just ensured.
             // ensure_dm returns the index but we don't have it here; re-find.
             // (For simplicity we select the last window.)
-            status_("Now talking to " + n->long_name + " (" + n->node_id + ")", 6);
+            status_("Now talking to " + n->long_name + " (" + n->node_id + ")", tui_color::INFO);
             return;
         }
     }
-    status_("No node matched '" + q + "'", 5);
+    status_("No node matched '" + q + "'", tui_color::ERROR);
 }
 
 void CommandDispatcher::cmd_msg(const std::vector<std::string>& args) {
-    if (args.size() < 2) { status_("Usage: /msg <node|nick> <text>", 5); return; }
+    if (args.size() < 2) { status_("Usage: /msg <node|nick> <text>", tui_color::ERROR); return; }
     std::string q = args[0];
     std::string text;
     for (size_t i = 1; i < args.size(); ++i) {
@@ -163,39 +167,39 @@ void CommandDispatcher::cmd_msg(const std::vector<std::string>& args) {
             return;
         }
     }
-    status_("No node matched '" + q + "'", 5);
+    status_("No node matched '" + q + "'", tui_color::ERROR);
 }
 
 void CommandDispatcher::cmd_close() {
     const auto* tgt = wm_.current_target();
-    if (!tgt) { status_("Cannot close the status window", 5); return; }
+    if (!tgt) { status_("Cannot close the status window", tui_color::ERROR); return; }
     // Closing is implemented by selecting the previous window; the window
     // object itself stays (irssi keeps history). For v1 we just switch away.
     wm_.select_relative(-1);
-    status_("(window kept; switched away. Use /clear to wipe history)", 6);
+    status_("(window kept; switched away. Use /clear to wipe history)", tui_color::INFO);
 }
 
 void CommandDispatcher::cmd_window(const std::vector<std::string>& args) {
-    if (args.empty()) { status_("Usage: /window <N>", 5); return; }
+    if (args.empty()) { status_("Usage: /window <N>", tui_color::ERROR); return; }
     try {
         int n = std::stoi(args[0]);
         wm_.select(n);
-    } catch (...) { status_("Invalid window number", 5); }
+    } catch (...) { status_("Invalid window number", tui_color::ERROR); }
 }
 
 void CommandDispatcher::cmd_channel(const std::vector<std::string>& args) {
-    if (args.empty()) { status_("Usage: /channel <n>", 5); return; }
+    if (args.empty()) { status_("Usage: /channel <n>", tui_color::ERROR); return; }
     try {
         uint32_t idx = static_cast<uint32_t>(std::stoul(args[0]));
         auto devices = service_.device_ids();
-        if (devices.empty()) { status_("(no devices connected)", 5); return; }
+        if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
         std::string name;
         if (auto* db = service_.db_for(devices[0])) {
             if (auto ch = db->channel(idx)) name = ch->name;
         }
         int w = wm_.ensure_channel(devices[0], idx, name);
         wm_.select(w);
-    } catch (...) { status_("Invalid channel index", 5); }
+    } catch (...) { status_("Invalid channel index", tui_color::ERROR); }
 }
 
 void CommandDispatcher::cmd_clear() {
@@ -204,25 +208,25 @@ void CommandDispatcher::cmd_clear() {
 
 void CommandDispatcher::cmd_info() {
     auto devices = service_.device_ids();
-    if (devices.empty()) { status_("(no devices)", 5); return; }
+    if (devices.empty()) { status_("(no devices)", tui_color::ERROR); return; }
     for (const auto& id : devices) {
         const NodeDb* db = service_.db_for(id);
-        status_("device: " + id, 6);
+        status_("device: " + id, tui_color::INFO);
         if (db) {
-            status_("  my node: " + node_num_to_id(db->my_node_num()), 6);
-            status_("  nodes known: " + std::to_string(db->all().size()), 6);
-            status_("  channels: " + std::to_string(db->channels().size()), 6);
+            status_("  my node: " + node_num_to_id(db->my_node_num()), tui_color::INFO);
+            status_("  nodes known: " + std::to_string(db->all().size()), tui_color::INFO);
+            status_("  channels: " + std::to_string(db->channels().size()), tui_color::INFO);
         }
     }
 }
 
 void CommandDispatcher::cmd_quit(CommandResult& res) {
     res.quit = true;
-    status_("Bye.", 6);
+    status_("Bye.", tui_color::INFO);
 }
 
 void CommandDispatcher::cmd_reconnect() {
-    status_("Reconnect not yet implemented; use /quit and re-run.", 5);
+    status_("Reconnect not yet implemented; use /quit and re-run.", tui_color::ERROR);
 }
 
 void CommandDispatcher::cmd_me(const std::vector<std::string>& args) {
@@ -232,7 +236,7 @@ void CommandDispatcher::cmd_me(const std::vector<std::string>& args) {
         text += args[i];
     }
     const auto* tgt = wm_.current_target();
-    if (!tgt) { status_("Cannot /me from status window", 5); return; }
+    if (!tgt) { status_("Cannot /me from status window", tui_color::ERROR); return; }
     if (tgt->kind == "channel") {
         service_.send_text(tgt->device, kBroadcastNodeNum, tgt->target, "* " + text, false);
     } else {
