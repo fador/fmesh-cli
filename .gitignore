@@ -1,0 +1,17 @@
+/build/
+/.build/
+/out/
+*.o
+*.a
+*.so
+*.pb.cc
+*.pb.h
+compile_commands.json
+.cache/
+*.log
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.idea/
+.vscode/

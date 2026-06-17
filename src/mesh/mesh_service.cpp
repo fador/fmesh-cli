@@ -1,0 +1,251 @@
+#include "mesh_service.h"
+
+#include "mesh/mesh_codec.h"
+#include "util/log.h"
+
+#include <chrono>
+
+namespace meshcli {
+
+MeshService::MeshService() {
+    // Seed the packet id generator like the python lib does.
+    std::uniform_int_distribution<uint32_t> dist(0, 0xFFFFFFFF);
+    packet_id_ = dist(rng_);
+}
+
+MeshService::~MeshService() { disconnect_all(); }
+
+void MeshService::set_event_sink(ConcurrentQueue<MeshEvent>* q, EventFd* wake) {
+    ui_queue_ = q;
+    ui_wake_ = wake;
+}
+
+bool MeshService::open_database(const std::string& path) {
+    return db_.open(path);
+}
+
+std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
+    auto rt = std::make_shared<DeviceRuntime>();
+    rt->db = std::make_unique<NodeDb>();
+    rt->display_name = spec.name;
+
+    // The BluezClient will push events into our handler which forwards to UI.
+    std::weak_ptr<DeviceRuntime> weak_rt = rt;
+    auto sink = [this, weak_rt](MeshEvent ev) {
+        // Stamp the runtime with config/node info before forwarding to UI.
+        handle_event(ev);
+        dispatch_to_ui(std::move(ev));
+    };
+
+    rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
+    std::string id = rt->client->start(pair);
+    if (id.empty()) {
+        // The client pushed an EvError already; just bail.
+        return {};
+    }
+
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    devices_[id] = rt;
+    // Preload cached nodes/channels from the DB (if this device was seen
+    // before). The live handshake will refresh them.
+    db_.load_nodes(id, *rt->db);
+    db_.load_channels(id, *rt->db);
+    return id;
+}
+
+void MeshService::disconnect_all() {
+    std::map<std::string, std::shared_ptr<DeviceRuntime>> tmp;
+    {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        tmp.swap(devices_);
+    }
+    for (auto& [_, rt] : tmp) {
+        if (rt->client) {
+            // Best-effort disconnect notification to the radio.
+            rt->client->send_to_radio(MeshCodec::encode_disconnect());
+            rt->client->stop();
+        }
+    }
+}
+
+uint32_t MeshService::next_packet_id() {
+    std::lock_guard<std::mutex> lock(pid_mu_);
+    // Mirror the meshtastic python algorithm: keep low 10 bits sequential,
+    // randomize upper 22 bits.
+    uint32_t next = (packet_id_ + 1) & 0xFFFFFFFFu;
+    next &= 0x3FFu;
+    uint32_t random_part = ((static_cast<uint32_t>(rng_()) & 0x3FFFFFu) << 10) & 0xFFFFFFFFu;
+    packet_id_ = next | random_part;
+    return packet_id_;
+}
+
+uint32_t MeshService::send_text(const std::string& device_id,
+                                uint32_t to_node,
+                                uint32_t channel_idx,
+                                const std::string& text,
+                                bool want_ack) {
+    std::shared_ptr<DeviceRuntime> rt;
+    {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        auto it = devices_.find(device_id);
+        if (it == devices_.end()) return 0;
+        rt = it->second;
+    }
+    if (!rt->client || !rt->client->is_connected()) return 0;
+
+    uint32_t pid = next_packet_id();
+    // PKI public key lookup for DMs (if the peer has a known public key).
+    std::vector<uint8_t> pubkey;
+    if (to_node != kBroadcastNodeNum) {
+        auto peer = rt->db->get(to_node);
+        if (peer && peer->has_public_key) pubkey = peer->public_key;
+    }
+    auto bytes = MeshCodec::encode_text_packet(pid, to_node, channel_idx,
+                                               text, want_ack, 0, pubkey);
+    if (!rt->client->send_to_radio(bytes)) return 0;
+
+    // Persist the outgoing message.
+    StoredMessage m;
+    m.device = device_id;
+    if (to_node == kBroadcastNodeNum) {
+        m.window_kind = "channel";
+        m.window_target = channel_idx;
+    } else {
+        m.window_kind = "dm";
+        m.window_target = to_node;
+    }
+    m.direction = "out";
+    m.from_node = rt->my_node_num;
+    m.to_node = to_node;
+    m.channel_idx = channel_idx;
+    m.text = text;
+    m.ts = std::chrono::duration_cast<std::chrono::seconds>(
+               std::chrono::system_clock::now().time_since_epoch()).count();
+    m.packet_id = pid;
+    m.ack_state = want_ack ? "pending" : "";
+    int64_t rowid = db_.insert_message(m);
+    if (want_ack) rt->pending_acks[pid] = rowid;
+    return pid;
+}
+
+std::vector<std::string> MeshService::device_ids() const {
+    std::vector<std::string> out;
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    out.reserve(devices_.size());
+    for (const auto& [id, _] : devices_) out.push_back(id);
+    return out;
+}
+
+const NodeDb* MeshService::db_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = devices_.find(device_id);
+    if (it == devices_.end()) return nullptr;
+    return it->second->db.get();
+}
+
+// ---------------------------------------------------------------------------
+// event handling (runs on the BLE thread of whichever device emitted it)
+// ---------------------------------------------------------------------------
+
+void MeshService::handle_event(const MeshEvent& ev) {
+    std::visit([this](const auto& e) {
+        using T = std::decay_t<decltype(e)>;
+        if constexpr (std::is_same_v<T, EvMyInfo>) {
+            std::lock_guard<std::mutex> lock(devices_mu_);
+            auto it = devices_.find(e.device);
+            if (it != devices_.end()) it->second->my_node_num = e.my_node_num;
+        } else if constexpr (std::is_same_v<T, EvMetadata>) {
+            std::lock_guard<std::mutex> lock(devices_mu_);
+            auto it = devices_.find(e.device);
+            if (it != devices_.end()) {
+                it->second->firmware_version = e.firmware_version;
+                it->second->hw_model = e.hw_model;
+            }
+        } else if constexpr (std::is_same_v<T, EvConfigComplete>) {
+            std::lock_guard<std::mutex> lock(devices_mu_);
+            auto it = devices_.find(e.device);
+            if (it != devices_.end()) {
+                it->second->config_complete = true;
+                // Pull our own long/short name from the node DB now that we
+                // know our node num.
+                auto me = it->second->db->get(it->second->my_node_num);
+                if (me) {
+                    it->second->my_long_name = me->long_name;
+                    it->second->my_short_name = me->short_name;
+                }
+            }
+        } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
+            std::lock_guard<std::mutex> lock(devices_mu_);
+            auto it = devices_.find(e.device);
+            if (it != devices_.end()) {
+                bool was_new = !it->second->db->get(e.node.node_num).has_value();
+                it->second->db->upsert_node(e.node);
+                db_.upsert_node(e.device, e.node);
+                (void)was_new;
+            }
+        } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
+            std::lock_guard<std::mutex> lock(devices_mu_);
+            auto it = devices_.find(e.device);
+            if (it != devices_.end()) {
+                it->second->db->upsert_channel(e.channel);
+                db_.upsert_channel(e.device, e.channel);
+            }
+        } else if constexpr (std::is_same_v<T, EvTextReceived>) {
+            // Persist inbound message.
+            std::shared_ptr<DeviceRuntime> rt;
+            {
+                std::lock_guard<std::mutex> lock(devices_mu_);
+                auto it = devices_.find(e.device);
+                if (it != devices_.end()) rt = it->second;
+            }
+            if (rt) {
+                StoredMessage m;
+                m.device = e.device;
+                if (e.broadcast) {
+                    m.window_kind = "channel";
+                    m.window_target = e.channel_idx;
+                } else {
+                    m.window_kind = "dm";
+                    m.window_target = e.from_node;
+                }
+                m.direction = "in";
+                m.from_node = e.from_node;
+                m.to_node = e.to_node;
+                m.channel_idx = e.channel_idx;
+                m.text = e.text;
+                m.ts = e.rx_time ? e.rx_time :
+                       std::chrono::duration_cast<std::chrono::seconds>(
+                           std::chrono::system_clock::now().time_since_epoch()).count();
+                m.packet_id = e.packet_id;
+                db_.insert_message(m);
+            }
+        } else if constexpr (std::is_same_v<T, EvAckReceived>) {
+            // Match pending outbound message and update its ack state.
+            std::shared_ptr<DeviceRuntime> rt;
+            {
+                std::lock_guard<std::mutex> lock(devices_mu_);
+                auto it = devices_.find(e.device);
+                if (it != devices_.end()) rt = it->second;
+            }
+            if (rt) {
+                auto pit = rt->pending_acks.find(e.packet_id);
+                if (pit != rt->pending_acks.end()) {
+                    db_.update_ack_state(pit->second,
+                                         e.success ? "acked" : "naked");
+                    rt->pending_acks.erase(pit);
+                }
+            }
+        } else {
+            // EvConnected / EvDisconnected / EvLogLine / EvError: no DB work.
+        }
+    }, ev);
+}
+
+void MeshService::dispatch_to_ui(MeshEvent ev) {
+    if (ui_queue_) {
+        ui_queue_->push(std::move(ev));
+        if (ui_wake_) ui_wake_->notify();
+    }
+}
+
+} // namespace meshcli
