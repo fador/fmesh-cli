@@ -29,6 +29,12 @@ static std::string to_lower(std::string s) {
     return s;
 }
 
+static std::string to_upper(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return std::toupper(c); });
+    return s;
+}
+
 BluezClient::BluezClient(BleDeviceSpec spec, EventSink sink)
     : spec_(std::move(spec)), sink_(std::move(sink)) {}
 
@@ -83,8 +89,9 @@ void BluezClient::run_connect_flow() {
 
     // Resolve device path: explicit address first, else scan by name.
     if (!spec_.address.empty()) {
-        // Build canonical BlueZ device path from MAC.
-        std::string mac = to_lower(spec_.address);
+        // Build canonical BlueZ device path from MAC. BlueZ uppercases the
+        // hex digits in the object path (e.g. dev_1C_DB_D4_A7_03_31).
+        std::string mac = to_upper(spec_.address);
         std::string p;
         for (char c : mac) if (c != ':' && c != '-' && c != '_') p += c;
         std::string dev = "/org/bluez/";
