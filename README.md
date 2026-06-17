@@ -93,6 +93,18 @@ cmake --build build -j$(nproc)
 
 Plain text (without leading `/`) sends to the current window's target: channel broadcast or DM.
 
+### Input prompt
+
+The input line shows a context-sensitive prompt so it's always clear what your
+text will do:
+
+| Prompt | Meaning |
+|--------|---------|
+| `cmd> ` | You typed `/` — input is a command, not a message |
+| `#name> ` | Input goes to the `name` channel as a broadcast |
+| `nick> ` | Input goes to `nick` as a direct message |
+| `status> ` | Status window is active (text can't be sent from here) |
+
 ## Architecture
 
 ```
@@ -121,8 +133,22 @@ The BLE layer talks the Meshtastic wire protocol directly (protobuf over GATT), 
 - Database: `~/.local/share/mesh-cli/mesh.db`
 - Log: `~/.local/share/mesh-cli/mesh-cli.log`
 
+## Testing
+
+```sh
+# Unit tests (no device required)
+./build/mesh-cli-tests
+
+# Live integration test (requires a paired device in range)
+./build/mesh-cli-live
+```
+
+The live test connects to the configured device, sends a channel broadcast
+and a DM, and verifies the outgoing messages are persisted to SQLite.
+
 ## Known issues
 
 - BLE connections can be unreliable if the device isn't paired. Use `mesh-cli pair` to establish a bond first.
+- Meshtastic firmware holds a single bond; if the device is paired to a phone, pairing from mesh-cli will fail with `AuthenticationFailed`. Remove the bond on the phone first, then run `mesh-cli pair`.
 - The `le-connection-abort-by-local` error on first connect is common; the client retries automatically.
 - If GATT operations time out, the device may have dropped the connection. Use `/reconnect` or restart.
