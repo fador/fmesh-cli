@@ -253,7 +253,6 @@ void TuiApp::render() {
     attron(A_REVERSE);
     mvhline(0, 0, ' ', cols);
     std::string title = "[" + std::to_string(wm_.current_index()) + ":" + w->title() + "]";
-    if (w->target().kind != "status") title += "  " + w->target().device;
     mvprintw(0, 0, "%s", title.c_str());
     std::string conn = connection_info();
     mvprintw(0, std::max(0, cols - static_cast<int>(conn.size())), "%s", conn.c_str());
