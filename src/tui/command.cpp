@@ -106,18 +106,27 @@ void CommandDispatcher::cmd_help() {
 
 void CommandDispatcher::cmd_list() {
     const auto& wins = wm_.windows();
+    // Collect (index, window*) pairs, sort by activity desc (status always first).
+    std::vector<std::pair<int, const Window*>> sorted;
     for (size_t i = 0; i < wins.size(); ++i) {
-        int idx = static_cast<int>(i + 1);
-        const Window& w = *wins[i];
+        sorted.emplace_back(static_cast<int>(i + 1), wins[i].get());
+    }
+    std::stable_sort(sorted.begin(), sorted.end(),
+        [](const auto& a, const auto& b) {
+            if (a.second->target().kind == "status") return true;
+            if (b.second->target().kind == "status") return false;
+            return a.second->activity() > b.second->activity();
+        });
+    for (const auto& [idx, w] : sorted) {
         std::string mark;
-        if (w.activity() >= 2) mark = " *";
-        else if (w.activity() == 1) mark = " #";
-        if (w.unread() > 0) mark += std::to_string(w.unread());
+        if (w->activity() >= 2) mark = " *";
+        else if (w->activity() == 1) mark = " #";
+        if (w->unread() > 0) mark += std::to_string(w->unread());
         int color = tui_color::INFO;
-        if (w.target().kind == "channel") color = tui_color::CHANNEL;
-        else if (w.target().kind == "dm") color = tui_color::DM;
-        status_("  " + std::to_string(idx) + ": " + w.title() +
-                "  [" + w.target().kind + "]" + mark, color);
+        if (w->target().kind == "channel") color = tui_color::CHANNEL;
+        else if (w->target().kind == "dm") color = tui_color::DM;
+        status_("  " + std::to_string(idx) + ": " + w->title() +
+                "  [" + w->target().kind + "]" + mark, color);
     }
 }
 
@@ -214,11 +223,21 @@ void CommandDispatcher::cmd_channel(const std::vector<std::string>& args) {
         auto devices = service_.device_ids();
         if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
         std::string name;
+        std::string role;
         if (auto* db = service_.db_for(devices[0])) {
-            if (auto ch = db->channel(idx)) name = ch->name;
+            if (auto ch = db->channel(idx)) {
+                name = ch->name;
+                role = ch->role;
+            }
         }
         int w = wm_.ensure_channel(devices[0], idx, name);
         wm_.select(w);
+        if (role == "DISABLED")
+            status_("Note: channel " + std::to_string(idx) + " is DISABLED",
+                    tui_color::ERROR);
+        else if (name.empty() && role != "DISABLED")
+            status_("Note: channel " + std::to_string(idx) + " has no name",
+                    tui_color::INFO);
     } catch (...) { status_("Invalid channel index", tui_color::ERROR); }
 }
 
