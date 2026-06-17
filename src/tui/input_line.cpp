@@ -1,6 +1,7 @@
 #include "input_line.h"
 
 #include <algorithm>
+#include <fstream>
 
 namespace meshcli {
 
@@ -73,6 +74,22 @@ bool InputLine::handle_key(int ch, std::string& out) {
         ++cursor_;
     }
     return false;
+}
+
+void InputLine::load_history(const std::string& path) {
+    std::ifstream f(path);
+    if (!f) return;
+    std::string line;
+    while (std::getline(f, line)) {
+        if (!line.empty()) history_.push_back(line);
+    }
+    history_pos_ = history_.size();
+}
+
+void InputLine::save_history(const std::string& path) const {
+    std::ofstream f(path, std::ios::trunc);
+    if (!f) return;
+    for (const auto& h : history_) f << h << '\n';
 }
 
 } // namespace meshcli

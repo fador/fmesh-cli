@@ -25,10 +25,16 @@ namespace {
 
 } // namespace
 
-TuiApp::TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake)
-    : service_(service), queue_(queue), wake_(wake), wm_(service) {}
+TuiApp::TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake,
+               const std::string& history_path)
+    : service_(service), queue_(queue), wake_(wake), wm_(service),
+      history_path_(history_path) {}
 
-TuiApp::~TuiApp() { teardown_ncurses(); }
+TuiApp::~TuiApp() {
+    if (!history_path_.empty())
+        input_.save_history(history_path_);
+    teardown_ncurses();
+}
 
 void TuiApp::init_ncurses() {
     initscr();
@@ -50,6 +56,8 @@ void TuiApp::init_ncurses() {
     // Disable logging to stderr now that ncurses owns the screen.
     Logger::instance().set_console(false);
     Logger::instance().set_level(LogLevel::Info);
+    if (!history_path_.empty())
+        input_.load_history(history_path_);
     clear();
     refresh();
 }
@@ -306,7 +314,7 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                 w.append_line(hexline);
             }
             if (idx != wm_.current_index()) w.bump_activity(1);
-            else w.mark_read();
+            else { w.mark_read(); w.scroll_to_bottom(); }
         }
     }, ev);
 }

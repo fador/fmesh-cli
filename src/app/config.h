@@ -13,6 +13,7 @@ struct AppConfig {
     int serial_baud = 115200;
     std::string db_path;               // default filled in main
     std::string log_path;              // default filled in main
+    std::string history_path;          // default filled in main
     bool pair = false;                 // run pairing agent
     bool list_only = false;            // scan + list, then exit
     bool headless = false;             // connect + dump events, no TUI

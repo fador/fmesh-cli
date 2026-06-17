@@ -17,7 +17,8 @@ struct AppConfig;
 // line, and the main poll loop. Runs on the main thread.
 class TuiApp {
 public:
-    TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake);
+    TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake,
+           const std::string& history_path);
     ~TuiApp();
 
     // Enter the ncurses event loop. Returns when the user quits. Returns an
@@ -44,6 +45,7 @@ private:
     StatusBar status_bar_;
     bool quit_ = false;
     bool need_redraw_ = true;
+    std::string history_path_;
 
     // Auto-reconnect state
     std::string reconnect_device_id_;

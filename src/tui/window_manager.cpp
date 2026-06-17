@@ -150,6 +150,7 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
                 mention = true;
         }
     }
+    if (mention) std::fputc('\a', stdout);  // terminal bell
 
     Line line;
     // Detect /me actions: text starts with "* ".

@@ -21,6 +21,10 @@ public:
 
     void clear() { buf_.clear(); cursor_ = 0; history_pos_ = history_.size(); }
 
+    // Persist history to/from a file.
+    void load_history(const std::string& path);
+    void save_history(const std::string& path) const;
+
 private:
     std::string buf_;
     size_t cursor_ = 0;

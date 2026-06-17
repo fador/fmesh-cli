@@ -136,7 +136,7 @@ int run_app(int argc, char** argv, MeshService& service) {
         return 0;
     }
 
-    TuiApp app(service, queue, wake);
+    TuiApp app(service, queue, wake, cfg.history_path);
     int rc = app.run();
 
     service.disconnect_all();

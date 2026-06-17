@@ -86,6 +86,7 @@ void finalize_paths(AppConfig& c) {
     ::mkdir(dir.c_str(), 0755);
     if (c.db_path.empty())  c.db_path  = dir + "/mesh.db";
     if (c.log_path.empty()) c.log_path = dir + "/mesh-cli.log";
+    if (c.history_path.empty()) c.history_path = dir + "/history";
 }
 
 } // namespace meshcli
