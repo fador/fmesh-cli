@@ -21,15 +21,6 @@ std::string fmt_time(uint32_t ts) {
     return buf;
 }
 
-std::string nick_for(const NodeDb* db, uint32_t node) {
-    if (!db) return node_num_to_id(node);
-    auto n = db->get(node);
-    if (!n) return node_num_to_id(node);
-    if (!n->short_name.empty()) return n->short_name;
-    if (!n->long_name.empty()) return n->long_name;
-    return n->node_id;
-}
-
 std::string short_nick(const NodeDb* db, uint32_t node) {
     auto n = db ? db->get(node) : std::nullopt;
     if (n && !n->short_name.empty()) return n->short_name;
@@ -92,7 +83,12 @@ int WindowManager::ensure_channel(const std::string& device, uint32_t idx,
                                   const std::string& name) {
     std::string key = device + "|channel|" + std::to_string(idx);
     auto it = by_key_.find(key);
-    if (it != by_key_.end()) return it->second;
+    if (it != by_key_.end()) {
+        // Update title if a real name arrived (created earlier with "").
+        if (!name.empty())
+            windows_[it->second - 1]->set_title(channel_title(device, idx, name));
+        return it->second;
+    }
     auto w = std::make_unique<Window>(
         WindowTarget{device, "channel", idx},
         channel_title(device, idx, name));

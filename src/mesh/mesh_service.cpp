@@ -26,6 +26,7 @@ bool MeshService::open_database(const std::string& path) {
 
 std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
     auto rt = std::make_shared<DeviceRuntime>();
+    rt->spec = spec;
     rt->db = std::make_unique<NodeDb>();
     rt->display_name = spec.name;
 
@@ -56,6 +57,48 @@ std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
     db_.load_nodes(id, *rt->db);
     db_.load_channels(id, *rt->db);
     return id;
+}
+
+bool MeshService::reconnect_device(const std::string& device_id) {
+    std::shared_ptr<DeviceRuntime> rt;
+    BleDeviceSpec spec;
+    {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        auto it = devices_.find(device_id);
+        if (it == devices_.end()) return false;
+        rt = it->second;
+        spec = rt->spec;
+    }
+
+    // Stop the old BLE client.
+    if (rt->client) {
+        rt->client->stop();
+        rt->client.reset();
+    }
+
+    // Recreate the client with the same event sink.
+    std::weak_ptr<DeviceRuntime> weak_rt = rt;
+    auto sink = [this, weak_rt](MeshEvent ev) {
+        if (auto r = weak_rt.lock()) {
+            handle_event(r, ev);
+        }
+        dispatch_to_ui(std::move(ev));
+    };
+
+    rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
+    std::string new_id = rt->client->start(/*pair=*/false);
+    if (new_id.empty()) return false;
+
+    // Update the map key if the device path changed.
+    if (new_id != device_id) {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        devices_.erase(device_id);
+        devices_[new_id] = rt;
+    }
+
+    rt->config_complete = false;
+    LOG_INFO() << "reconnected " << spec.name << " (" << new_id << ")";
+    return true;
 }
 
 void MeshService::disconnect_all() {

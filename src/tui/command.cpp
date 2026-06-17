@@ -226,7 +226,18 @@ void CommandDispatcher::cmd_quit(CommandResult& res) {
 }
 
 void CommandDispatcher::cmd_reconnect() {
-    status_("Reconnect not yet implemented; use /quit and re-run.", tui_color::ERROR);
+    auto devices = service_.device_ids();
+    if (devices.empty()) {
+        status_("(no devices connected)", tui_color::ERROR);
+        return;
+    }
+    for (const auto& id : devices) {
+        if (service_.reconnect_device(id)) {
+            status_("Reconnecting to " + id + "...", tui_color::INFO);
+        } else {
+            status_("Reconnect failed for " + id, tui_color::ERROR);
+        }
+    }
 }
 
 void CommandDispatcher::cmd_me(const std::vector<std::string>& args) {

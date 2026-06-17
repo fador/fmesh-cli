@@ -18,6 +18,7 @@
 namespace meshcli {
 
 struct DeviceRuntime {
+    BleDeviceSpec spec;             // stored for reconnection
     std::unique_ptr<BluezClient> client;
     std::unique_ptr<NodeDb> db;
     std::string display_name;
@@ -53,6 +54,10 @@ public:
 
     // Disconnect everything.
     void disconnect_all();
+
+    // Reconnect a device (e.g. after BLE disconnect). Returns false if the
+    // device id is unknown.
+    bool reconnect_device(const std::string& device_id);
 
     // Send a text message. `to_node` == kBroadcastNodeNum for a channel
     // broadcast. Returns the packet_id used (0 on failure).

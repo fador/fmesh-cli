@@ -40,6 +40,7 @@ public:
     [[nodiscard]] const std::vector<Line>& lines() const { return lines_; }
     [[nodiscard]] const WindowTarget& target() const { return target_; }
     [[nodiscard]] const std::string& title() const { return title_; }
+    void set_title(std::string t) { title_ = std::move(t); }
 
     // Unread bookkeeping (driven by the window manager).
     void mark_read() { unread_ = 0; activity_ = 0; }
