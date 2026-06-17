@@ -70,6 +70,9 @@ public:
     // --- queries for the UI ---
     [[nodiscard]] std::vector<std::string> device_ids() const;
     [[nodiscard]] const NodeDb* db_for(const std::string& device_id) const;
+    [[nodiscard]] std::string firmware_for(const std::string& device_id) const;
+    [[nodiscard]] std::string hw_model_for(const std::string& device_id) const;
+    [[nodiscard]] std::string display_name_for(const std::string& device_id) const;
     [[nodiscard]] Database& database() { return db_; }
     [[nodiscard]] bool has_devices() const { return !devices_.empty(); }
 

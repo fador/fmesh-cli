@@ -137,8 +137,17 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
     }
 
     Line line;
-    line.text = "[" + fmt_time(ts) + "] <" + nick + "> " + text;
-    line.color_pair = mention ? 4 : (broadcast ? 2 : 3);   // see tui.cpp color table
+    // Detect /me actions: text starts with "* ".
+    bool is_action = (text.size() > 2 && text[0] == '*' && text[1] == ' ');
+    if (is_action) {
+        std::string action = text.substr(2);   // text after "* "
+        line.text = "[" + fmt_time(ts) + "] * " + nick + " " + action;
+        line.is_meta = true;
+        line.color_pair = mention ? 4 : (broadcast ? 2 : 3);
+    } else {
+        line.text = "[" + fmt_time(ts) + "] <" + nick + "> " + text;
+        line.color_pair = mention ? 4 : (broadcast ? 2 : 3);
+    }
     w.append_line(line);
 
     if (idx != current_) {

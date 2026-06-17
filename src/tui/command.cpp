@@ -211,11 +211,31 @@ void CommandDispatcher::cmd_info() {
     if (devices.empty()) { status_("(no devices)", tui_color::ERROR); return; }
     for (const auto& id : devices) {
         const NodeDb* db = service_.db_for(id);
-        status_("device: " + id, tui_color::INFO);
+        std::string name = service_.display_name_for(id);
+        std::string fw   = service_.firmware_for(id);
+        std::string hw   = service_.hw_model_for(id);
+
+        status_("Device: " + name + " (" + id + ")", tui_color::INFO);
+        if (!fw.empty() || !hw.empty())
+            status_("  Firmware: " + fw + "  HW: " + hw, tui_color::INFO);
         if (db) {
-            status_("  my node: " + node_num_to_id(db->my_node_num()), tui_color::INFO);
-            status_("  nodes known: " + std::to_string(db->all().size()), tui_color::INFO);
-            status_("  channels: " + std::to_string(db->channels().size()), tui_color::INFO);
+            auto me = db->get(db->my_node_num());
+            if (me) {
+                std::string batt;
+                if (me->battery_level)
+                    batt = " batt=" + std::to_string(*me->battery_level) + "%";
+                if (me->voltage)
+                    batt += " " + std::to_string(*me->voltage) + "V";
+                status_("  My node: " + me->long_name + " (" + me->short_name
+                        + ") " + me->node_id + batt, tui_color::CHANNEL);
+            } else {
+                status_("  My node: " + node_num_to_id(db->my_node_num()),
+                        tui_color::INFO);
+            }
+            status_("  Nodes known: " + std::to_string(db->all().size()),
+                    tui_color::INFO);
+            status_("  Channels: " + std::to_string(db->channels().size()),
+                    tui_color::INFO);
         }
     }
 }

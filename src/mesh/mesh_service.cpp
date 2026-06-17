@@ -194,6 +194,27 @@ const NodeDb* MeshService::db_for(const std::string& device_id) const {
     return it->second->db.get();
 }
 
+std::string MeshService::firmware_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = devices_.find(device_id);
+    if (it == devices_.end()) return {};
+    return it->second->firmware_version;
+}
+
+std::string MeshService::hw_model_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = devices_.find(device_id);
+    if (it == devices_.end()) return {};
+    return it->second->hw_model;
+}
+
+std::string MeshService::display_name_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = devices_.find(device_id);
+    if (it == devices_.end()) return {};
+    return it->second->display_name;
+}
+
 // ---------------------------------------------------------------------------
 // event handling (runs on the BLE thread of whichever device emitted it)
 // ---------------------------------------------------------------------------
