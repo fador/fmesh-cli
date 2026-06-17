@@ -1,6 +1,7 @@
 #include "window_manager.h"
 
 #include "mesh/mesh_service.h"
+#include "store/database.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -92,7 +93,9 @@ int WindowManager::ensure_channel(const std::string& device, uint32_t idx,
     auto w = std::make_unique<Window>(
         WindowTarget{device, "channel", idx},
         channel_title(device, idx, name));
-    return add_window(std::move(w));
+    int win_idx = add_window(std::move(w));
+    load_history(win_idx);
+    return win_idx;
 }
 
 int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
@@ -103,7 +106,9 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
     auto w = std::make_unique<Window>(
         WindowTarget{device, "dm", peer_node},
         dm_title(device, peer_node, nick));
-    return add_window(std::move(w));
+    int win_idx = add_window(std::move(w));
+    load_history(win_idx);
+    return win_idx;
 }
 
 void WindowManager::append_text(const std::string& device, uint32_t from_node,
@@ -188,6 +193,48 @@ const WindowTarget* WindowManager::current_target() const {
     const auto& t = windows_[current_ - 1]->target();
     if (t.kind == "status") return nullptr;
     return &t;
+}
+
+void WindowManager::load_history(int window_idx) {
+    if (window_idx < 1 || window_idx > static_cast<int>(windows_.size())) return;
+    Window& w = *windows_[window_idx - 1];
+    const auto& t = w.target();
+    if (t.kind == "status") return;
+
+    WindowKey wk{t.device, t.kind, t.target};
+    auto msgs = service_.database().recent_messages(wk, 200);
+    if (msgs.empty()) return;
+
+    const NodeDb* db = service_.db_for(t.device);
+    for (const auto& m : msgs) {
+        // Skip empty messages.
+        if (m.text.empty()) continue;
+
+        std::string nick;
+        if (m.direction == "out") {
+            // Message we sent. Use our own nick.
+            uint32_t me = db ? db->my_node_num() : 0;
+            nick = short_nick(db, me);
+        } else {
+            nick = short_nick(db, m.from_node);
+        }
+
+        Line line;
+        line.text = "[" + fmt_time(static_cast<uint32_t>(m.ts)) + "] <" + nick + "> " + m.text;
+        bool is_dm = (t.kind == "dm");
+        bool mention = false;
+        if (db) {
+            auto me = db->get(db->my_node_num());
+            if (me) {
+                if (!me->short_name.empty() && m.text.find(me->short_name) != std::string::npos)
+                    mention = true;
+                else if (!me->long_name.empty() && m.text.find(me->long_name) != std::string::npos)
+                    mention = true;
+            }
+        }
+        line.color_pair = mention ? 4 : (is_dm ? 3 : 2);
+        w.append_line(line);
+    }
 }
 
 } // namespace meshcli

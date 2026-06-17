@@ -51,6 +51,7 @@ public:
 
 private:
     int add_window(std::unique_ptr<Window> w);
+    void load_history(int window_idx);
     static std::string channel_title(const std::string& device, uint32_t idx,
                                      const std::string& name);
     static std::string dm_title(const std::string& device, uint32_t node,
