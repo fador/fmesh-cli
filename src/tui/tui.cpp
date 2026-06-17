@@ -123,23 +123,29 @@ int TuiApp::run() {
         if (pfds[0].revents & POLLIN) {
             int ch = getch();
             while (ch != ERR) {
-                // Handle Alt+key (ESC prefix).
+                // Handle Alt+key (ESC prefix).  In nodelay mode the second
+                // byte of an ESC-sequence may not be available immediately,
+                // so temporarily switch to a short blocking timeout.
                 if (ch == 27) {
+                    timeout(50);               // 50ms window for the next byte
                     int ch2 = getch();
+                    nodelay(stdscr, TRUE);     // restore non-blocking
                     if (ch2 != ERR) {
-                        int alt = decode_alt(ch2);
                         // Alt+1..0 window switch.
                         if (ch2 >= '0' && ch2 <= '9') {
                             int idx = (ch2 == '0') ? 10 : (ch2 - '0');
                             wm_.select(idx);
+                            need_redraw_ = true;
                         } else if (ch2 == 'a') {
                             wm_.select_next_active();
+                            need_redraw_ = true;
                         } else if (ch2 == 'n') {
                             wm_.select_relative(1);
+                            need_redraw_ = true;
                         } else if (ch2 == 'p') {
                             wm_.select_relative(-1);
+                            need_redraw_ = true;
                         }
-                        (void)alt;
                         ch = getch();
                         continue;
                     }
@@ -270,8 +276,19 @@ void TuiApp::render() {
     render_input(rows - 2, cols);
     status_bar_.render(wm_, cols, conn);
 
-    // Place the cursor at the input line.
-    move(rows - 2, static_cast<int>(input_.cursor()));
+    // Place the cursor at the input line, after the prompt.
+    Window* cw = wm_.current_window();
+    std::string cur_prompt;
+    const std::string& ib = input_.buf();
+    if (!ib.empty() && ib[0] == '/')
+        cur_prompt = "cmd> ";
+    else if (cw && cw->target().kind == "channel")
+        cur_prompt = cw->title() + "> ";
+    else if (cw && cw->target().kind == "dm")
+        cur_prompt = cw->title() + "> ";
+    else
+        cur_prompt = "status> ";
+    move(rows - 2, static_cast<int>(cur_prompt.size() + input_.cursor()));
     refresh();
 }
 
@@ -302,16 +319,46 @@ void TuiApp::render_scrollback(const Window& w, int top, int height, int width) 
 
 void TuiApp::render_input(int row, int width) {
     mvhline(row, 0, ' ', width);
-    attron(A_BOLD);
-    mvprintw(row, 0, "> ");
-    attroff(A_BOLD);
-    std::string s = input_.buf();
-    if (static_cast<int>(s.size()) > width - 2) {
+
+    // Build a context prompt that shows where text will go:
+    //   status window : ">" greyed, with a hint
+    //   channel       : "#name>"
+    //   dm            : "nick>"
+    // If the input starts with '/', show "/" as the prompt to make it
+    // obvious a command is being typed.
+    Window* w = wm_.current_window();
+    std::string prompt;
+    int prompt_color = 0;
+    const std::string& buf = input_.buf();
+
+    if (!buf.empty() && buf[0] == '/') {
+        // Command mode — always show "cmd" regardless of window.
+        prompt = "cmd> ";
+        prompt_color = COLOR_META;     // cyan
+    } else if (w && w->target().kind == "channel") {
+        prompt = w->title() + "> ";    // e.g. "#EdgeFastLow> "
+        prompt_color = COLOR_CHANNEL;
+    } else if (w && w->target().kind == "dm") {
+        prompt = w->title() + "> ";    // e.g. "Bob> "
+        prompt_color = COLOR_DM;
+    } else {
+        // Status window: plain text can't be sent.
+        prompt = "status> ";
+        prompt_color = COLOR_META;
+    }
+
+    if (prompt_color) attron(COLOR_PAIR(prompt_color) | A_BOLD);
+    mvprintw(row, 0, "%s", prompt.c_str());
+    if (prompt_color) attroff(COLOR_PAIR(prompt_color) | A_BOLD);
+
+    int prompt_w = static_cast<int>(prompt.size());
+    std::string s = buf;
+    if (static_cast<int>(s.size()) > width - prompt_w) {
         // Show the tail so the cursor stays visible.
-        size_t start = s.size() - (width - 2);
+        size_t start = s.size() - (width - prompt_w);
         s = s.substr(start);
     }
-    mvprintw(row, 2, "%s", s.c_str());
+    mvprintw(row, prompt_w, "%s", s.c_str());
 }
 
 } // namespace meshcli
