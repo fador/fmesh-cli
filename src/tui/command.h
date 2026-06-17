@@ -50,6 +50,7 @@ private:
     void cmd_config();
     void cmd_whois(const std::vector<std::string>& args);
     void cmd_raw(const std::vector<std::string>& args);
+    void cmd_stats();
 };
 
 } // namespace meshcli

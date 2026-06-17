@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <ctime>
+#include <map>
 #include <sstream>
 
 namespace meshcli {
@@ -67,6 +68,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "config" || cmd == "cfg")  cmd_config();
     else if (cmd == "whois" || cmd == "wi")    cmd_whois(tokens);
     else if (cmd == "raw")                     cmd_raw(tokens);
+    else if (cmd == "stats" || cmd == "st")    cmd_stats();
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -90,6 +92,7 @@ void CommandDispatcher::cmd_help() {
     status_("  /config               show device configuration", tui_color::INFO);
     status_("  /whois <node|nick>    show detailed node information", tui_color::INFO);
     status_("  /raw [N]              show last N raw packets (default 5)", tui_color::INFO);
+    status_("  /stats                show packet statistics", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", tui_color::INFO);
 }
@@ -287,6 +290,37 @@ void CommandDispatcher::cmd_raw(const std::vector<std::string>& args) {
             std::string line;
             while (std::getline(iss, line))
                 status_("    " + line, tui_color::META);
+        }
+    }
+}
+
+void CommandDispatcher::cmd_stats() {
+    auto devices = service_.device_ids();
+    if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
+    for (const auto& id : devices) {
+        auto pkts = service_.raw_packets_for(id);
+        status_("Stats for " + service_.display_name_for(id)
+                + " (" + std::to_string(pkts.size()) + " packets):",
+                tui_color::INFO);
+
+        // Count by extracting the first word of each summary.
+        std::map<std::string, int> counts;
+        for (const auto& p : pkts) {
+            std::string type = p.summary;
+            auto sp = type.find(' ');
+            if (sp != std::string::npos) type = type.substr(0, sp);
+            counts[type]++;
+        }
+
+        // Sort by count descending.
+        std::vector<std::pair<std::string, int>> sorted(counts.begin(), counts.end());
+        std::sort(sorted.begin(), sorted.end(),
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+
+        for (const auto& [type, count] : sorted) {
+            char buf[80];
+            std::snprintf(buf, sizeof(buf), "  %-20s %d", type.c_str(), count);
+            status_(buf, tui_color::CHANNEL);
         }
     }
 }
