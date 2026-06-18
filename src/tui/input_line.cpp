@@ -71,8 +71,8 @@ bool InputLine::handle_key(int ch, std::string& out) {
         return false;
     }
 
-    // Printable ASCII (skip control chars / multibyte for v1).
-    if (ch >= 0x20 && ch < 0x7F) {
+    // Printable ASCII and extended bytes (for UTF-8).
+    if ((ch >= 0x20 && ch <= 0x7E) || (ch >= 0x80 && ch <= 0xFF)) {
         if (buf_.size() >= kMaxLineSize) return false;
         buf_.insert(buf_.begin() + cursor_, static_cast<char>(ch));
         ++cursor_;
