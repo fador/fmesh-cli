@@ -22,7 +22,7 @@ enum class Mode { Normal, ConnectWizard_Tab, ConnectWizard_BLE,
 
 enum class ConnTransport { BLE, TCP, Serial, Mesh };
 
-enum class NodeListSort { Name, LastHeard, NodeId, Battery, Hops };
+enum class NodeListSort { Name, LastHeard, NodeId, Battery, Hops, Distance };
 
 struct BleScanEntry {
     std::string name;

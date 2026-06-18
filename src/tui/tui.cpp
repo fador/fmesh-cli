@@ -36,6 +36,52 @@
 
 namespace meshcli {
 
+namespace {
+double haversine(double lat1, double lon1, double lat2, double lon2) {
+    constexpr double R = 6371.0;
+    double dLat = (lat2 - lat1) * 3.14159265358979323846 / 180.0;
+    double dLon = (lon2 - lon1) * 3.14159265358979323846 / 180.0;
+    lat1 = lat1 * 3.14159265358979323846 / 180.0;
+    lat2 = lat2 * 3.14159265358979323846 / 180.0;
+    double a = std::sin(dLat/2) * std::sin(dLat/2) +
+               std::cos(lat1) * std::cos(lat2) * std::sin(dLon/2) * std::sin(dLon/2);
+    double c = 2 * std::atan2(std::sqrt(a), std::sqrt(1-a));
+    return R * c;
+}
+
+std::pair<std::optional<double>, std::optional<double>> get_my_location(
+    MeshService& service, bool unified, const std::string& nodelist_device) {
+    std::optional<double> my_lat, my_lon;
+    if (!unified) {
+        if (const NodeDb* db = service.db_for(nodelist_device)) {
+            if (auto me = db->get(db->my_node_num())) {
+                my_lat = me->latitude;
+                my_lon = me->longitude;
+            }
+        }
+    } else {
+        for (const auto& id : service.device_ids()) {
+            if (const NodeDb* db = service.db_for(id)) {
+                if (auto me = db->get(db->my_node_num())) {
+                    if (me->latitude && me->longitude) {
+                        my_lat = me->latitude;
+                        my_lon = me->longitude;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    return {my_lat, my_lon};
+}
+
+double get_dist(const Node& n, std::optional<double> my_lat, std::optional<double> my_lon) {
+    if (my_lat && my_lon && n.latitude && n.longitude)
+        return haversine(*my_lat, *my_lon, *n.latitude, *n.longitude);
+    return 999999.0;
+}
+} // namespace
+
 time_t TuiApp::s_last_reconnect_attempt = 0;
 TuiApp* TuiApp::s_instance_ = nullptr;
 
@@ -464,7 +510,8 @@ bool TuiApp::handle_nodelist_key(int ch) {
             }
             std::vector<std::pair<std::string, Node>> sorted;
             for (auto& [num, p] : merged) sorted.push_back(std::move(p));
-            std::sort(sorted.begin(), sorted.end(), [this](const auto& a, const auto& b) {
+            auto [my_lat, my_lon] = get_my_location(service_, unified, nodelist_device_);
+            std::sort(sorted.begin(), sorted.end(), [this, my_lat, my_lon](const auto& a, const auto& b) {
                 switch (nodelist_sort_) {
                 case NodeListSort::LastHeard:
                     return a.second.last_heard.value_or(0) > b.second.last_heard.value_or(0);
@@ -474,6 +521,8 @@ bool TuiApp::handle_nodelist_key(int ch) {
                     return a.second.battery_level.value_or(0) > b.second.battery_level.value_or(0);
                 case NodeListSort::Hops:
                     return a.second.hops_away.value_or(99) < b.second.hops_away.value_or(99);
+                case NodeListSort::Distance:
+                    return get_dist(a.second, my_lat, my_lon) < get_dist(b.second, my_lat, my_lon);
                 default:
                     return a.second.long_name < b.second.long_name;
                 }
@@ -495,11 +544,11 @@ bool TuiApp::handle_nodelist_key(int ch) {
     }
     if (ch == 's') {
         int s = static_cast<int>(nodelist_sort_);
-        s = (s + 1) % 5;
+        s = (s + 1) % 6;
         nodelist_sort_ = static_cast<NodeListSort>(s);
         nodelist_cursor_ = 0;
         nodelist_offset_ = 0;
-        const char* names[] = {"Name", "Last heard", "Node ID", "Battery", "Hops"};
+        const char* names[] = {"Name", "Last heard", "Node ID", "Battery", "Hops", "Distance"};
         wm_.append_status("Sort by: " + std::string(names[s]), tui_color::INFO);
         need_redraw_ = true;
         return true;
@@ -552,7 +601,8 @@ void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
         return;
     }
     // Sort
-    std::sort(nodes.begin(), nodes.end(), [this](const Node& a, const Node& b) {
+    auto [my_lat, my_lon] = get_my_location(service_, unified, nodelist_device_);
+    std::sort(nodes.begin(), nodes.end(), [this, my_lat, my_lon](const Node& a, const Node& b) {
         switch (nodelist_sort_) {
         case NodeListSort::LastHeard:
             return a.last_heard.value_or(0) > b.last_heard.value_or(0);
@@ -562,6 +612,8 @@ void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
             return a.battery_level.value_or(0) > b.battery_level.value_or(0);
         case NodeListSort::Hops:
             return a.hops_away.value_or(99) < b.hops_away.value_or(99);
+        case NodeListSort::Distance:
+            return get_dist(a, my_lat, my_lon) < get_dist(b, my_lat, my_lon);
         default:
             return a.long_name < b.long_name;
         }
@@ -581,6 +633,7 @@ void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
     case NodeListSort::NodeId:    sort_label = "node id"; break;
     case NodeListSort::Battery:   sort_label = "battery"; break;
     case NodeListSort::Hops:      sort_label = "hops"; break;
+    case NodeListSort::Distance:  sort_label = "distance"; break;
     default: break;
     }
     std::string title = unified
@@ -603,6 +656,10 @@ void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
         if (sid.size() > 10) sid = sid.substr(0, 10);
         int batt = n.battery_level.value_or(-1);
         int hops = n.hops_away.value_or(0);
+        double dist = get_dist(n, my_lat, my_lon);
+        char dist_str[16];
+        if (dist < 999999.0) std::snprintf(dist_str, sizeof(dist_str), "%.1fkm", dist);
+        else std::snprintf(dist_str, sizeof(dist_str), "???");
 
         char buf[256];
         if (unified) {
@@ -618,13 +675,13 @@ void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
                     devices_str += dname;
                 }
             }
-            std::snprintf(buf, sizeof(buf), "  %-18s %-6s %-10s  batt=%d%%  hops=%d  [%s]",
+            std::snprintf(buf, sizeof(buf), "  %-18s %-6s %-10s  batt=%d%%  hops=%d  dist=%-7s  [%s]",
                           n.long_name.c_str(), n.short_name.c_str(),
-                          sid.c_str(), batt, hops, devices_str.c_str());
+                          sid.c_str(), batt, hops, dist_str, devices_str.c_str());
         } else {
-            std::snprintf(buf, sizeof(buf), "  %-20s %-8s %-12s  batt=%d%%  hops=%d",
+            std::snprintf(buf, sizeof(buf), "  %-20s %-8s %-12s  batt=%d%%  hops=%d  dist=%-7s",
                           n.long_name.c_str(), n.short_name.c_str(),
-                          sid.c_str(), batt, hops);
+                          sid.c_str(), batt, hops, dist_str);
         }
         if (sel) attron(COLOR_PAIR(tui_color::CHANNEL));
         mvprintw(row, 0, "%s", buf);
