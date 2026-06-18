@@ -177,17 +177,16 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
                                 uint32_t ts, const NodeDb* db,
                                 float rx_snr, uint32_t hop_start, uint32_t hop_limit) {
     int idx;
-    std::string nick;
+    std::string sender_nick = short_nick(db, from_node);
     if (broadcast) {
-        nick = short_nick(db, from_node);
         idx = ensure_channel(device, channel_idx, "");
     } else {
         uint32_t peer_node = from_node;
         if (db && from_node == db->my_node_num()) {
             peer_node = to_node;
         }
-        nick = short_nick(db, peer_node);
-        idx = ensure_dm(device, peer_node, nick);
+        std::string peer_nick = short_nick(db, peer_node);
+        idx = ensure_dm(device, peer_node, peer_nick);
     }
     Window& w = *windows_[idx - 1];
 
@@ -222,17 +221,20 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
     bool is_action = (text.size() > 2 && text[0] == '*' && text[1] == ' ');
     if (is_action) {
         std::string action = text.substr(2);
-        line.text = "[" + fmt_time(ts) + "] * " + nick + " " + action + sig;
+        line.text = "[" + fmt_time(ts) + "] * " + sender_nick + " " + action + sig;
         line.is_meta = true;
         line.color_pair = mention ? 4 : (broadcast ? 2 : 3);
     } else {
-        line.text = "[" + fmt_time(ts) + "] <" + nick + "> " + text + sig;
+        line.text = "[" + fmt_time(ts) + "] <" + sender_nick + "> " + text + sig;
         line.color_pair = mention ? 4 : (broadcast ? 2 : 3);
     }
     w.append_line(line);
 
     if (idx != current_) {
         w.bump_activity(mention ? 2 : 1);
+        if (!broadcast) {
+            append_status("*** New DM from " + sender_nick + ": " + text, 3); // 3 is tui_color::DM
+        }
     } else {
         w.mark_read();
     }

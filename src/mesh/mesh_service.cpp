@@ -443,7 +443,11 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
                     dup.window_target = e.channel_idx;
                 } else {
                     dup.window_kind = "dm";
-                    dup.window_target = e.from_node;
+                    uint32_t peer = e.from_node;
+                    if (rt->my_node_num && e.from_node == rt->my_node_num) {
+                        peer = e.to_node;
+                    }
+                    dup.window_target = peer;
                 }
                 dup.direction = "in";
                 dup.from_node = e.from_node;
@@ -465,7 +469,11 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
                 m.window_target = e.channel_idx;
             } else {
                 m.window_kind = "dm";
-                m.window_target = e.from_node;
+                uint32_t peer = e.from_node;
+                if (rt->my_node_num && e.from_node == rt->my_node_num) {
+                    peer = e.to_node;
+                }
+                m.window_target = peer;
             }
             m.direction = "in";
             m.from_node = e.from_node;

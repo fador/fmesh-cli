@@ -192,6 +192,7 @@ if(NOT WIN32)
     target_link_libraries(meshcli_core PUBLIC sdbus-c++)
 else()
     target_link_libraries(meshcli_core PUBLIC ws2_32 windowsapp)
+    target_compile_definitions(meshcli_core PUBLIC PDC_WIDE PDC_FORCE_UTF8)
 endif()
 target_include_directories(meshcli_core PUBLIC ${NCURSES_INCLUDE_DIR} ${SQLITE3_INCLUDE_DIR})
 
