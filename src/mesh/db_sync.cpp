@@ -106,9 +106,14 @@ void DbSyncManager::handle_inventory(const std::string& device, const std::strin
         mesh_.dispatch_to_ui(ev);
     }
     
-    // If we have more than them, we could proactively send a request or just data.
-    // But since TCP is bidirectional, the other side will also send an inventory,
-    // and we'll both request from each other.
+    // If we have more than them, proactively send our data to them
+    // by pretending they requested it from their max points.
+    if (local_msg > remote_msg || local_loc > remote_loc) {
+        json req;
+        req["after_message_rowid"] = remote_msg;
+        req["after_location_ts"] = remote_loc;
+        handle_request(device, req.dump());
+    }
 }
 
 void DbSyncManager::handle_request(const std::string& device, const std::string& json_str) {
@@ -116,13 +121,24 @@ void DbSyncManager::handle_request(const std::string& device, const std::string&
     int64_t after_msg = j.value("after_message_rowid", (int64_t)0);
     uint64_t after_loc = j.value("after_location_ts", (uint64_t)0);
 
-    auto msgs = db_.get_messages_after(after_msg, 50); // limit to 50
-    auto locs = db_.get_locations_after(after_loc, 50);
+    auto msgs = db_.get_messages_after(after_msg, 51); // fetch 51 to check if has_more
+    auto locs = db_.get_locations_after(after_loc, 51);
 
     if (msgs.empty() && locs.empty()) return;
 
+    bool has_more = false;
+    if (msgs.size() > 50) {
+        has_more = true;
+        msgs.pop_back(); // remove the 51st
+    }
+    if (locs.size() > 50) {
+        has_more = true;
+        locs.pop_back(); // remove the 51st
+    }
+
     json resp;
     resp["type"] = "data";
+    resp["has_more"] = has_more;
     
     json m_arr = json::array();
     for (const auto& m : msgs) {
@@ -213,6 +229,10 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             db_.insert_location(d, node_num, lat, lon, alt, ts);
             // We could emit EvNodeUpdated to UI, but UI probably re-queries DB on /nodes.
         }
+    }
+
+    if (j.value("has_more", false)) {
+        initiate_sync();
     }
 }
 
