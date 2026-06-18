@@ -40,6 +40,18 @@ using namespace std::chrono_literals;
 
 // ---- transport openers -------------------------------------------------
 
+void set_blocking(intptr_t fd, bool blocking) {
+#ifdef _WIN32
+    u_long mode = blocking ? 0 : 1;
+    ioctlsocket(fd, FIONBIO, &mode);
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (blocking) flags &= ~O_NONBLOCK;
+    else flags |= O_NONBLOCK;
+    fcntl(fd, F_SETFL, flags);
+#endif
+}
+
 intptr_t tcp_connect(const std::string& host, uint16_t port) {
 #ifdef _WIN32
     static bool wsa_init = false;
@@ -183,10 +195,14 @@ std::string StreamClient::start() {
         ::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 #endif
 
+        // Make socket blocking for TLS handshake
+        set_blocking(fd_, true);
+
         ssl_ = SSL_new(ssl_ctx_);
         SSL_set_fd(ssl_, static_cast<int>(fd_));
         if (SSL_connect(ssl_) <= 0) {
-            emit_error("SSL handshake failed");
+            emit_error("SSL handshake failed: " + std::to_string(ERR_get_error()));
+            set_blocking(fd_, false);
             return "";
         }
         std::string auth_cmd = "AUTH " + tls_user_ + " " + tls_password_ + "\n";
@@ -195,9 +211,13 @@ std::string StreamClient::start() {
         SSL_read(ssl_, resp, sizeof(resp) - 1);
         if (std::string(resp).find("OK") == std::string::npos) {
             emit_error("Mesh authentication failed");
+            set_blocking(fd_, false);
             return "";
         }
         LOG_INFO() << "Mesh TLS authentication successful";
+        
+        // Restore non-blocking mode
+        set_blocking(fd_, false);
     }
 #endif
 

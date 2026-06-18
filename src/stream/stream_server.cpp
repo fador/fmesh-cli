@@ -332,6 +332,19 @@ void StreamServer::accept_loop() {
                     ev_log.message = "MeshServer: Client authenticated from " + conn->ip;
                     emit(ev_log);
 
+                    // Remove timeouts for normal stream reading
+#ifdef _WIN32
+                    DWORD timeout_zero = 0;
+                    ::setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout_zero, sizeof(timeout_zero));
+                    ::setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout_zero, sizeof(timeout_zero));
+#else
+                    struct timeval tv_zero;
+                    tv_zero.tv_sec = 0;
+                    tv_zero.tv_usec = 0;
+                    ::setsockopt(conn->fd, SOL_SOCKET, SO_RCVTIMEO, &tv_zero, sizeof(tv_zero));
+                    ::setsockopt(conn->fd, SOL_SOCKET, SO_SNDTIMEO, &tv_zero, sizeof(tv_zero));
+#endif
+
                     // Connection established and authenticated, read framed stream
                     std::string buf;
                     buf.reserve(4096);
