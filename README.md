@@ -13,11 +13,11 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 - **Multi-device support**: connect to multiple radios simultaneously via `--device` flag or `/connect`
 - **Active device cycling**: `Ctrl+X` or `/device` switches the active device for context-sensitive commands
 - **Auto-reconnect**: per-device automatic reconnection on disconnect (up to 6 attempts, 5s intervals)
-- **Mesh Connectivity (Server/Client)**: multi-device secure mesh sharing with TLS authentication
+- **Mesh Connectivity (Server/Client)**: multi-device secure mesh sharing with TLS authentication and multiplexed database syncing
 - **Message history**: past sessions' messages reload from SQLite on startup
 - **Device config viewer**: `/config` shows LoRa, power, position, network, Bluetooth settings
 - **Raw packet view**: `/raw` displays hex dumps of received FromRadio packets, live raw window
-- **Node inspection**: `/whois` shows detailed node info (ID, HW, battery, position, SNR, flags)
+- **Node inspection**: `/whois` shows detailed node info (ID, HW, battery, position, SNR, distance, flags)
 - **Auto-pairing**: built-in `org.bluez.Agent1` that supplies the PIN automatically
 - **SQLite persistence**: messages, nodes, channels, and ACK state survive restarts
 - **PKI DM support**: public-key encryption for direct messages on recent firmware
@@ -124,7 +124,7 @@ cmake --build build -j$(nproc)
 | ↑ / ↓ or j / k | Move selection |
 | PgUp / PgDn | Page up/down |
 | Enter | Show node info + open DM window |
-| s | Cycle sort: Name → Last heard → Node ID → Battery → Hops |
+| s | Cycle sort: Name → Last heard → Node ID → Battery → Hops → Distance |
 
 **Connection wizard keys (`/scan`):**
 
@@ -161,7 +161,8 @@ cmake --build build -j$(nproc)
 | `/connect <spec>` | Connect a new device at runtime |
 | `/disconnect [id]` | Disconnect a device (no arg: list devices) |
 | `/device [id]` | Show or switch active device |
-| `/scan` | Open the interactive connection wizard (BLE scan / TCP / serial) |
+| `/scan` | Open the interactive connection wizard (BLE scan / TCP / serial / Mesh Sync) |
+| `/server [on|off]` | Open the interactive Mesh Sync Stream Server configuration dialog |
 | `/quit` | Exit |
 
 Plain text (without leading `/`) sends to the current window's target: channel broadcast or DM.
