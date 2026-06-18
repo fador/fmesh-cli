@@ -59,6 +59,13 @@ public:
     void load_nodes(const std::string& device, NodeDb& db);
     void load_channels(const std::string& device, NodeDb& db);
 
+    // --- location history ------------------------------------------------
+    void insert_location(const std::string& device, uint32_t node_num, double lat, double lon, int altitude, uint64_t ts);
+
+    // --- offline history loading -----------------------------------------
+    std::vector<std::string> get_all_devices();
+    std::vector<WindowKey> get_all_windows(const std::string& device);
+
     // --- messages ---------------------------------------------------------
     int64_t insert_message(const StoredMessage& m);
     void update_ack_state(int64_t rowid, const std::string& ack_state);

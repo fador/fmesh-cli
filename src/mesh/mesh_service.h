@@ -84,6 +84,7 @@ public:
                        bool want_ack);
 
     // --- queries for the UI ---
+    void load_offline_history();
     [[nodiscard]] std::vector<std::string> device_ids() const;
     [[nodiscard]] const NodeDb* db_for(const std::string& device_id) const;
     [[nodiscard]] std::string firmware_for(const std::string& device_id) const;
@@ -114,6 +115,7 @@ private:
     Database db_;
     mutable std::mutex devices_mu_;
     std::map<std::string, std::shared_ptr<DeviceRuntime>> devices_;
+    std::map<std::string, std::unique_ptr<NodeDb>> offline_dbs_;
 
 #ifdef ENABLE_MESH_NET
     std::unique_ptr<StreamServer> stream_server_;

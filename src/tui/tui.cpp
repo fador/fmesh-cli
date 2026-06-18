@@ -1058,6 +1058,20 @@ int TuiApp::run() {
         return 1;
     }
 
+    // Load offline history
+    service_.load_offline_history();
+    for (const auto& dev : service_.device_ids()) {
+        wm_.ensure_nodelist(dev);
+        auto windows = service_.database().get_all_windows(dev);
+        for (const auto& w : windows) {
+            if (w.kind == "channel") {
+                wm_.ensure_channel(w.device, w.target, "");
+            } else if (w.kind == "dm") {
+                wm_.ensure_dm(w.device, w.target, "");
+            }
+        }
+    }
+
     while (!quit_) {
         if (need_redraw_) {
             render();

@@ -50,6 +50,17 @@ CREATE TABLE IF NOT EXISTS messages(
 );
 CREATE INDEX IF NOT EXISTS idx_messages_window
     ON messages(device, window_kind, window_target, ts);
+CREATE TABLE IF NOT EXISTS location_history(
+    rowid       INTEGER PRIMARY KEY AUTOINCREMENT,
+    device      TEXT NOT NULL,
+    node_num    INTEGER NOT NULL,
+    latitude    REAL NOT NULL,
+    longitude   REAL NOT NULL,
+    altitude    INTEGER,
+    ts          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_location_history_node
+    ON location_history(device, node_num, ts);
 )SQL";
 
 int null_cb(void*, int, char**, char**) { return 0; }
@@ -187,6 +198,39 @@ void Database::load_channels(const std::string& device, NodeDb& db) {
     sqlite3_finalize(st);
 }
 
+// --- offline history loading -----------------------------------------------
+
+std::vector<std::string> Database::get_all_devices() {
+    std::vector<std::string> out;
+    if (!db_) return out;
+    const char* sql = "SELECT DISTINCT device FROM messages UNION SELECT DISTINCT device FROM nodes UNION SELECT DISTINCT device FROM channels";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        if (auto* p = sqlite3_column_text(st, 0)) out.push_back(reinterpret_cast<const char*>(p));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::vector<WindowKey> Database::get_all_windows(const std::string& device) {
+    std::vector<WindowKey> out;
+    if (!db_) return out;
+    const char* sql = "SELECT DISTINCT window_kind, window_target FROM messages WHERE device=?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        WindowKey w;
+        w.device = device;
+        if (auto* p = sqlite3_column_text(st, 0)) w.kind = reinterpret_cast<const char*>(p);
+        w.target = static_cast<uint32_t>(sqlite3_column_int64(st, 1));
+        out.push_back(std::move(w));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
 // --- messages --------------------------------------------------------------
 
 int64_t Database::insert_message(const StoredMessage& m) {
@@ -293,6 +337,24 @@ std::optional<StoredMessage> Database::find_by_packet_id(uint32_t packet_id) {
 void Database::checkpoint() {
     if (!db_) return;
     sqlite3_exec(db_, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr);
+}
+
+// --- location history ------------------------------------------------------
+
+void Database::insert_location(const std::string& device, uint32_t node_num, double lat, double lon, int altitude, uint64_t ts) {
+    if (!db_) return;
+    const char* sql = "INSERT INTO location_history(device,node_num,latitude,longitude,altitude,ts) VALUES(?,?,?,?,?,?)";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return;
+    sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, node_num);
+    sqlite3_bind_double(st, 3, lat);
+    sqlite3_bind_double(st, 4, lon);
+    sqlite3_bind_int(st, 5, altitude);
+    sqlite3_bind_int64(st, 6, ts);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    maybe_checkpoint();
 }
 
 void Database::maybe_checkpoint() {

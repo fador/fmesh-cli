@@ -349,19 +349,38 @@ uint32_t MeshService::send_text(const std::string& device_id,
     return pid;
 }
 
+void MeshService::load_offline_history() {
+    auto devs = db_.get_all_devices();
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    for (const auto& d : devs) {
+        if (devices_.find(d) == devices_.end() && offline_dbs_.find(d) == offline_dbs_.end()) {
+            auto ndb = std::make_unique<NodeDb>();
+            db_.load_nodes(d, *ndb);
+            db_.load_channels(d, *ndb);
+            offline_dbs_[d] = std::move(ndb);
+            LOG_INFO() << "loaded offline history for device " << d;
+        }
+    }
+}
+
 std::vector<std::string> MeshService::device_ids() const {
     std::vector<std::string> out;
     std::lock_guard<std::mutex> lock(devices_mu_);
-    out.reserve(devices_.size());
+    out.reserve(devices_.size() + offline_dbs_.size());
     for (const auto& [id, _] : devices_) out.push_back(id);
+    for (const auto& [id, _] : offline_dbs_) {
+        if (devices_.find(id) == devices_.end()) out.push_back(id);
+    }
     return out;
 }
 
 const NodeDb* MeshService::db_for(const std::string& device_id) const {
     std::lock_guard<std::mutex> lock(devices_mu_);
     auto it = devices_.find(device_id);
-    if (it == devices_.end()) return nullptr;
-    return it->second->db.get();
+    if (it != devices_.end()) return it->second->db.get();
+    auto it2 = offline_dbs_.find(device_id);
+    if (it2 != offline_dbs_.end()) return it2->second.get();
+    return nullptr;
 }
 
 std::string MeshService::firmware_for(const std::string& device_id) const {
@@ -427,6 +446,14 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
             rt->db->upsert_node(e.node);
             db_.upsert_node(e.device, e.node);
+            if (e.node.latitude.has_value() || e.node.longitude.has_value()) {
+                uint64_t ts = e.node.last_heard.value_or(0);
+                if (ts == 0) ts = static_cast<uint64_t>(std::time(nullptr));
+                db_.insert_location(e.device, e.node.node_num, 
+                                    e.node.latitude.value_or(0.0), 
+                                    e.node.longitude.value_or(0.0), 
+                                    e.node.altitude.value_or(0), ts);
+            }
         } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
             rt->db->upsert_channel(e.channel);
             db_.upsert_channel(e.device, e.channel);
