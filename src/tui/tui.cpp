@@ -204,12 +204,7 @@ void TuiApp::start_scan() {
     scan_complete_ = false;
     scan_running_ = true;
     BleClient::scan_async(15, [this](const std::string& name, const std::string& addr) {
-        // Deduplicate
-        bool dup = false;
-        for (auto& e : scan_entries_) {
-            if (e.address == addr) { dup = true; break; }
-        }
-        if (dup) return;
+        // Dedup is done on the TUI thread in the event handler.
         EvBleDeviceFound ev;
         ev.device = addr; // using addr as device_path abstraction
         ev.name = name;
@@ -297,14 +292,14 @@ bool TuiApp::handle_wizard_key(int ch) {
                 service_.connect_device(spec, false);
             }
             exit_wizard();
-        } else if (ch == KEY_UP || ch == 'k') {
+        } else if (ch == KEY_UP || ch == 'k' || ch == KEY_LEFT) {
             if (scan_selection_ > 0) {
                 --scan_selection_;
                 if (scan_selection_ < scan_entries_offset_)
                     scan_entries_offset_ = scan_selection_;
                 need_redraw_ = true;
             }
-        } else if (ch == KEY_DOWN || ch == 'j') {
+        } else if (ch == KEY_DOWN || ch == 'j' || ch == KEY_RIGHT) {
             if (static_cast<size_t>(scan_selection_ + 1) < scan_entries_.size()) {
                 ++scan_selection_;
                 int max_lines = std::max(1, LINES - 7);
@@ -918,7 +913,7 @@ void TuiApp::render_wizard_ble() {
                 attron(A_REVERSE);
                 mvprintw(y, cx, "> %-24s %s", e.name.c_str(), e.address.c_str());
                 if (e.rssi != 0) printw("  %d dBm", e.rssi);
-    attroff(COLOR_PAIR(tui_color::TITLE));
+    attroff(A_REVERSE);
             } else {
                 mvprintw(y, cx, "  %-24s %s", e.name.c_str(), e.address.c_str());
                 if (e.rssi != 0) printw("  %d dBm", e.rssi);
@@ -1348,12 +1343,19 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             if (e.scan_complete) {
                 scan_complete_ = true;
             } else {
-                BleScanEntry entry;
-                entry.name = e.name;
-                entry.address = e.address;
-                entry.device_path = e.device;
-                entry.rssi = e.rssi;
-                scan_entries_.push_back(std::move(entry));
+                // Deduplicate on the TUI thread (safe, single-threaded access).
+                bool dup = false;
+                for (const auto& existing : scan_entries_) {
+                    if (existing.address == e.address) { dup = true; break; }
+                }
+                if (!dup) {
+                    BleScanEntry entry;
+                    entry.name = e.name;
+                    entry.address = e.address;
+                    entry.device_path = e.device;
+                    entry.rssi = e.rssi;
+                    scan_entries_.push_back(std::move(entry));
+                }
             }
         }
     }, ev);
