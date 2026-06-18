@@ -419,6 +419,11 @@ void StreamClient::read_loop() {
                 state = WaitStart1;
 
                 if (frame_type == 0xC3) {
+                    EvRawRxBytes rx_ev;
+                    rx_ev.device = device_id_;
+                    rx_ev.bytes = payload;
+                    emit(rx_ev);
+
                     // Decode and emit Meshtastic proto
                     uint32_t config_id = 0;
                     auto ev = MeshCodec::decode_from_radio(payload, device_id_, config_id);
