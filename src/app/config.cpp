@@ -14,7 +14,12 @@ namespace meshcli {
 namespace {
 std::string home_dir() {
     const char* h = std::getenv("HOME");
-    return h ? std::string(h) : "/tmp";
+    if (h) return std::string(h);
+#ifdef _WIN32
+    const char* up = std::getenv("USERPROFILE");
+    if (up) return std::string(up);
+#endif
+    return "/tmp";
 }
 std::string default_data_dir() { return home_dir() + "/.local/share/fmesh-cli"; }
 } // namespace
