@@ -73,6 +73,10 @@ private:
     void render_nodelist(const Window& w, int top, int height, int width);
     bool handle_nodelist_key(int ch);
 
+    // --- popup ---
+    void render_popup();
+    bool handle_popup_key(int ch);
+
     // --- themes ---
     [[nodiscard]] const ColorTheme& current_theme() const { return *current_theme_; }
     bool set_theme(const std::string& name);
@@ -121,6 +125,12 @@ private:
     int nodelist_cursor_ = 0;
     int nodelist_offset_ = 0;
     NodeListSort nodelist_sort_ = NodeListSort::Name;
+
+    // --- popup state ---
+    bool popup_active_ = false;
+    std::string popup_device_;
+    Node popup_node_;
+    int popup_selection_ = 0;  // 0=Send DM, 1=Close
 
     // --- theming ---
     const ColorTheme* current_theme_ = nullptr;
