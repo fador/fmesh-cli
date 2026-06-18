@@ -153,6 +153,27 @@ bool MeshService::reconnect_device(const std::string& device_id) {
     return true;
 }
 
+bool MeshService::disconnect_device(const std::string& device_id) {
+    std::shared_ptr<DeviceRuntime> rt;
+    {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        auto it = devices_.find(device_id);
+        if (it == devices_.end()) return false;
+        rt = it->second;
+        devices_.erase(it);
+    }
+    if (rt->client) {
+        rt->client->send_to_radio(MeshCodec::encode_disconnect());
+        rt->client->stop();
+    }
+    if (rt->stream) {
+        rt->stream->send_to_radio(MeshCodec::encode_disconnect());
+        rt->stream->stop();
+    }
+    LOG_INFO() << "disconnected " << device_id;
+    return true;
+}
+
 void MeshService::disconnect_all() {
     std::map<std::string, std::shared_ptr<DeviceRuntime>> tmp;
     {

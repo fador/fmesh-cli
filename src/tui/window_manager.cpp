@@ -69,16 +69,26 @@ int WindowManager::ensure_status(const std::string& device) {
 std::string WindowManager::channel_title(const std::string& device,
                                          uint32_t idx,
                                          const std::string& name) {
-    (void)device;
-    if (!name.empty()) return "#" + name;
-    return "#ch" + std::to_string(idx);
+    std::string base;
+    if (!name.empty()) base = "#" + name;
+    else base = "#ch" + std::to_string(idx);
+    if (service_.device_ids().size() > 1) {
+        std::string dname = service_.display_name_for(device);
+        if (!dname.empty()) base += " @" + dname;
+    }
+    return base;
 }
 
 std::string WindowManager::dm_title(const std::string& device, uint32_t node,
                                     const std::string& nick) {
-    (void)device;
-    if (!nick.empty()) return nick;
-    return node_num_to_id(node);
+    std::string base;
+    if (!nick.empty()) base = nick;
+    else base = node_num_to_id(node);
+    if (service_.device_ids().size() > 1) {
+        std::string dname = service_.display_name_for(device);
+        if (!dname.empty()) base += " @" + dname;
+    }
+    return base;
 }
 
 int WindowManager::ensure_channel(const std::string& device, uint32_t idx,

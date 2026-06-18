@@ -53,6 +53,8 @@ private:
     void cmd_stats();
     void cmd_topic();
     void cmd_lastlog(const std::vector<std::string>& args);
+    void cmd_connect(const std::vector<std::string>& args);
+    void cmd_disconnect(const std::vector<std::string>& args);
 };
 
 } // namespace meshcli

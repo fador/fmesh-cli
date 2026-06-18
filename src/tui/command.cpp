@@ -1,5 +1,6 @@
 #include "command.h"
 
+#include "app/config.h"
 #include "colors.h"
 #include "mesh/mesh_service.h"
 #include "window_manager.h"
@@ -74,6 +75,8 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "stats" || cmd == "st")    cmd_stats();
     else if (cmd == "topic" || cmd == "t")     cmd_topic();
     else if (cmd == "lastlog" || cmd == "l")   cmd_lastlog(tokens);
+    else if (cmd == "connect")                cmd_connect(tokens);
+    else if (cmd == "disconnect" || cmd == "dc") cmd_disconnect(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -100,6 +103,12 @@ void CommandDispatcher::cmd_help() {
     status_("  /stats                show packet statistics", tui_color::INFO);
     status_("  /topic                show current channel details", tui_color::INFO);
     status_("  /lastlog <pattern>    search scrollback for pattern", tui_color::INFO);
+    status_("  /connect <spec>       connect a new device at runtime", tui_color::INFO);
+    status_("                        spec: ble:<name>[:<pin>]", tui_color::INFO);
+    status_("                              addr:<mac>[:<pin>]", tui_color::INFO);
+    status_("                              tcp:<host>[:<port>]", tui_color::INFO);
+    status_("                              serial:<path>[:<baud>]", tui_color::INFO);
+    status_("  /disconnect [id]      disconnect a device (no arg: list IDs)", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", tui_color::INFO);
 }
@@ -575,6 +584,54 @@ void CommandDispatcher::cmd_me(const std::vector<std::string>& args) {
     }
     const NodeDb* db = service_.db_for(tgt->device);
     wm_.append_outgoing(tgt->device, tgt->kind, tgt->target, "* " + text, db);
+}
+
+void CommandDispatcher::cmd_connect(const std::vector<std::string>& args) {
+    if (args.empty()) {
+        status_("Usage: /connect <spec>", tui_color::ERROR);
+        status_("  ble:<name>[:<pin>]  addr:<mac>[:<pin>]", tui_color::INFO);
+        status_("  tcp:<host>[:<port>]  serial:<path>[:<baud>]", tui_color::INFO);
+        return;
+    }
+    BleDeviceSpec spec;
+    if (!parse_device_spec(args[0], spec)) {
+        status_("Invalid spec: " + args[0], tui_color::ERROR);
+        return;
+    }
+    std::string id = service_.connect_device(spec, false);
+    if (id.empty()) {
+        status_("Failed to connect to " + args[0], tui_color::ERROR);
+    } else {
+        status_("Connected to " + args[0] + " (" + id + ")", tui_color::INFO);
+    }
+}
+
+void CommandDispatcher::cmd_disconnect(const std::vector<std::string>& args) {
+    auto devices = service_.device_ids();
+    if (devices.empty()) {
+        status_("(no devices connected)", tui_color::ERROR);
+        return;
+    }
+    if (args.empty()) {
+        status_("Connected devices:", tui_color::INFO);
+        for (const auto& id : devices)
+            status_("  " + id + "  " + service_.display_name_for(id), tui_color::CHANNEL);
+        status_("Usage: /disconnect <id>", tui_color::INFO);
+        return;
+    }
+    std::string id = args[0];
+    // Allow partial match on device ID.
+    for (const auto& did : devices) {
+        if (did.find(id) != std::string::npos || id == did) {
+            if (service_.disconnect_device(did)) {
+                status_("Disconnected " + did, tui_color::INFO);
+            } else {
+                status_("Failed to disconnect " + did, tui_color::ERROR);
+            }
+            return;
+        }
+    }
+    status_("No device matched: " + id, tui_color::ERROR);
 }
 
 } // namespace meshcli

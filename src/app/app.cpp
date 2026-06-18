@@ -29,9 +29,6 @@ int run_app(int argc, char** argv, MeshService& service) {
 
     Logger::instance().init(cfg.log_path, /*console=*/true,
                             cfg.log_debug ? LogLevel::Trace : LogLevel::Info);
-    LOG_INFO() << "mesh-cli starting (device=" << cfg.device_name
-               << " addr=" << (cfg.device_addr.empty() ? "(scan)" : cfg.device_addr)
-               << " pair=" << cfg.pair << ")";
 
     if (!service.open_database(cfg.db_path)) {
         std::fprintf(stderr, "error: cannot open database at %s\n", cfg.db_path.c_str());
@@ -47,33 +44,61 @@ int run_app(int argc, char** argv, MeshService& service) {
     EventFd wake;
     service.set_event_sink(&queue, &wake);
 
-    // Connect to the device. The BLE handshake now runs synchronously so the
-    // caller knows immediately whether the connection succeeded.
-    BleDeviceSpec spec;
-    spec.name = cfg.device_name;
-    spec.address = cfg.device_addr;
-    spec.pin = cfg.pin;
-    spec.tcp_host = cfg.tcp_host;
-    spec.serial_port = cfg.serial_port;
-    spec.serial_baud = cfg.serial_baud;
-    std::string device_id = service.connect_device(spec, cfg.pair);
-    if (device_id.empty()) {
-        // Drain any error events to stderr so the user sees why.
-        for (auto& ev : queue.drain_all()) {
-            std::visit([](const auto& e) {
-                using T = std::decay_t<decltype(e)>;
-                if constexpr (std::is_same_v<T, EvError>)
-                    std::fprintf(stderr, "error: %s\n", e.message.c_str());
-                else if constexpr (std::is_same_v<T, EvDisconnected>)
-                    std::fprintf(stderr, "disconnected: %s\n", e.reason.c_str());
-            }, ev);
+    // Connect to each device specified. If --device flags were used, use
+    // those; otherwise fall back to legacy single-device flags.
+    std::vector<BleDeviceSpec> specs;
+    if (!cfg.devices.empty()) {
+        specs = std::move(cfg.devices);
+    } else {
+        BleDeviceSpec spec;
+        spec.name = cfg.device_name;
+        spec.address = cfg.device_addr;
+        spec.pin = cfg.pin;
+        spec.tcp_host = cfg.tcp_host;
+        spec.serial_port = cfg.serial_port;
+        spec.serial_baud = cfg.serial_baud;
+        specs.push_back(std::move(spec));
+    }
+
+    LOG_INFO() << "mesh-cli starting"
+               << " devices=" << specs.size()
+               << " pair=" << cfg.pair;
+
+    int connected = 0;
+    for (const auto& spec : specs) {
+        LOG_INFO() << "connecting to " << spec.name
+                   << (spec.address.empty() ? "" : " (" + spec.address + ")")
+                   << (spec.tcp_host.empty() ? "" : " tcp=" + spec.tcp_host)
+                   << (spec.serial_port.empty() ? "" : " serial=" + spec.serial_port);
+        std::string device_id = service.connect_device(spec, cfg.pair);
+        if (device_id.empty()) {
+            LOG_ERROR() << "failed to connect to " << spec.name;
+            // Drain error events to stderr so the user sees why.
+            for (auto& ev : queue.drain_all()) {
+                std::visit([](const auto& e) {
+                    using T = std::decay_t<decltype(e)>;
+                    if constexpr (std::is_same_v<T, EvError>)
+                        std::fprintf(stderr, "error: %s\n", e.message.c_str());
+                    else if constexpr (std::is_same_v<T, EvDisconnected>)
+                        std::fprintf(stderr, "disconnected: %s\n", e.reason.c_str());
+                }, ev);
+            }
+            continue;
         }
+        std::printf("connected to %s (%s)\n",
+                    spec.name.empty() ? spec.tcp_host : spec.name.c_str(),
+                    device_id.c_str());
+        ++connected;
+    }
+
+    if (connected == 0) {
         if (cfg.list_only) return 0;
         return 1;
     }
 
     if (cfg.list_only) {
-        std::printf("connected to %s (%s)\n", spec.name.c_str(), device_id.c_str());
+        for (const auto& id : service.device_ids())
+            std::printf("  device: %s (%s)\n", id.c_str(), service.display_name_for(id).c_str());
         service.disconnect_all();
         return 0;
     }

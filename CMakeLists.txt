@@ -122,6 +122,7 @@ add_executable(mesh-cli-tests
     tests/test_robustness_stream.cpp
     tests/test_robustness_db.cpp
     tests/test_robustness_edge.cpp
+    src/app/config.cpp
 )
 target_link_libraries(mesh-cli-tests PRIVATE meshcli_tui)
 target_include_directories(mesh-cli-tests PRIVATE src ${GENERATED_PROTO_DIR} tests)

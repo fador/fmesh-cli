@@ -21,6 +21,8 @@
 
 namespace meshcli {
 
+time_t TuiApp::s_last_reconnect_attempt = 0;
+
 namespace {
 
 } // namespace
@@ -100,34 +102,50 @@ std::string TuiApp::connection_info() const {
 }
 
 void TuiApp::maybe_reconnect() {
-    if (reconnect_device_id_.empty()) return;
+    if (reconnect_attempts_.empty()) return;
 
-    static time_t last_attempt = 0;
     time_t now = std::time(nullptr);
-    if (now - last_attempt < kReconnectIntervalS) return;
-    last_attempt = now;
+    if (now - s_last_reconnect_attempt < kReconnectIntervalS) return;
+    s_last_reconnect_attempt = now;
 
-    ++reconnect_attempt_;
-    if (reconnect_attempt_ > reconnect_max_attempts_) {
-        wm_.append_status("*** Auto-reconnect gave up after " +
-                          std::to_string(reconnect_max_attempts_) + " attempts",
-                          tui_color::ERROR);
-        reconnect_device_id_.clear();
-        reconnect_attempt_ = 0;
+    auto ids = service_.device_ids();
+    std::vector<std::string> to_remove;
+
+    for (auto& [device_id, attempts] : reconnect_attempts_) {
+        // Skip if device reconnected on its own.
+        bool already = false;
+        for (const auto& id : ids)
+            if (id == device_id) { already = true; break; }
+        if (already) {
+            wm_.append_status("*** " + device_id + " reconnected", tui_color::INFO);
+            to_remove.push_back(device_id);
+            continue;
+        }
+
+        ++attempts;
+        if (attempts > reconnect_max_attempts_) {
+            wm_.append_status("*** Auto-reconnect gave up for " + device_id
+                              + " after " + std::to_string(reconnect_max_attempts_) + " attempts",
+                              tui_color::ERROR);
+            to_remove.push_back(device_id);
+            continue;
+        }
+
+        wm_.append_status("*** Reconnect attempt " +
+                          std::to_string(attempts) + "/" +
+                          std::to_string(reconnect_max_attempts_) +
+                          " for " + device_id + "...",
+                          tui_color::INFO);
+        if (service_.reconnect_device(device_id)) {
+            wm_.append_status("*** " + device_id + " reconnected!", tui_color::INFO);
+            to_remove.push_back(device_id);
+        }
+    }
+
+    for (const auto& id : to_remove)
+        reconnect_attempts_.erase(id);
+    if (!to_remove.empty())
         need_redraw_ = true;
-        return;
-    }
-
-    wm_.append_status("*** Reconnect attempt " +
-                      std::to_string(reconnect_attempt_) + "/" +
-                      std::to_string(reconnect_max_attempts_) + "...",
-                      tui_color::INFO);
-    if (service_.reconnect_device(reconnect_device_id_)) {
-        wm_.append_status("*** Reconnected!", tui_color::INFO);
-        reconnect_device_id_.clear();
-        reconnect_attempt_ = 0;
-    }
-    need_redraw_ = true;
 }
 
 int TuiApp::run() {
@@ -241,10 +259,10 @@ void TuiApp::handle_event(const MeshEvent& ev) {
         } else if constexpr (std::is_same_v<T, EvDisconnected>) {
             wm_.append_status("*** Disconnected: " + e.reason, tui_color::ERROR);
             // Start auto-reconnect for this device.
-            if (reconnect_device_id_.empty()) {
-                reconnect_device_id_ = e.device;
-                reconnect_attempt_ = 0;
-                wm_.append_status("*** Auto-reconnect in " +
+            if (reconnect_attempts_.find(e.device) == reconnect_attempts_.end()) {
+                reconnect_attempts_[e.device] = 0;
+                s_last_reconnect_attempt = std::time(nullptr);
+                wm_.append_status("*** Auto-reconnect for " + e.device + " in " +
                                   std::to_string(reconnect_delay_s_) + "s...",
                                   tui_color::INFO);
             }

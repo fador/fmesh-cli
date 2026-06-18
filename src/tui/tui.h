@@ -7,6 +7,7 @@
 #include "window_manager.h"
 
 #include <atomic>
+#include <map>
 #include <string>
 
 namespace meshcli {
@@ -50,12 +51,12 @@ private:
     bool need_redraw_ = true;
     std::string history_path_;
 
-    // Auto-reconnect state
-    std::string reconnect_device_id_;
-    int reconnect_attempt_ = 0;
-    int reconnect_delay_s_ = 5;     // seconds between attempts
-    int reconnect_max_attempts_ = 6; // give up after ~30s
+    // Auto-reconnect state (per-device attempt counters)
+    std::map<std::string, int> reconnect_attempts_;
+    int reconnect_delay_s_ = 5;
+    int reconnect_max_attempts_ = 6;
     static constexpr int kReconnectIntervalS = 5;
+    static time_t s_last_reconnect_attempt;
 };
 
 } // namespace meshcli

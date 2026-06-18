@@ -57,6 +57,9 @@ public:
     // times for different devices.
     std::string connect_device(const BleDeviceSpec& spec, bool pair);
 
+    // Disconnect a single device. Returns false if the device id is unknown.
+    bool disconnect_device(const std::string& device_id);
+
     // Disconnect everything.
     void disconnect_all();
 

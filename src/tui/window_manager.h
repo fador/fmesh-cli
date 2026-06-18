@@ -64,10 +64,10 @@ public:
 private:
     int add_window(std::unique_ptr<Window> w);
     void load_history(int window_idx);
-    static std::string channel_title(const std::string& device, uint32_t idx,
-                                     const std::string& name);
-    static std::string dm_title(const std::string& device, uint32_t node,
-                                const std::string& nick);
+    std::string channel_title(const std::string& device, uint32_t idx,
+                              const std::string& name);
+    std::string dm_title(const std::string& device, uint32_t node,
+                         const std::string& nick);
 
     MeshService& service_;
     std::vector<std::unique_ptr<Window>> windows_;
