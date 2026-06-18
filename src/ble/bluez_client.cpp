@@ -157,7 +157,7 @@ void BluezClient::initial_handshake() {
     // The event loop is already running, so FROMNUM notifications also
     // trigger drain_from_radio() which processes data on the BLE thread.
     bool got_config = false;
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (running_ && !got_config && std::chrono::steady_clock::now() < deadline) {
         try {
             auto bytes = read_char(fromradio_path_);
@@ -174,13 +174,13 @@ void BluezClient::initial_handshake() {
         } catch (const sdbus::Error& e) {
             LOG_DEBUG() << "FROMRADIO read during handshake: " << e.what();
         }
-        std::this_thread::sleep_for(200ms);
+        std::this_thread::sleep_for(50ms);
     }
 
     // Give the event loop one more cycle to drain any remaining data.
     if (got_config) {
         LOG_DEBUG() << "config handshake complete, draining residual...";
-        for (int i = 0; i < 5 && running_; ++i) {
+        for (int i = 0; i < 50 && running_; ++i) {
             try {
                 auto bytes = read_char(fromradio_path_);
                 if (!bytes.empty()) {
@@ -189,7 +189,7 @@ void BluezClient::initial_handshake() {
                     if (ev) emit(*ev);
                 }
             } catch (const sdbus::Error&) {}
-            std::this_thread::sleep_for(100ms);
+            std::this_thread::sleep_for(20ms);
         }
     }
 }
@@ -549,6 +549,7 @@ void BluezClient::subscribe_notifications() {
 void BluezClient::drain_from_radio() {
     if (fromradio_path_.empty()) return;
     int msgs = 0;
+    int errors = 0;
     while (running_) {
         std::string bytes;
         {
@@ -557,10 +558,14 @@ void BluezClient::drain_from_radio() {
             try {
                 bytes = read_char_locked(fromradio_path_);
             } catch (const sdbus::Error& e) {
-                LOG_WARN() << "FROMRADIO read error: " << e.what();
-                return;
+                LOG_DEBUG() << "FROMRADIO read error: " << e.what();
+                ++errors;
+                if (errors > 3) return;
+                std::this_thread::sleep_for(100ms);
+                continue;
             }
         }
+        errors = 0;
         if (bytes.empty()) {
             if (msgs > 0) LOG_DEBUG() << "drained " << msgs << " FromRadio messages";
             return;
@@ -591,9 +596,11 @@ std::string BluezClient::read_char_locked(const std::string& path) {
     else if (!conn_) return {};
     else { tmp = sdbus::createProxy(*conn_, "org.bluez", path); ch = tmp.get(); }
     std::vector<uint8_t> result;
+    std::map<std::string, sdbus::Variant> opts;
+    opts["offset"] = sdbus::Variant{uint16_t(0)};  // enable long-read (Read Blob)
     ch->callMethod("ReadValue")
         .onInterface("org.bluez.GattCharacteristic1")
-        .withArguments(std::map<std::string, sdbus::Variant>{})
+        .withArguments(opts)
         .storeResultsTo(result);
     return std::string(result.begin(), result.end());
 }
