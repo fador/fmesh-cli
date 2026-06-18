@@ -21,7 +21,7 @@ public:
         wm_.clear();
         char tmppath[256];
         std::snprintf(tmppath, sizeof(tmppath),
-                      "/tmp/mesh-cli-cmd-db-%d.db",
+                      "/tmp/fmesh-cli-cmd-db-%d.db",
                       static_cast<int>(std::random_device{}()));
         db_path_ = tmppath;
         std::remove(db_path_.c_str());

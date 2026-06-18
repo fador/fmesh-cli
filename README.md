@@ -1,4 +1,4 @@
-# mesh-cli
+# fmesh-cli
 
 An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) devices, written in C++17 with ncurses.
 
@@ -40,8 +40,8 @@ sudo usermod -aG bluetooth $USER   # then re-login
 ### Compile
 
 ```sh
-git clone --recurse-submodules <repo-url> mesh-cli
-cd mesh-cli
+git clone --recurse-submodules <repo-url> fmesh-cli
+cd fmesh-cli
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
@@ -49,42 +49,42 @@ cmake --build build -j$(nproc)
 ### Run tests
 
 ```sh
-./build/mesh-cli-tests
+./build/fmesh-cli-tests
 ```
 
 ## Usage
 
 ```sh
 # Connect to the default test device (Fad3_0330, PIN 123456)
-./build/mesh-cli
+./build/fmesh-cli
 
 # Pair first, then connect
-./build/mesh-cli pair
+./build/fmesh-cli pair
 
 # Specify a different device
-./build/mesh-cli --name MyNode --pin 000000
+./build/fmesh-cli --name MyNode --pin 000000
 
 # Skip scanning by providing the MAC directly
-./build/mesh-cli --addr 1C:DB:D4:A7:03:31
+./build/fmesh-cli --addr 1C:DB:D4:A7:03:31
 
 # Scan for BLE devices and exit
-./build/mesh-cli --scan
+./build/fmesh-cli --scan
 
 # Headless mode (for testing — logs events, no TUI)
-./build/mesh-cli --headless --debug
+./build/fmesh-cli --headless --debug
 
 # Verbose logging
-./build/mesh-cli --debug
+./build/fmesh-cli --debug
 
 # Connect via TCP (e.g. Meshtastic device on WiFi, port 4403)
-./build/mesh-cli --tcp 192.168.1.50:4403
+./build/fmesh-cli --tcp 192.168.1.50:4403
 
 # Connect via serial port
-./build/mesh-cli --serial /dev/ttyUSB0
-./build/mesh-cli --serial /dev/ttyACM0 --serial-baud 921600
+./build/fmesh-cli --serial /dev/ttyUSB0
+./build/fmesh-cli --serial /dev/ttyACM0 --serial-baud 921600
 
 # Multi-device: connect to several devices at once
-./build/mesh-cli --device ble:NodeA:123456 --device tcp:192.168.1.50 --device serial:/dev/ttyUSB0
+./build/fmesh-cli --device ble:NodeA:123456 --device tcp:192.168.1.50 --device serial:/dev/ttyUSB0
 
 # Device spec formats:
 #   ble:<name>[:<pin>]      addr:<mac>[:<pin>]
@@ -190,17 +190,17 @@ The BLE layer talks the Meshtastic wire protocol directly (protobuf over GATT), 
 
 ## Data storage
 
-- Database: `~/.local/share/mesh-cli/mesh.db`
-- Log: `~/.local/share/mesh-cli/mesh-cli.log`
+- Database: `~/.local/share/fmesh-cli/mesh.db`
+- Log: `~/.local/share/fmesh-cli/fmesh-cli.log`
 
 ## Testing
 
 ```sh
 # Unit tests (no device required)
-./build/mesh-cli-tests
+./build/fmesh-cli-tests
 
 # Live integration test (requires a paired device in range)
-./build/mesh-cli-live
+./build/fmesh-cli-live
 ```
 
 The live test connects to the configured device, sends a channel broadcast
@@ -208,8 +208,8 @@ and a DM, and verifies the outgoing messages are persisted to SQLite.
 
 ## Known issues
 
-- BLE connections can be unreliable if the device isn't paired. Use `mesh-cli pair` to establish a bond first.
-- Meshtastic firmware holds a single bond; if the device is paired to a phone, pairing from mesh-cli will fail with `AuthenticationFailed`. Remove the bond on the phone first, then run `mesh-cli pair`.
+- BLE connections can be unreliable if the device isn't paired. Use `fmesh-cli pair` to establish a bond first.
+- Meshtastic firmware holds a single bond; if the device is paired to a phone, pairing from fmesh-cli will fail with `AuthenticationFailed`. Remove the bond on the phone first, then run `fmesh-cli pair`.
 - The `le-connection-abort-by-local` error on first connect is common; the client retries automatically.
 - If GATT operations time out, the device may have dropped the connection. Use `/reconnect` or restart.
 

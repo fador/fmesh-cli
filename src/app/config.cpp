@@ -15,7 +15,7 @@ std::string home_dir() {
     const char* h = std::getenv("HOME");
     return h ? std::string(h) : "/tmp";
 }
-std::string default_data_dir() { return home_dir() + "/.local/share/mesh-cli"; }
+std::string default_data_dir() { return home_dir() + "/.local/share/fmesh-cli"; }
 } // namespace
 
 bool parse_device_spec(const std::string& spec, BleDeviceSpec& out) {
@@ -76,8 +76,8 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
         const char* v = nullptr;
         if (a == "--help" || a == "-h") {
             std::printf(
-                "mesh-cli - irssi-style Meshtastic terminal client\n\n"
-                "Usage: mesh-cli [options] [pair]\n\n"
+                "fmesh-cli - irssi-style Meshtastic terminal client\n\n"
+                "Usage: fmesh-cli [options] [pair]\n\n"
                 "Connection options:\n"
                 "  --name <name>     BLE device name (default: %s)\n"
                 "  --addr <mac>      explicit BLE MAC address\n"
@@ -171,7 +171,7 @@ void finalize_paths(AppConfig& c) {
     ::mkdir(dir.c_str(), 0755);
 #endif
     if (c.db_path.empty())  c.db_path  = dir + "/mesh.db";
-    if (c.log_path.empty()) c.log_path = dir + "/mesh-cli.log";
+    if (c.log_path.empty()) c.log_path = dir + "/fmesh-cli.log";
     if (c.history_path.empty()) c.history_path = dir + "/history";
 }
 

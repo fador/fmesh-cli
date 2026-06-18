@@ -1,5 +1,11 @@
 #include "mesh_service.h"
 
+#ifdef _WIN32
+#include "ble/win_ble_client.h"
+#else
+#include "ble/bluez_client.h"
+#endif
+
 #include "mesh/mesh_codec.h"
 #include "util/log.h"
 
@@ -94,17 +100,13 @@ std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
         id = rt->stream->start();
     } else {
         // --- BLE transport (default) ---
-#ifndef _WIN32
+#ifdef _WIN32
+        rt->client = std::make_unique<WinBleClient>(spec, std::move(sink));
+#else
         rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
+#endif
         id = rt->client->start(pair);
         if (id.empty()) return {};
-#else
-        EvError ev;
-        ev.device = "";
-        ev.message = "BLE is not supported on Windows yet.";
-        dispatch_to_ui(std::move(ev));
-        return {};
-#endif
     }
 
     std::lock_guard<std::mutex> lock(devices_mu_);
@@ -128,9 +130,7 @@ bool MeshService::reconnect_device(const std::string& device_id) {
     }
 
     // Stop the old transport.
-#ifndef _WIN32
     if (rt->client) { rt->client->stop(); rt->client.reset(); }
-#endif
     if (rt->stream) { rt->stream->stop(); rt->stream.reset(); }
 
     // Recreate the event sink.
@@ -155,13 +155,13 @@ bool MeshService::reconnect_device(const std::string& device_id) {
         rt->stream = std::make_unique<StreamClient>(fd, "serial:" + spec.serial_port, std::move(sink));
         new_id = rt->stream->start();
     } else {
-#ifndef _WIN32
+#ifdef _WIN32
+        rt->client = std::make_unique<WinBleClient>(spec, std::move(sink));
+#else
         rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
+#endif
         new_id = rt->client->start(/*pair=*/false);
         if (new_id.empty()) return false;
-#else
-        return false;
-#endif
     }
 
     // Update the map key if the device path changed.

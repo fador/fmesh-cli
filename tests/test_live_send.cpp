@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
                 db->all().size(), db->channels().size());
 
     // --- Test 1: channel broadcast on ch0 ---
-    std::string test_msg = "mesh-cli live test broadcast " +
+    std::string test_msg = "fmesh-cli live test broadcast " +
                            std::to_string(std::chrono::system_clock::now()
                                               .time_since_epoch().count());
     uint32_t pid1 = service.send_text(id, kBroadcastNodeNum, 0, test_msg, true);
@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
 
     // --- Test 2: DM to ourselves (loopback test) ---
     uint32_t me = db->my_node_num();
-    std::string dm_msg = "mesh-cli live test DM";
+    std::string dm_msg = "fmesh-cli live test DM";
     uint32_t pid2 = service.send_text(id, me, 0, dm_msg, true);
     std::printf("DM send: packet_id=%u to=%s text=%zu bytes\n",
                 pid2, node_num_to_id(me).c_str(), dm_msg.size());

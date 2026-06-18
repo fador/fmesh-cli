@@ -60,7 +60,7 @@ int run_app(int argc, char** argv, MeshService& service) {
         specs.push_back(std::move(spec));
     }
 
-    LOG_INFO() << "mesh-cli starting"
+    LOG_INFO() << "fmesh-cli starting"
                << " devices=" << specs.size()
                << " pair=" << cfg.pair;
 

@@ -1,10 +1,13 @@
 #include "tui.h"
 
+#include "app.h"
+#include "ble/ble_client.h"
 #include "colors.h"
 #include "command.h"
 #include "keybinds.h"
 #include "mesh/event.h"
 #include "mesh/mesh_service.h"
+#include "stream/stream_client.h"
 #include "util/log.h"
 
 #ifdef _WIN32
@@ -198,95 +201,20 @@ void TuiApp::start_scan() {
     scan_selection_ = 0;
     scan_complete_ = false;
     scan_running_ = true;
-    scan_thread_ = std::thread([this]() {
-        #ifndef _WIN32
-        std::unique_ptr<sdbus::IConnection> conn;
-                try { conn = sdbus::createSystemBusConnection(); }
-                catch (const sdbus::Error& e) {
-                    scan_running_ = false;
-                    EvBleDeviceFound ev;
-                    ev.scan_complete = true;
-                    queue_.push(std::move(ev));
-                    wake_.notify();
-                    return;
-                }
-                // Find adapter
-                std::string adapter_path;
-                try {
-                    auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
-                    std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
-                    obj_mgr->callMethod("GetManagedObjects")
-                        .onInterface("org.freedesktop.DBus.ObjectManager")
-                        .storeResultsTo(objects);
-                    for (const auto& [path, ifaces] : objects) {
-                        if (ifaces.find("org.bluez.Adapter1") != ifaces.end()) {
-                            adapter_path = path; break;
-                        }
-                    }
-                } catch (const sdbus::Error&) {}
-                if (adapter_path.empty()) {
-                    scan_running_ = false;
-                    EvBleDeviceFound ev;
-                    ev.scan_complete = true;
-                    queue_.push(std::move(ev));
-                    wake_.notify();
-                    return;
-                }
-                // Start discovery
-                try {
-                    auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
-                    adapter->callMethod("StartDiscovery").onInterface("org.bluez.Adapter1");
-                } catch (const sdbus::Error&) {}
-                // Scan loop
-                auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-                while (scan_running_ && std::chrono::steady_clock::now() < deadline) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-                    if (!scan_running_) break;
-                    try {
-                        auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
-                        std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
-                        obj_mgr->callMethod("GetManagedObjects")
-                            .onInterface("org.freedesktop.DBus.ObjectManager")
-                            .storeResultsTo(objects);
-                        for (const auto& [path, ifaces] : objects) {
-                            auto it = ifaces.find("org.bluez.Device1");
-                            if (it == ifaces.end()) continue;
-                            if (path.find(adapter_path + "/") != 0) continue;
-                            const auto& props = it->second;
-                            auto name_it = props.find("Name");
-                            auto alias_it = props.find("Alias");
-                            auto addr_it = props.find("Address");
-                            auto rssi_it = props.find("RSSI");
-                            if (name_it == props.end() && alias_it == props.end()) continue;
-                            std::string nm, addr;
-                            if (name_it != props.end()) nm = name_it->second.get<std::string>();
-                            else if (alias_it != props.end()) nm = alias_it->second.get<std::string>();
-                            if (addr_it != props.end()) addr = addr_it->second.get<std::string>();
-                            // Deduplicate
-                            bool dup = false;
-                            for (auto& e : scan_entries_)
-                                if (e.device_path == path) { dup = true; break; }
-                            if (dup) continue;
-                            EvBleDeviceFound ev;
-                            ev.device = path;
-                            ev.name = nm;
-                            ev.address = addr;
-                            if (rssi_it != props.end())
-                                ev.rssi = static_cast<int16_t>(rssi_it->second.get<int16_t>());
-                            queue_.push(std::move(ev));
-                            wake_.notify();
-                        }
-                    } catch (const sdbus::Error&) {}
-                }
-                // Stop discovery
-                try {
-                    auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
-                    adapter->callMethod("StopDiscovery").onInterface("org.bluez.Adapter1");
-                } catch (const sdbus::Error&) {}
-#else
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-#endif
-
+    BleClient::scan_async(15, [this](const std::string& name, const std::string& addr) {
+        // Deduplicate
+        bool dup = false;
+        for (auto& e : scan_entries_) {
+            if (e.address == addr) { dup = true; break; }
+        }
+        if (dup) return;
+        EvBleDeviceFound ev;
+        ev.device = addr; // using addr as device_path abstraction
+        ev.name = name;
+        ev.address = addr;
+        queue_.push(std::move(ev));
+        wake_.notify();
+    }, [this]() {
         scan_running_ = false;
         EvBleDeviceFound done;
         done.scan_complete = true;
@@ -297,9 +225,7 @@ void TuiApp::start_scan() {
 
 void TuiApp::stop_scan() {
     scan_running_ = false;
-    if (scan_thread_.joinable()) {
-        scan_thread_.join();
-    }
+    BleClient::stop_scan();
 }
 
 bool TuiApp::handle_wizard_key(int ch) {

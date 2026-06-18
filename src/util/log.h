@@ -16,7 +16,7 @@ enum class LogLevel : int {
 
 // Minimal logger: writes to a rotating file + optional stderr (when TUI is not
 // running). Thread-safe. The log path defaults to
-// ~/.local/share/mesh-cli/mesh-cli.log but may be overridden via init().
+// ~/.local/share/fmesh-cli/fmesh-cli.log but may be overridden via init().
 class Logger {
 public:
     static Logger& instance();

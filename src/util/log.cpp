@@ -24,7 +24,7 @@ std::mutex g_log_mutex;
 std::string default_log_path() {
     const char* home = std::getenv("HOME");
     if (!home || !*home) home = "/tmp";
-    std::string dir = std::string(home) + "/.local/share/mesh-cli";
+    std::string dir = std::string(home) + "/.local/share/fmesh-cli";
     // mkdir is best-effort; logger init will also try create_directories.
 #ifdef _WIN32
     ::_mkdir(dir.c_str());
@@ -34,7 +34,7 @@ std::string default_log_path() {
     try {
         std::filesystem::create_directories(dir);
     } catch (...) {}
-    return dir + "/mesh-cli.log";
+    return dir + "/fmesh-cli.log";
 }
 
 const char* level_str(LogLevel l) {
@@ -74,7 +74,7 @@ void Logger::init(std::string path, bool console, LogLevel level) {
     level_ = level;
     // Touch the file so we know it's writable.
     if (std::ofstream f(path_, std::ios::app); f) {
-        f << "---- mesh-cli log ----\n";
+        f << "---- fmesh-cli log ----\n";
     }
 }
 

@@ -121,7 +121,7 @@ void CommandDispatcher::cmd_help() {
     status_("  /scan                 open the interactive connection wizard", tui_color::INFO);
     status_("  /theme [name]         list themes or switch to a theme", tui_color::INFO);
     status_("  /device [id]          show or switch active device", tui_color::INFO);
-    status_("  /quit                 exit mesh-cli", tui_color::INFO);
+    status_("  /quit                 exit fmesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw, Ctrl-X cycle device", tui_color::INFO);
 }
 

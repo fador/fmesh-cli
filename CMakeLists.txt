@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mesh-cli LANGUAGES CXX)
+project(fmesh-cli LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -148,6 +148,10 @@ if(NOT WIN32)
         src/ble/bluez_agent.cpp
         src/ble/bluez_client.cpp
     )
+else()
+    list(APPEND CORE_SRCS
+        src/ble/win_ble_client.cpp
+    )
 endif()
 
 add_library(meshcli_core STATIC ${CORE_SRCS})
@@ -161,7 +165,7 @@ target_link_libraries(meshcli_core PUBLIC
 if(NOT WIN32)
     target_link_libraries(meshcli_core PUBLIC sdbus-c++)
 else()
-    target_link_libraries(meshcli_core PUBLIC ws2_32)
+    target_link_libraries(meshcli_core PUBLIC ws2_32 windowsapp)
 endif()
 target_include_directories(meshcli_core PUBLIC ${NCURSES_INCLUDE_DIR} ${SQLITE3_INCLUDE_DIR})
 
@@ -177,15 +181,15 @@ add_library(meshcli_tui STATIC
 )
 target_link_libraries(meshcli_tui PUBLIC meshcli_core)
 
-add_executable(mesh-cli src/main.cpp src/app/app.cpp src/app/config.cpp)
-target_link_libraries(mesh-cli PRIVATE meshcli_tui)
+add_executable(fmesh-cli src/main.cpp src/app/app.cpp src/app/config.cpp)
+target_link_libraries(fmesh-cli PRIVATE meshcli_tui)
 if(WIN32)
-    target_link_libraries(mesh-cli PRIVATE winmm)
+    target_link_libraries(fmesh-cli PRIVATE winmm)
 endif()
 
 # --- tests ------------------------------------------------------------------
 enable_testing()
-add_executable(mesh-cli-tests
+add_executable(fmesh-cli-tests
     tests/test_main.cpp
     tests/test_codec.cpp
     tests/test_routing.cpp
@@ -197,19 +201,19 @@ add_executable(mesh-cli-tests
     tests/test_robustness_edge.cpp
     src/app/config.cpp
 )
-target_link_libraries(mesh-cli-tests PRIVATE meshcli_tui)
+target_link_libraries(fmesh-cli-tests PRIVATE meshcli_tui)
 if(WIN32)
-    target_link_libraries(mesh-cli-tests PRIVATE winmm)
+    target_link_libraries(fmesh-cli-tests PRIVATE winmm)
 endif()
-target_include_directories(mesh-cli-tests PRIVATE src ${GENERATED_PROTO_DIR} tests)
-add_test(NAME mesh-cli-tests COMMAND mesh-cli-tests)
+target_include_directories(fmesh-cli-tests PRIVATE src ${GENERATED_PROTO_DIR} tests)
+add_test(NAME fmesh-cli-tests COMMAND fmesh-cli-tests)
 
 # Live integration test (requires a real paired device; not part of ctest).
-add_executable(mesh-cli-live tests/test_live_send.cpp src/app/config.cpp)
-target_link_libraries(mesh-cli-live PRIVATE meshcli_tui)
+add_executable(fmesh-cli-live tests/test_live_send.cpp src/app/config.cpp)
+target_link_libraries(fmesh-cli-live PRIVATE meshcli_tui)
 if(WIN32)
-    target_link_libraries(mesh-cli-live PRIVATE winmm)
+    target_link_libraries(fmesh-cli-live PRIVATE winmm)
 endif()
-target_include_directories(mesh-cli-live PRIVATE src ${GENERATED_PROTO_DIR})
+target_include_directories(fmesh-cli-live PRIVATE src ${GENERATED_PROTO_DIR})
 
-install(TARGETS mesh-cli RUNTIME DESTINATION bin)
+install(TARGETS fmesh-cli RUNTIME DESTINATION bin)

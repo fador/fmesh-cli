@@ -16,17 +16,9 @@
 #include <thread>
 #include <vector>
 
-namespace meshcli {
+#include "ble_client.h"
 
-struct BleDeviceSpec {
-    std::string name;        // e.g. "Fad3_0330" (matched case-insensitively)
-    std::string address;     // optional explicit MAC "AA:BB:CC:DD:EE:FF"
-    std::string pin = "123456";
-    // Stream transport (TCP/serial) — if set, BLE is skipped.
-    std::string tcp_host;    // "host:port"
-    std::string serial_port; // "/dev/ttyUSB0"
-    int serial_baud = 115200;
-};
+namespace meshcli {
 
 #ifndef _WIN32
 // A single BLE connection to one Meshtastic device, built on BlueZ over
@@ -40,12 +32,12 @@ struct BleDeviceSpec {
 //   FROMRADIO: 2c55e69e-4993-11ed-b878-0242ac120002   (read/poll)
 //   FROMNUM  : ed9da18c-a800-4f66-a670-aa7547e34453   (notify)
 //   LOGRADIO : 5a3d6e49-06e6-4423-9944-e9de8cdf9547   (notify, optional)
-class BluezClient {
+class BluezClient : public BleClient {
 public:
     using EventSink = std::function<void(MeshEvent)>;
 
     BluezClient(BleDeviceSpec spec, EventSink sink);
-    ~BluezClient();
+    ~BluezClient() override;
 
     BluezClient(const BluezClient&) = delete;
     BluezClient& operator=(const BluezClient&) = delete;
@@ -54,17 +46,17 @@ public:
     // BlueZ object path of the device). If `pair` is true and the device is
     // not yet paired, the agent will be used to pair it.
     // Returns empty string on failure (an EvError is also pushed).
-    std::string start(bool pair);
+    std::string start(bool pair) override;
 
     // Stop the connection and join the background thread.
-    void stop();
+    void stop() override;
 
     // Send raw ToRadio bytes by writing the TORADIO characteristic. Safe to
     // call from any thread. Returns false if not connected.
-    bool send_to_radio(const std::string& bytes);
+    bool send_to_radio(const std::string& bytes) override;
 
-    [[nodiscard]] std::string device_id() const { return device_id_; }
-    [[nodiscard]] bool is_connected() const { return connected_; }
+    [[nodiscard]] std::string device_id() const override { return device_id_; }
+    [[nodiscard]] bool is_connected() const override { return connected_; }
 
 private:
     BleDeviceSpec spec_;

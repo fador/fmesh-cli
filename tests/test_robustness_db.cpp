@@ -16,7 +16,7 @@ struct DbRobust {
 
     void SetUp() {
         int r = std::random_device{}();
-        tmp_path = "mesh-cli-test-robust-" + std::to_string(r) + ".db";
+        tmp_path = "fmesh-cli-test-robust-" + std::to_string(r) + ".db";
         std::remove(tmp_path.c_str());
         db.open(tmp_path);
     }

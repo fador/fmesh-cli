@@ -610,4 +610,80 @@ void BluezClient::write_char_locked(const std::string& path, const std::string& 
         .withArguments(v, opts);
 }
 
+// Global scanner state for Linux
+static std::thread g_scan_thread;
+static std::atomic<bool> g_scanning{false};
+
+void BleClient::scan_async(int timeout_s, std::function<void(const std::string&, const std::string&)> on_device, std::function<void()> on_complete) {
+    stop_scan();
+    
+    g_scanning = true;
+    g_scan_thread = std::thread([timeout_s, on_device, on_complete]() {
+        try {
+            auto conn = sdbus::createSystemBusConnection();
+            
+            // Find adapter
+            std::string adapter_path;
+            auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
+            std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
+            obj_mgr->callMethod("GetManagedObjects")
+                .onInterface("org.freedesktop.DBus.ObjectManager")
+                .storeResultsTo(objects);
+            for (const auto& [path, ifaces] : objects) {
+                if (ifaces.find("org.bluez.Adapter1") != ifaces.end()) {
+                    adapter_path = path; break;
+                }
+            }
+
+            if (adapter_path.empty()) {
+                g_scanning = false;
+                if (on_complete) on_complete();
+                return;
+            }
+
+            // Start discovery
+            auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
+            adapter->callMethod("StartDiscovery").onInterface("org.bluez.Adapter1");
+
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_s);
+            while (g_scanning && std::chrono::steady_clock::now() < deadline) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                if (!g_scanning) break;
+
+                std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objs;
+                obj_mgr->callMethod("GetManagedObjects")
+                    .onInterface("org.freedesktop.DBus.ObjectManager")
+                    .storeResultsTo(objs);
+
+                for (const auto& [path, ifaces] : objs) {
+                    auto it = ifaces.find("org.bluez.Device1");
+                    if (it != ifaces.end()) {
+                        auto name_it = it->second.find("Name");
+                        auto addr_it = it->second.find("Address");
+                        if (name_it != it->second.end() && addr_it != it->second.end()) {
+                            std::string name = name_it->second.get<std::string>();
+                            std::string addr = addr_it->second.get<std::string>();
+                            if (on_device) on_device(name, addr);
+                        }
+                    }
+                }
+            }
+
+            adapter->callMethod("StopDiscovery").onInterface("org.bluez.Adapter1");
+
+        } catch (const sdbus::Error&) {}
+
+        g_scanning = false;
+        if (on_complete) on_complete();
+    });
+}
+
+void BleClient::stop_scan() {
+    g_scanning = false;
+    if (g_scan_thread.joinable()) {
+        g_scan_thread.join();
+    }
+}
+
 } // namespace meshcli
+#endif
