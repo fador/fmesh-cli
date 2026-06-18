@@ -64,17 +64,7 @@ bool generate_temp_cert(SSL_CTX* ctx) {
     return true;
 }
 
-std::string frame_bytes(const std::string& payload) {
-    std::string out;
-    out.reserve(4 + payload.size());
-    out += static_cast<char>(0x94);
-    out += static_cast<char>(0xC3);
-    uint16_t len = static_cast<uint16_t>(payload.size());
-    out += static_cast<char>((len >> 8) & 0xFF);
-    out += static_cast<char>(len & 0xFF);
-    out += payload;
-    return out;
-}
+
 
 } // namespace
 
