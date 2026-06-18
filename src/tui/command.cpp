@@ -154,17 +154,17 @@ void CommandDispatcher::cmd_list() {
 void CommandDispatcher::cmd_nodes() {
     auto devices = service_.device_ids();
     if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
-    // Use active device, falling back to first.
-    std::string dev = active_device_;
-    if (dev.empty() || !service_.db_for(dev)) {
-        for (const auto& d : devices) {
-            if (service_.db_for(d)) { dev = d; break; }
-        }
-        if (dev.empty()) dev = devices[0];
+    // Use unified nodelist when multiple devices are connected.
+    if (devices.size() > 1) {
+        int idx = wm_.ensure_nodelist("*");  // unified
+        wm_.select(idx);
+        status_("Unified node list for " + std::to_string(devices.size()) + " devices (arrows=select, enter=info, s=sort)", tui_color::INFO);
+    } else {
+        std::string dev = devices[0];
+        int idx = wm_.ensure_nodelist(dev);
+        wm_.select(idx);
+        status_("Nodes for " + service_.display_name_for(dev) + " (arrows=select, enter=info, s=sort)", tui_color::INFO);
     }
-    int idx = wm_.ensure_nodelist(dev);
-    wm_.select(idx);
-    status_("Nodes for " + service_.display_name_for(dev) + " (arrows=select, enter=info, s=sort)", tui_color::INFO);
 }
 
 void CommandDispatcher::cmd_query(const std::vector<std::string>& args) {

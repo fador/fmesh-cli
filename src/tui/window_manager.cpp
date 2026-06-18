@@ -150,7 +150,8 @@ int WindowManager::ensure_nodelist(const std::string& device) {
 void WindowManager::append_text(const std::string& device, uint32_t from_node,
                                 uint32_t to_node, uint32_t channel_idx,
                                 bool broadcast, const std::string& text,
-                                uint32_t ts, const NodeDb* db) {
+                                uint32_t ts, const NodeDb* db,
+                                float rx_snr, uint32_t hop_start, uint32_t hop_limit) {
     int idx;
     std::string nick = short_nick(db, from_node);
     if (broadcast) {
@@ -160,7 +161,6 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
     }
     Window& w = *windows_[idx - 1];
 
-    // Simple mention detection: current node's short/long name in the text.
     bool mention = false;
     if (db) {
         auto me = db->get(db->my_node_num());
@@ -171,18 +171,32 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
                 mention = true;
         }
     }
-    if (mention) std::fputc('\a', stdout);  // terminal bell
+    if (mention) std::fputc('\a', stdout);
+
+    // Build signal quality suffix.
+    std::string sig;
+    uint32_t hops = (hop_start > hop_limit) ? hop_start - hop_limit : 0;
+    if (hops > 0 || rx_snr != 0) {
+        sig = " [";
+        if (hops > 0) sig += "hops=" + std::to_string(hops);
+        if (hops > 0 && rx_snr != 0) sig += " ";
+        if (rx_snr != 0) {
+            char snrbuf[16];
+            std::snprintf(snrbuf, sizeof(snrbuf), "%.1fdB", rx_snr);
+            sig += snrbuf;
+        }
+        sig += "]";
+    }
 
     Line line;
-    // Detect /me actions: text starts with "* ".
     bool is_action = (text.size() > 2 && text[0] == '*' && text[1] == ' ');
     if (is_action) {
-        std::string action = text.substr(2);   // text after "* "
-        line.text = "[" + fmt_time(ts) + "] * " + nick + " " + action;
+        std::string action = text.substr(2);
+        line.text = "[" + fmt_time(ts) + "] * " + nick + " " + action + sig;
         line.is_meta = true;
         line.color_pair = mention ? 4 : (broadcast ? 2 : 3);
     } else {
-        line.text = "[" + fmt_time(ts) + "] <" + nick + "> " + text;
+        line.text = "[" + fmt_time(ts) + "] <" + nick + "> " + text + sig;
         line.color_pair = mention ? 4 : (broadcast ? 2 : 3);
     }
     w.append_line(line);

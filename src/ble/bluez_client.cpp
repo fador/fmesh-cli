@@ -44,10 +44,6 @@ std::string BluezClient::start(bool pair) {
     try {
         conn_ = sdbus::createSystemBusConnection();
         running_ = true;
-        LOG_DEBUG() << "start(): running_ set true (event loop deferred)";
-        // NOTE: We do NOT start the event loop here yet. We'll start it after
-        // the connect flow completes, to avoid threading conflicts during
-        // GATT operations.
     } catch (const sdbus::Error& e) {
         emit_error(std::string("D-Bus connect failed: ") + e.what());
         return {};
@@ -59,8 +55,6 @@ std::string BluezClient::start(bool pair) {
         });
         try {
             agent_->register_on(*conn_, "/meshcli/agent");
-            // For pairing, we need the event loop running to handle agent
-            // callbacks. Start it temporarily.
             loop_thread_ = std::thread([this] {
                 try { conn_->enterEventLoop(); }
                 catch (const sdbus::Error& e) { LOG_ERROR() << "event loop: " << e.what(); }
@@ -68,16 +62,23 @@ std::string BluezClient::start(bool pair) {
         } catch (...) {}
     }
 
+    // Connect, discover GATT, subscribe to notifications — all synchronous.
     run_connect_flow();
     if (device_id_.empty()) return {};
 
-    // Now start the event loop for GATT notifications (if not already running).
+    // Start the event loop BEFORE sending want_config, so FROMNUM
+    // notifications fire and trigger drain_from_radio() immediately.
     if (!loop_thread_.joinable()) {
         loop_thread_ = std::thread([this] {
             try { conn_->enterEventLoop(); }
             catch (const sdbus::Error& e) { LOG_ERROR() << "event loop: " << e.what(); }
         });
+        // Give the event loop a moment to start.
+        std::this_thread::sleep_for(100ms);
     }
+
+    // Kick off the protocol handshake and drain the initial data stream.
+    initial_handshake();
     return device_id_;
 }
 
@@ -89,8 +90,6 @@ void BluezClient::run_connect_flow() {
 
     // Resolve device path: explicit address first, else scan by name.
     if (!spec_.address.empty()) {
-        // Build canonical BlueZ device path from MAC. BlueZ uppercases the
-        // hex digits in the object path (e.g. dev_1C_DB_D4_A7_03_31).
         std::string mac = to_upper(spec_.address);
         std::string p;
         for (char c : mac) if (c != ':' && c != '-' && c != '_') p += c;
@@ -127,9 +126,14 @@ void BluezClient::run_connect_flow() {
     }
     subscribe_notifications();
 
-    // Send the initial want_config_id to kick off the protocol handshake.
-    // The device responds with MyInfo, Metadata, NodeInfo*, Channel*,
-    // Config, and finally config_complete_id.
+    connected_ = true;
+    LOG_INFO() << "BLE connected to " << spec_.name << " (" << device_id_ << ")";
+}
+
+// Send want_config_id and drain FROMRADIO until the config handshake
+// completes. Runs with the event loop already active so FROMNUM
+// notifications trigger drain_from_radio() in parallel.
+void BluezClient::initial_handshake() {
     // Test: read FROMRADIO to verify GATT works before writing.
     try {
         auto test = read_char(fromradio_path_);
@@ -142,35 +146,49 @@ void BluezClient::run_connect_flow() {
     LOG_INFO() << "sending want_config_id=" << config_id;
     try {
         auto payload = MeshCodec::encode_want_config(config_id);
-        LOG_DEBUG() << "encoded want_config: " << payload.size() << " bytes, writing to TORADIO...";
         write_char(toradio_path_, payload);
-        LOG_DEBUG() << "TORADIO write succeeded";
     } catch (const sdbus::Error& e) {
         LOG_ERROR() << "TORADIO write failed: " << e.what();
     }
 
-    connected_ = true;
-    LOG_INFO() << "BLE connected to " << spec_.name << " (" << device_id_ << ")";
-
-    // Poll FROMRADIO a few times — the device may have queued config data
-    // before the first FROMNUM notification arrives.
-    for (int i = 0; i < 20 && running_; ++i) {
+    // Poll FROMRADIO until config_complete_id arrives, or timeout.
+    // The event loop is already running, so FROMNUM notifications also
+    // trigger drain_from_radio() which processes data on the BLE thread.
+    bool got_config = false;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (running_ && !got_config && std::chrono::steady_clock::now() < deadline) {
         try {
             auto bytes = read_char(fromradio_path_);
-            LOG_DEBUG() << "initial FROMRADIO poll: " << bytes.size() << " bytes";
             if (!bytes.empty()) {
                 emit_raw(bytes);
                 uint32_t cid = 0;
                 auto ev = MeshCodec::decode_from_radio(bytes, device_id_, cid);
-                if (ev) {
-                    LOG_DEBUG() << "initial FromRadio: emitting event (variant index=" << ev->index() << ")";
-                    emit(*ev);
+                if (ev) emit(*ev);
+                if (cid != 0) {
+                    LOG_DEBUG() << "config_complete_id=" << cid;
+                    got_config = true;
                 }
             }
         } catch (const sdbus::Error& e) {
-            LOG_WARN() << "initial FROMRADIO read error: " << e.what();
+            LOG_DEBUG() << "FROMRADIO read during handshake: " << e.what();
         }
-        std::this_thread::sleep_for(300ms);
+        std::this_thread::sleep_for(200ms);
+    }
+
+    // Give the event loop one more cycle to drain any remaining data.
+    if (got_config) {
+        LOG_DEBUG() << "config handshake complete, draining residual...";
+        for (int i = 0; i < 5 && running_; ++i) {
+            try {
+                auto bytes = read_char(fromradio_path_);
+                if (!bytes.empty()) {
+                    emit_raw(bytes);
+                    auto ev = MeshCodec::decode_from_radio(bytes, device_id_, config_id);
+                    if (ev) emit(*ev);
+                }
+            } catch (const sdbus::Error&) {}
+            std::this_thread::sleep_for(100ms);
+        }
     }
 }
 

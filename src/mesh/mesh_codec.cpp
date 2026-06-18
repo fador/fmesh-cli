@@ -140,6 +140,9 @@ std::optional<MeshEvent> decode_packet(
         ev.packet_id = pkt.id();
         ev.rx_time = pkt.rx_time();
         ev.rx_snr = pkt.rx_snr();
+        ev.rx_rssi = pkt.rx_rssi();
+        ev.hop_start = pkt.hop_start();
+        ev.hop_limit = pkt.hop_limit();
         ev.broadcast = (pkt.to() == kBroadcastNodeNum);
         ev.want_ack = pkt.want_ack();
         ev.text = d.payload();

@@ -9,7 +9,6 @@
 namespace meshcli {
 
 namespace {
-    // Split "host:port" into host and port. Default port is 4403.
     std::pair<std::string, uint16_t> parse_tcp_host(const std::string& tcp_host) {
         size_t colon = tcp_host.rfind(':');
         std::string host = tcp_host.substr(0, colon);
@@ -19,6 +18,16 @@ namespace {
         return {host, port};
     }
 } // namespace
+
+bool MeshService::is_duplicate(uint32_t from_node, uint32_t packet_id) {
+    uint64_t key = (static_cast<uint64_t>(from_node) << 32) | packet_id;
+    for (auto k : seen_messages_)
+        if (k == key) return true;
+    seen_messages_.push_back(key);
+    if (seen_messages_.size() > kDedupMax)
+        seen_messages_.pop_front();
+    return false;
+}
 
 MeshService::MeshService() {
     // Seed the packet id generator like the python lib does.
@@ -340,6 +349,29 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
             rt->db->upsert_channel(e.channel);
             db_.upsert_channel(e.device, e.channel);
         } else if constexpr (std::is_same_v<T, EvTextReceived>) {
+            // Dedup: check if this message already arrived via another device.
+            if (is_duplicate(e.from_node, e.packet_id)) {
+                StoredMessage dup;
+                dup.device = e.device;
+                if (e.broadcast) {
+                    dup.window_kind = "channel";
+                    dup.window_target = e.channel_idx;
+                } else {
+                    dup.window_kind = "dm";
+                    dup.window_target = e.from_node;
+                }
+                dup.direction = "in";
+                dup.from_node = e.from_node;
+                dup.to_node = e.to_node;
+                dup.channel_idx = e.channel_idx;
+                dup.text = e.text;
+                dup.ts = e.rx_time ? e.rx_time :
+                       std::chrono::duration_cast<std::chrono::seconds>(
+                           std::chrono::system_clock::now().time_since_epoch()).count();
+                dup.packet_id = e.packet_id;
+                db_.insert_message(dup);
+                return;
+            }
             // Persist inbound message.
             StoredMessage m;
             m.device = e.device;

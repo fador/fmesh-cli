@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -106,6 +107,12 @@ private:
     Database db_;
     mutable std::mutex devices_mu_;
     std::map<std::string, std::shared_ptr<DeviceRuntime>> devices_;
+
+    // Dedup: track recently seen {from_node, packet_id} pairs across
+    // all devices so the same mesh message only appears once in the UI.
+    static constexpr size_t kDedupMax = 500;
+    std::deque<uint64_t> seen_messages_;  // (from_node << 32) | packet_id
+    bool is_duplicate(uint32_t from_node, uint32_t packet_id);
 };
 
 } // namespace meshcli

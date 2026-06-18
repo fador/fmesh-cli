@@ -95,6 +95,7 @@ private:
 
     // --- internal helpers ---
     void run_connect_flow();  // synchronous scan/pair/connect/GATT setup
+    void initial_handshake();  // send want_config + drain FROMRADIO (event loop active)
     void emit(MeshEvent ev);
     void emit_error(std::string msg);
     // Emit a raw-packet hex dump alongside the decoded event.
