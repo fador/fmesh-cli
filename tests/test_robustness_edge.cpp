@@ -343,6 +343,125 @@ TEST(WindowManagerEdge, NextActiveWithNoActivity) {
     EXPECT_EQ(wm.current_index(), before);
 }
 
+TEST(WindowManagerEdge, CloseIfEmptyDm) {
+    MeshService svc;
+    WindowManager wm(svc);
+    // Create an empty DM window.
+    int dm_idx = wm.ensure_dm("dev", 0x1234u, "Bob");
+    EXPECT_EQ(wm.windows().size(), 2u);
+    EXPECT_EQ(dm_idx, 2);
+    // Navigate from status (1) to DM (2) - status should never close.
+    wm.select(2);
+    EXPECT_EQ(wm.current_index(), 2);
+    EXPECT_EQ(wm.windows().size(), 2u);
+    // Navigate back to status - the empty DM should be auto-closed.
+    wm.select(1);
+    EXPECT_EQ(wm.windows().size(), 1u);
+    EXPECT_EQ(wm.current_index(), 1);
+}
+
+TEST(WindowManagerEdge, KeepNamedChannelWhenEmpty) {
+    MeshService svc;
+    WindowManager wm(svc);
+    // Create a named channel (title starts with # followed by name, not #ch<N>).
+    int ch_idx = wm.ensure_channel("dev", 0, "LongFast");
+    EXPECT_EQ(wm.windows().size(), 2u);
+    wm.select(ch_idx);
+    wm.select(1);
+    // Named channel should not be auto-closed even when empty.
+    EXPECT_EQ(wm.windows().size(), 2u);
+}
+
+TEST(WindowManagerEdge, CloseIfEmptyUnnamedChannel) {
+    MeshService svc;
+    WindowManager wm(svc);
+    // Create an unnamed channel (default title is #ch0, etc.).
+    int ch_idx = wm.ensure_channel("dev", 1, "");
+    EXPECT_EQ(wm.windows().size(), 2u);
+    wm.select(ch_idx);
+    wm.select(1);
+    // Unnamed empty channel should be auto-closed.
+    EXPECT_EQ(wm.windows().size(), 1u);
+}
+
+TEST(WindowManagerEdge, KeepDmWithMessages) {
+    MeshService svc;
+    WindowManager wm(svc);
+    int dm_idx = wm.ensure_dm("dev", 0x1234u, "Bob");
+    // Add a message so the DM is not empty.
+    wm.append_outgoing("dev", "dm", 0x1234u, "hello", nullptr);
+    wm.select(dm_idx);
+    wm.select(1);
+    // DM with messages should be kept.
+    EXPECT_EQ(wm.windows().size(), 2u);
+}
+
+TEST(WindowManagerEdge, CloseIfEmptyDoesNotCloseStatus) {
+    MeshService svc;
+    WindowManager wm(svc);
+    for (int i = 0; i < 5; ++i) {
+        bool closed = wm.close_if_empty(1);
+        EXPECT_FALSE(closed);
+    }
+    // Status window should never be closed.
+    EXPECT_EQ(wm.windows().size(), 1u);
+}
+
+TEST(WindowManagerEdge, CloseIfEmptyAdjustsCurrent) {
+    MeshService svc;
+    WindowManager wm(svc);
+    // Create 3 empty DM windows.
+    wm.ensure_dm("dev", 0x100u, "A");  // index 2
+    wm.ensure_dm("dev", 0x200u, "B");  // index 3
+    wm.ensure_dm("dev", 0x300u, "C");  // index 4
+    EXPECT_EQ(wm.windows().size(), 4u);
+    // Switch to window 3 (B).
+    wm.select(3);
+    // Switch to window 2 (A) - this should close window 3 (B, empty DM).
+    wm.select(2);
+    EXPECT_EQ(wm.windows().size(), 3u);
+    // After close, current_ should be valid.
+    EXPECT_EQ(wm.current_index(), 2);
+}
+
+TEST(WindowManagerEdge, CloseIfEmptySelectRelative) {
+    MeshService svc;
+    WindowManager wm(svc);
+    wm.ensure_dm("dev", 0x100u, "A");  // index 2
+    wm.ensure_dm("dev", 0x200u, "B");  // index 3
+    wm.append_outgoing("dev", "dm", 0x100u, "hello", nullptr);
+    // windows_: [1:status, 2:A(has msgs), 3:B(empty)]
+    wm.select(2);
+    EXPECT_EQ(wm.windows().size(), 3u);
+    EXPECT_EQ(wm.current_index(), 2);
+    // Navigate from A to B - A has messages, stays open.
+    wm.select_relative(1);
+    EXPECT_EQ(wm.windows().size(), 3u);
+
+    EXPECT_EQ(wm.current_index(), 3);
+    // Navigate back from B to A - B is empty, should be auto-closed.
+    wm.select_relative(-1);
+    EXPECT_EQ(wm.windows().size(), 2u);
+    EXPECT_EQ(wm.current_index(), 2);
+}
+
+TEST(WindowManagerEdge, CloseIfEmptySelectViaNumber) {
+    MeshService svc;
+    WindowManager wm(svc);
+    wm.ensure_dm("dev", 0x100u, "A");  // 2
+    wm.ensure_dm("dev", 0x200u, "B");  // 3
+    wm.ensure_dm("dev", 0x300u, "C");  // 4
+    EXPECT_EQ(wm.windows().size(), 4u);
+    // Directly select window 4 (C) from status (1) - no close since source is status.
+    wm.select(4);
+    EXPECT_EQ(wm.current_index(), 4);
+    EXPECT_EQ(wm.windows().size(), 4u);
+    // Now select window 2 (A) - should close current (4, empty).
+    wm.select(2);
+    EXPECT_EQ(wm.windows().size(), 3u);
+    EXPECT_EQ(wm.current_index(), 2);
+}
+
 // -- Window edge cases --
 
 TEST(WindowRobust, ScrollbackCap) {

@@ -34,7 +34,7 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 
 ```sh
 sudo apt install -y build-essential cmake git libncursesw5-dev libsqlite3-dev \
-  libprotobuf-dev protobuf-compiler libsdbus-c++-dev libgtest-dev
+  libprotobuf-dev protobuf-compiler libsdbus-c++-dev libgtest-dev libssl-dev
 sudo usermod -aG bluetooth $USER   # then re-login
 ```
 
