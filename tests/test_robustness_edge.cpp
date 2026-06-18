@@ -540,16 +540,38 @@ TEST(WindowManagerEdge, DmTitlePreservedOnOutgoing) {
 TEST(WindowManagerEdge, DmTitleUpgradedFromHash) {
     MeshService svc;
     WindowManager wm(svc);
-    // Create DM with empty nick → title = !deadbeef
+    // Create DM with empty nick — title = !deadbeef
     int idx = wm.ensure_dm("dev", 0xDEADu, "");
     std::string hash_title = wm.windows()[idx - 1]->title();
     EXPECT_EQ(hash_title[0], '!');
-    // Later, real nick arrives → title should upgrade.
+    // Later, real nick arrives — title should upgrade.
     wm.ensure_dm("dev", 0xDEADu, "Bob");
     EXPECT_EQ(wm.windows()[idx - 1]->title(), "Bob");
     // Placeholder nick should not downgrade the title.
     wm.ensure_dm("dev", 0xDEADu, "?");
     EXPECT_EQ(wm.windows()[idx - 1]->title(), "Bob");
+}
+
+TEST(WindowManagerEdge, RebuildNickUpdatesDisplayNames) {
+    MeshService svc;
+    WindowManager wm(svc);
+    const NodeDb* db = nullptr;
+    uint32_t node = 0xDEADBEEFu;
+    std::string old_nick = node_num_to_id(node).substr(0, 10);
+    // Receive a DM from the node — nick will be hash initially.
+    wm.append_text("dev", node, 0xBEEFu, 0, false, "Hello", 1000, db, 0, 0, 0);
+    EXPECT_EQ(wm.windows().size(), 2u);
+    const auto& lines = wm.windows()[1]->lines();
+    ASSERT_FALSE(lines.empty());
+    std::string first_line = lines[0].text;
+    std::string old_pattern = "<" + old_nick + "> ";
+    EXPECT_NE(first_line.find(old_pattern), std::string::npos);
+    EXPECT_EQ(first_line.find("<Bob>"), std::string::npos);
+    // Simulate NodeInfo arriving with real name — rebuild nick.
+    wm.rebuild_all_nicks("dev", node, old_nick, "Bob");
+    std::string updated = wm.windows()[1]->lines()[0].text;
+    EXPECT_NE(updated.find("<Bob>"), std::string::npos);
+    EXPECT_EQ(updated.find(old_pattern), std::string::npos);
 }
 
 TEST(WindowManagerEdge, ReceiveDmRoutesToDmWindow) {

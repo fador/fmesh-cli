@@ -424,7 +424,15 @@ std::vector<EvRawPacket> MeshService::raw_packets_for(const std::string& device_
 // event handling (runs on the BLE thread of whichever device emitted it)
 // ---------------------------------------------------------------------------
 
-void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const MeshEvent& ev) {
+void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEvent& ev) {
+    // Capture old node names before upsert for retroactive nick updates.
+    if (auto* n = std::get_if<EvNodeUpdated>(&ev)) {
+        auto old = rt->db->get(n->node.node_num);
+        if (old) {
+            n->old_short_name = old->short_name;
+            n->old_long_name = old->long_name;
+        }
+    }
     std::visit([this, &rt](const auto& e) {
         using T = std::decay_t<decltype(e)>;
         if constexpr (std::is_same_v<T, EvMyInfo>) {

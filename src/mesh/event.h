@@ -45,6 +45,8 @@ struct EvConfigComplete {
 struct EvNodeUpdated {
     DeviceId device;
     Node node;
+    std::string old_short_name;
+    std::string old_long_name;
 };
 
 struct EvChannelUpdated {
