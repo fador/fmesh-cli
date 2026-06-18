@@ -72,6 +72,10 @@ public:
     // Returns true if the window was closed.
     bool close_if_empty(int index);
 
+    // Update all windows to reflect a new nick for a given node.
+    void rebuild_all_nicks(const std::string& device, uint32_t sender_node,
+                           const std::string& old_nick, const std::string& new_nick);
+
     // Look up the routing target of the current window (returns nullptr if
     // the status window is active — you can't send text from there).
     [[nodiscard]] const WindowTarget* current_target() const;

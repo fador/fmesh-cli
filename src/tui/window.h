@@ -24,9 +24,10 @@ struct WindowTarget {
 // window can redraw cheaply and so scrollback search works on the rendered
 // text rather than raw fields.
 struct Line {
-    std::string text;       // already formatted (timestamp + nick + body)
-    int color_pair = 0;     // ncurses color pair index, 0 = default
-    bool is_meta = false;   // *** join/part/info line
+    std::string text;         // already formatted (timestamp + nick + body)
+    int color_pair = 0;       // ncurses color pair index, 0 = default
+    bool is_meta = false;     // *** join/part/info line
+    uint32_t sender_node = 0; // node number of sender (for retroactive nick updates)
 };
 
 class Window {
@@ -41,6 +42,10 @@ public:
     [[nodiscard]] const WindowTarget& target() const { return target_; }
     [[nodiscard]] const std::string& title() const { return title_; }
     void set_title(std::string t) { title_ = std::move(t); }
+
+    // Rebuild display nicks for all lines belonging to a given sender node.
+    void rebuild_nick(uint32_t sender_node, const std::string& old_nick,
+                      const std::string& new_nick);
 
     // Unread bookkeeping (driven by the window manager).
     void mark_read() { unread_ = 0; activity_ = 0; }

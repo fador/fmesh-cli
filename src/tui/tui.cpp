@@ -1271,6 +1271,12 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             std::string nick = e.node.short_name.empty()
                                    ? e.node.long_name : e.node.short_name;
             wm_.update_dm_nick(e.device, e.node.node_num, nick);
+            // Rebuild nicks in existing messages if the node name changed.
+            std::string old_nick = e.old_short_name.empty()
+                                       ? e.old_long_name : e.old_short_name;
+            if (!old_nick.empty() && old_nick != nick) {
+                wm_.rebuild_all_nicks(e.device, e.node.node_num, old_nick, nick);
+            }
             // Clamp nodelist cursor if viewing this device.
             if (nodelist_device_ == e.device && db) {
                 int total = static_cast<int>(db->all().size());

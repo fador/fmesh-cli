@@ -236,6 +236,7 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
         line.text = "[" + fmt_time(ts) + "] <" + sender_nick + "> " + text + sig;
         line.color_pair = mention ? 4 : (broadcast ? 2 : 3);
     }
+    line.sender_node = from_node;
     w.append_line(line);
 
     if (idx != current_) {
@@ -286,7 +287,7 @@ void WindowManager::append_outgoing(const std::string& device,
     if (kind == "channel")
         idx = ensure_channel(device, target, "");
     else if (kind == "dm")
-        idx = ensure_dm(device, target, "?");
+        idx = ensure_dm(device, target, "");
     else
         return;
     Window& w = *windows_[idx - 1];
@@ -296,6 +297,7 @@ void WindowManager::append_outgoing(const std::string& device,
     line.text = "[" + fmt_time(static_cast<uint32_t>(std::time(nullptr)))
                 + "] <" + nick + "> " + text;
     line.color_pair = (kind == "dm") ? 3 : 2;
+    line.sender_node = me;
     w.append_line(line);
     if (idx == current_) w.mark_read();
 }
@@ -353,6 +355,13 @@ bool WindowManager::close_if_empty(int index) {
     if (current_ > index) --current_;
     if (current_ > static_cast<int>(windows_.size())) current_ = static_cast<int>(windows_.size());
     return true;
+}
+
+void WindowManager::rebuild_all_nicks(const std::string& device, uint32_t sender_node,
+                                       const std::string& old_nick,
+                                       const std::string& new_nick) {
+    (void)device;
+    for (auto& w : windows_) w->rebuild_nick(sender_node, old_nick, new_nick);
 }
 
 Window* WindowManager::current_window() {

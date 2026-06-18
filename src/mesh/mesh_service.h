@@ -99,7 +99,7 @@ public:
     [[nodiscard]] std::mutex& devices_mu_for_test() { return devices_mu_; }
 
 private:
-    void handle_event(const std::shared_ptr<DeviceRuntime>& rt, const MeshEvent& ev);
+    void handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEvent& ev);
     void dispatch_to_ui(MeshEvent ev);
     uint32_t next_packet_id();
 
