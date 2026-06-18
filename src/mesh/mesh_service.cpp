@@ -431,6 +431,9 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
             rt->db->upsert_channel(e.channel);
             db_.upsert_channel(e.device, e.channel);
         } else if constexpr (std::is_same_v<T, EvTextReceived>) {
+            LOG_INFO() << "Received text message. Broadcast: " << e.broadcast 
+                       << ", From: " << e.from_node << ", To: " << e.to_node 
+                       << ", Text: " << e.text;
             // Dedup: check if this message already arrived via another device.
             if (is_duplicate(e.from_node, e.packet_id)) {
                 StoredMessage dup;

@@ -854,7 +854,7 @@ void TuiApp::render() {
         cur_prompt = cw->title() + "> ";
     else
         cur_prompt = "status> ";
-    move(rows - 2, static_cast<int>(cur_prompt.size() + input_.cursor()));
+    move(rows - 2, static_cast<int>(cur_prompt.size() + input_.cursor_visual()));
     if (popup_active_) render_popup();
     refresh();
 }

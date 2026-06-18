@@ -25,6 +25,13 @@ public:
 
     [[nodiscard]] const std::string& buf() const { return buf_; }
     [[nodiscard]] size_t cursor() const { return cursor_; }
+    [[nodiscard]] int cursor_visual() const {
+        int w = 0;
+        for (size_t i = 0; i < cursor_ && i < buf_.size(); ++i) {
+            if ((buf_[i] & 0xC0) != 0x80) w++;
+        }
+        return w;
+    }
 
     void clear() { buf_.clear(); cursor_ = 0; history_pos_ = history_.size(); }
 

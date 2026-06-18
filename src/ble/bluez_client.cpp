@@ -41,12 +41,19 @@ BluezClient::BluezClient(BleDeviceSpec spec, EventSink sink)
 BluezClient::~BluezClient() { LOG_DEBUG() << "~BluezClient"; stop(); }
 
 std::string BluezClient::start(bool pair) {
+    if (running_.exchange(true)) return device_id_;
+
     try {
         conn_ = sdbus::createSystemBusConnection();
-        running_ = true;
     } catch (const sdbus::Error& e) {
         emit_error(std::string("D-Bus connect failed: ") + e.what());
         return {};
+    }
+
+    if (!spec_.address.empty()) {
+        device_id_ = spec_.address;
+    } else {
+        device_id_ = spec_.name;
     }
 
     if (pair) {
@@ -55,30 +62,25 @@ std::string BluezClient::start(bool pair) {
         });
         try {
             agent_->register_on(*conn_, "/meshcli/agent");
-            loop_thread_ = std::thread([this] {
-                try { conn_->enterEventLoop(); }
-                catch (const sdbus::Error& e) { LOG_ERROR() << "event loop: " << e.what(); }
-            });
         } catch (...) {}
     }
 
-    // Connect, discover GATT, subscribe to notifications — all synchronous.
-    run_connect_flow();
-    if (device_id_.empty()) return {};
+    loop_thread_ = std::thread([this]() {
+        try { conn_->enterEventLoop(); }
+        catch (const sdbus::Error& e) { LOG_ERROR() << "event loop: " << e.what(); }
+    });
 
-    // Start the event loop BEFORE sending want_config, so FROMNUM
-    // notifications fire and trigger drain_from_radio() immediately.
-    if (!loop_thread_.joinable()) {
-        loop_thread_ = std::thread([this] {
-            try { conn_->enterEventLoop(); }
-            catch (const sdbus::Error& e) { LOG_ERROR() << "event loop: " << e.what(); }
-        });
-        // Give the event loop a moment to start.
-        std::this_thread::sleep_for(100ms);
-    }
+    init_thread_ = std::thread([this]() {
+        try {
+            run_connect_flow();
+            if (device_id_.empty()) return;
+            
+            initial_handshake();
+        } catch (const sdbus::Error& e) {
+            LOG_ERROR() << "connect error: " << e.what();
+        }
+    });
 
-    // Kick off the protocol handshake and drain the initial data stream.
-    initial_handshake();
     return device_id_;
 }
 
@@ -198,6 +200,7 @@ void BluezClient::stop() {
     if (conn_) {
         try { conn_->leaveEventLoop(); } catch (...) {}
     }
+    if (init_thread_.joinable()) init_thread_.join();
     if (loop_thread_.joinable()) loop_thread_.join();
     agent_.reset();
     {

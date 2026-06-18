@@ -119,6 +119,8 @@ endif()
 if(WIN32)
     message(STATUS "Windows detected, fetching PDCursesMod via FetchContent")
     set(PDC_BUILD_SHARED OFF CACHE BOOL "Build static PDCurses" FORCE)
+    set(PDC_WIDE ON CACHE BOOL "Build wide-character PDCurses" FORCE)
+    set(PDC_UTF8 ON CACHE BOOL "Build UTF-8 PDCurses" FORCE)
     FetchContent_Declare(
         pdcurses
         GIT_REPOSITORY https://github.com/Bill-Gray/PDCursesMod.git
@@ -130,6 +132,7 @@ if(WIN32)
 else()
     find_path(NCURSES_INCLUDE_DIR ncurses.h)
     find_library(NCURSES_LIB NAMES ncursesw ncurses)
+    add_compile_definitions(_XOPEN_SOURCE_EXTENDED)
 endif()
 
 # --- OpenSSL ----------------------------------------------------------------

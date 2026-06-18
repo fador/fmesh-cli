@@ -63,6 +63,7 @@ private:
     EventSink sink_;
     std::unique_ptr<sdbus::IConnection> conn_;
     std::thread loop_thread_;
+    std::thread init_thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> connected_{false};
 

@@ -1,0 +1,4 @@
+server_mode=1
+server_port=4403
+server_user=admin
+server_password=pass
