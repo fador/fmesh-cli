@@ -177,15 +177,16 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
                                 uint32_t ts, const NodeDb* db,
                                 float rx_snr, uint32_t hop_start, uint32_t hop_limit) {
     int idx;
+    std::string nick;
     if (broadcast) {
-        std::string nick = short_nick(db, from_node);
+        nick = short_nick(db, from_node);
         idx = ensure_channel(device, channel_idx, "");
     } else {
         uint32_t peer_node = from_node;
         if (db && from_node == db->my_node_num()) {
             peer_node = to_node;
         }
-        std::string nick = short_nick(db, peer_node);
+        nick = short_nick(db, peer_node);
         idx = ensure_dm(device, peer_node, nick);
     }
     Window& w = *windows_[idx - 1];
