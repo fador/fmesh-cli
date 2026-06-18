@@ -237,12 +237,12 @@ bool TuiApp::handle_wizard_key(int ch) {
 
     switch (mode_) {
     case M::ConnectWizard_Tab:
-        if (ch == KEY_LEFT || ch == 'h') {
+        if (ch == KEY_UP || ch == 'k') {
             int t = static_cast<int>(wizard_transport_);
             t = (t - 1 + 4) % 4;
             wizard_transport_ = static_cast<ConnTransport>(t);
             need_redraw_ = true;
-        } else if (ch == KEY_RIGHT || ch == 'l' || ch == '\t') {
+        } else if (ch == KEY_DOWN || ch == 'j' || ch == '\t') {
             int t = static_cast<int>(wizard_transport_);
             t = (t + 1) % 4;
             wizard_transport_ = static_cast<ConnTransport>(t);
@@ -292,14 +292,14 @@ bool TuiApp::handle_wizard_key(int ch) {
                 service_.connect_device(spec, false);
             }
             exit_wizard();
-        } else if (ch == KEY_UP || ch == 'k' || ch == KEY_LEFT) {
+        } else if (ch == KEY_UP || ch == 'k') {
             if (scan_selection_ > 0) {
                 --scan_selection_;
                 if (scan_selection_ < scan_entries_offset_)
                     scan_entries_offset_ = scan_selection_;
                 need_redraw_ = true;
             }
-        } else if (ch == KEY_DOWN || ch == 'j' || ch == KEY_RIGHT) {
+        } else if (ch == KEY_DOWN || ch == 'j') {
             if (static_cast<size_t>(scan_selection_ + 1) < scan_entries_.size()) {
                 ++scan_selection_;
                 int max_lines = std::max(1, LINES - 7);
