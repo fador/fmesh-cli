@@ -80,6 +80,12 @@ std::string TuiApp::connection_info() const {
     auto devices = service_.device_ids();
     if (devices.empty()) return "no device";
     std::string s;
+    // Show active device marker when multiple devices.
+    if (devices.size() > 1) {
+        std::string active_name = service_.display_name_for(active_device_);
+        if (!active_name.empty())
+            s += "[" + active_name + "] ";
+    }
     for (size_t i = 0; i < devices.size(); ++i) {
         if (i) s += ",";
         const NodeDb* db = service_.db_for(devices[i]);
@@ -211,6 +217,20 @@ int TuiApp::run() {
                     need_redraw_ = true;
                 } else if (ch == 12) {  // Ctrl-L
                     need_redraw_ = true;
+                } else if (ch == 24) {   // Ctrl-X: cycle active device
+                    auto devices = service_.device_ids();
+                    if (devices.size() > 1) {
+                        int cur = 0;
+                        for (size_t i = 0; i < devices.size(); ++i) {
+                            if (devices[i] == active_device_) { cur = static_cast<int>(i); break; }
+                        }
+                        cur = (cur + 1) % static_cast<int>(devices.size());
+                        active_device_ = devices[cur];
+                        wm_.append_status("Active device: " +
+                            service_.display_name_for(active_device_) + " (" + active_device_ + ")",
+                            tui_color::INFO);
+                        need_redraw_ = true;
+                    }
                 } else if (ch == 3) {   // Ctrl-C
                     quit_ = true;
                     break;
@@ -229,7 +249,8 @@ int TuiApp::run() {
                     if (input_.handle_key(ch, submitted)) {
                         need_redraw_ = true;
                         CommandDispatcher disp(service_, wm_,
-                            [this](const std::string& s, int c) { wm_.append_status(s, c); });
+                            [this](const std::string& s, int c) { wm_.append_status(s, c); },
+                            active_device_);
                         auto res = disp.execute(submitted);
                         if (res.quit) quit_ = true;
                     } else {
@@ -256,8 +277,19 @@ void TuiApp::handle_event(const MeshEvent& ev) {
         using T = std::decay_t<decltype(e)>;
         if constexpr (std::is_same_v<T, EvConnected>) {
             wm_.append_status("*** Connected to " + e.display_name, tui_color::INFO);
+            if (active_device_.empty()) {
+                active_device_ = e.device;
+            }
         } else if constexpr (std::is_same_v<T, EvDisconnected>) {
             wm_.append_status("*** Disconnected: " + e.reason, tui_color::ERROR);
+            // If the active device disconnected, pick another.
+            if (e.device == active_device_) {
+                auto devices = service_.device_ids();
+                active_device_.clear();
+                for (const auto& id : devices) {
+                    if (id != e.device) { active_device_ = id; break; }
+                }
+            }
             // Start auto-reconnect for this device.
             if (reconnect_attempts_.find(e.device) == reconnect_attempts_.end()) {
                 reconnect_attempts_[e.device] = 0;

@@ -86,7 +86,7 @@ int run_app(int argc, char** argv, MeshService& service) {
             continue;
         }
         std::printf("connected to %s (%s)\n",
-                    spec.name.empty() ? spec.tcp_host : spec.name.c_str(),
+                    (spec.name.empty() ? spec.tcp_host.c_str() : spec.name.c_str()),
                     device_id.c_str());
         ++connected;
     }

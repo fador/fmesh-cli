@@ -23,7 +23,8 @@ class CommandDispatcher {
 public:
     using StatusSink = std::function<void(const std::string&, int)>;
 
-    CommandDispatcher(MeshService& service, WindowManager& wm, StatusSink status);
+    CommandDispatcher(MeshService& service, WindowManager& wm, StatusSink status,
+                      const std::string& active_device);
 
     // Execute a full input line (may be a command or plain text). Returns
     // a CommandResult (quit flag etc.).
@@ -33,6 +34,7 @@ private:
     MeshService& service_;
     WindowManager& wm_;
     StatusSink status_;
+    std::string active_device_;
 
     void cmd_help();
     void cmd_list();

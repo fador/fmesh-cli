@@ -26,8 +26,10 @@ std::vector<std::string> split(const std::string& s) {
 } // namespace
 
 CommandDispatcher::CommandDispatcher(MeshService& service, WindowManager& wm,
-                                     StatusSink status)
-    : service_(service), wm_(wm), status_(std::move(status)) {}
+                                     StatusSink status,
+                                     const std::string& active_device)
+    : service_(service), wm_(wm), status_(std::move(status)),
+      active_device_(active_device) {}
 
 CommandResult CommandDispatcher::execute(const std::string& line) {
     CommandResult res;
@@ -91,6 +93,7 @@ void CommandDispatcher::cmd_help() {
     status_("  /query <node|nick>    open a DM window with a node", tui_color::INFO);
     status_("  /msg <node|nick> <text>  send a DM without switching windows", tui_color::INFO);
     status_("  /channel <n>          switch to / create channel window n", tui_color::INFO);
+    status_("                          (uses active device; Ctrl+X to cycle)", tui_color::INFO);
     status_("  /window <N>           switch to window N", tui_color::INFO);
     status_("  /close                close the current (non-status) window", tui_color::INFO);
     status_("  /clear                clear the current window's scrollback", tui_color::INFO);
@@ -110,7 +113,7 @@ void CommandDispatcher::cmd_help() {
     status_("                              serial:<path>[:<baud>]", tui_color::INFO);
     status_("  /disconnect [id]      disconnect a device (no arg: list IDs)", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
-    status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw", tui_color::INFO);
+    status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw, Ctrl-X cycle device", tui_color::INFO);
 }
 
 void CommandDispatcher::cmd_list() {
@@ -231,15 +234,18 @@ void CommandDispatcher::cmd_channel(const std::vector<std::string>& args) {
         uint32_t idx = static_cast<uint32_t>(std::stoul(args[0]));
         auto devices = service_.device_ids();
         if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
+        // Use the active device (set via Ctrl+X), falling back to first device.
+        std::string dev = active_device_;
+        if (dev.empty() || !service_.db_for(dev)) dev = devices[0];
         std::string name;
         std::string role;
-        if (auto* db = service_.db_for(devices[0])) {
+        if (auto* db = service_.db_for(dev)) {
             if (auto ch = db->channel(idx)) {
                 name = ch->name;
                 role = ch->role;
             }
         }
-        int w = wm_.ensure_channel(devices[0], idx, name);
+        int w = wm_.ensure_channel(dev, idx, name);
         wm_.select(w);
         if (role == "DISABLED")
             status_("Note: channel " + std::to_string(idx) + " is DISABLED",

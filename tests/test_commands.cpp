@@ -54,7 +54,8 @@ public:
     Capture exec(const std::string& line) {
         Capture c;
         CommandDispatcher disp(svc_, wm_,
-            [&](const std::string& s, int) { c.lines.push_back(s); });
+            [&](const std::string& s, int) { c.lines.push_back(s); },
+            "");
         auto res = disp.execute(line);
         c.quit = res.quit;
         return c;

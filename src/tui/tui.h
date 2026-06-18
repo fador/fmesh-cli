@@ -51,6 +51,9 @@ private:
     bool need_redraw_ = true;
     std::string history_path_;
 
+    // Active device for context-sensitive commands (cycled with Ctrl+X).
+    std::string active_device_;
+
     // Auto-reconnect state (per-device attempt counters)
     std::map<std::string, int> reconnect_attempts_;
     int reconnect_delay_s_ = 5;

@@ -14,6 +14,7 @@ namespace keybind {
     constexpr int PAGE_UP     = KEY_PPAGE;
     constexpr int PAGE_DOWN   = KEY_NPAGE;
     constexpr int REDRAW      = 12;          // Ctrl-L
+    constexpr int DEVICE_CYCLE = 24;          // Ctrl-X  (cycle active device)
     constexpr int QUIT        = 3;           // Ctrl-C (also /quit)
 } // namespace keybind
 

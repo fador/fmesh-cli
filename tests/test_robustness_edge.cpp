@@ -200,7 +200,7 @@ struct CmdFixture {
         CommandDispatcher disp(svc, wm, [this](const std::string& s, int c) {
             status_lines.push_back(s);
             status_color = c;
-        });
+        }, "");
         return disp.execute(cmd);
     }
 };
