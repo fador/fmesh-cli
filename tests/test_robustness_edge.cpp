@@ -526,3 +526,35 @@ TEST(MeshServiceEdge, ConfigLinesForUnknownDevice) {
     MeshService svc;
     EXPECT_TRUE(svc.config_lines_for("nonexistent").empty());
 }
+
+TEST(WindowManagerEdge, ReceiveDmRoutesToDmWindow) {
+    MeshService svc;
+    WindowManager wm(svc);
+    // Simulate receiving a DM from node 0xDEAD.
+    const NodeDb* db = nullptr;
+    wm.append_text("dev1", 0xDEADu, 0xBEEFu, 0, false, "Hello from peer", 1000, db, 0, 0, 0);
+    EXPECT_EQ(wm.windows().size(), 2u);
+    EXPECT_EQ(wm.windows()[1]->target().kind, "dm");
+    EXPECT_EQ(wm.windows()[1]->target().target, 0xDEADu);
+    EXPECT_FALSE(wm.windows()[1]->lines().empty());
+}
+
+TEST(WindowManagerEdge, ReceiveBroadcastRoutesToChannelWindow) {
+    MeshService svc;
+    WindowManager wm(svc);
+    const NodeDb* db = nullptr;
+    wm.append_text("dev1", 0xDEADu, kBroadcastNodeNum, 0, true, "Hello channel", 1000, db, 0, 0, 0);
+    EXPECT_EQ(wm.windows().size(), 2u);
+    EXPECT_EQ(wm.windows()[1]->target().kind, "channel");
+    EXPECT_EQ(wm.windows()[1]->target().target, 0u);
+}
+
+TEST(WindowManagerEdge, ReceiveDmMultipleCreatesOneWindow) {
+    MeshService svc;
+    WindowManager wm(svc);
+    const NodeDb* db = nullptr;
+    wm.append_text("dev1", 0xDEADu, 0xBEEFu, 0, false, "First DM", 1000, db, 0, 0, 0);
+    wm.append_text("dev1", 0xDEADu, 0xBEEFu, 0, false, "Second DM", 2000, db, 0, 0, 0);
+    EXPECT_EQ(wm.windows().size(), 2u);  // only status + one DM
+    EXPECT_EQ(wm.windows()[1]->lines().size(), 2u);
+}

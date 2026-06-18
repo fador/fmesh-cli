@@ -107,9 +107,11 @@ cmake --build build -j$(nproc)
 
 | Key | Action |
 |-----|--------|
-| Alt+1..0 | Switch to window N |
+| Alt+1..0 | Switch to window 1-10 |
+| Alt+q..p | Switch to window 11-20 |
 | Alt+a | Next active window |
-| Alt+n / Alt+p | Next / previous window |
+| Alt+n | Next window |
+| Alt+Left / Alt+Right | Previous / next window |
 | PgUp / PgDn | Scroll scrollback (navigate pages in nodelist) |
 | Ctrl+X | Cycle active device (for multi-device) |
 | Ctrl+L | Redraw screen |
