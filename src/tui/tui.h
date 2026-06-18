@@ -3,6 +3,7 @@
 #include "input_line.h"
 #include "mesh/mesh_service.h"
 #include "status_bar.h"
+#include "theme.h"
 #include "util/event_loop.h"
 #include "window_manager.h"
 
@@ -70,6 +71,10 @@ private:
     void render_nodelist(const Window& w, int top, int height, int width);
     bool handle_nodelist_key(int ch);
 
+    // --- themes ---
+    [[nodiscard]] const ColorTheme& current_theme() const { return *current_theme_; }
+    bool set_theme(const std::string& name);
+
     MeshService& service_;
     ConcurrentQueue<MeshEvent>& queue_;
     EventFd& wake_;
@@ -114,6 +119,9 @@ private:
     int nodelist_cursor_ = 0;
     int nodelist_offset_ = 0;
     NodeListSort nodelist_sort_ = NodeListSort::Name;
+
+    // --- theming ---
+    const ColorTheme* current_theme_ = nullptr;
 };
 
 } // namespace meshcli

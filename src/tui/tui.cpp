@@ -66,12 +66,8 @@ void TuiApp::init_ncurses() {
     if (has_colors()) {
         start_color();
         use_default_colors();
-        init_pair(tui_color::META,    COLOR_CYAN,  -1);
-        init_pair(tui_color::CHANNEL, -1,          -1);
-        init_pair(tui_color::DM,      COLOR_GREEN, -1);
-        init_pair(tui_color::MENTION, COLOR_YELLOW,-1);
-        init_pair(tui_color::ERROR,   COLOR_RED,   -1);
-        init_pair(tui_color::INFO,    COLOR_CYAN,  -1);
+        current_theme_ = &builtin_themes()[0];  // dark
+        apply_theme(*current_theme_);
     }
     Logger::instance().set_console(false);
     Logger::instance().set_level(LogLevel::Info);
@@ -426,6 +422,17 @@ bool TuiApp::handle_wizard_key(int ch) {
     return handled;
 }
 
+// --- themes ---
+
+bool TuiApp::set_theme(const std::string& name) {
+    const ColorTheme* t = find_theme(name);
+    if (!t) return false;
+    current_theme_ = t;
+    apply_theme(*current_theme_);
+    need_redraw_ = true;
+    return true;
+}
+
 // --- nodelist interactive mode -----------------------------------------------
 
 bool TuiApp::handle_nodelist_key(int ch) {
@@ -628,8 +635,8 @@ void TuiApp::render() {
     int scrollback_top = 1;
     int scrollback_h = std::max(1, rows - 3);
 
-    // Title bar with overlap protection.
-    attron(A_REVERSE);
+    // Title bar with theme color.
+    attron(COLOR_PAIR(tui_color::TITLE));
     mvhline(0, 0, ' ', cols);
     std::string title = "[" + std::to_string(wm_.current_index()) + ":" + w->title() + "]";
     std::string conn = connection_info();
@@ -732,7 +739,7 @@ void TuiApp::render_wizard_ble() {
                 attron(A_REVERSE);
                 mvprintw(y, cx, "> %-24s %s", e.name.c_str(), e.address.c_str());
                 if (e.rssi != 0) printw("  %d dBm", e.rssi);
-                attroff(A_REVERSE);
+    attroff(COLOR_PAIR(tui_color::TITLE));
             } else {
                 mvprintw(y, cx, "  %-24s %s", e.name.c_str(), e.address.c_str());
                 if (e.rssi != 0) printw("  %d dBm", e.rssi);
@@ -970,7 +977,8 @@ int TuiApp::run() {
                         CommandDispatcher disp(service_, wm_,
                             [this](const std::string& s, int c) { wm_.append_status(s, c); },
                             active_device_,
-                            [this]() { enter_wizard(); });
+                            [this]() { enter_wizard(); },
+                            [this](const std::string& name) { return set_theme(name); });
                         auto res = disp.execute(submitted);
                         if (res.quit) quit_ = true;
                     } else {

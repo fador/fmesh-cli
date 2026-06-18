@@ -25,7 +25,8 @@ public:
 
     CommandDispatcher(MeshService& service, WindowManager& wm, StatusSink status,
                       std::string& active_device,
-                      std::function<void()> on_scan = {});
+                      std::function<void()> on_scan = {},
+                      std::function<bool(const std::string&)> on_set_theme = {});
 
     // Execute a full input line (may be a command or plain text). Returns
     // a CommandResult (quit flag etc.).
@@ -37,6 +38,7 @@ private:
     StatusSink status_;
     std::string& active_device_;
     std::function<void()> on_scan_;
+    std::function<bool(const std::string&)> on_set_theme_;
 
     void cmd_help();
     void cmd_list();
@@ -61,6 +63,7 @@ private:
     void cmd_connect(const std::vector<std::string>& args);
     void cmd_disconnect(const std::vector<std::string>& args);
     void cmd_scan();
+    void cmd_theme(const std::vector<std::string>& args);
 };
 
 } // namespace meshcli

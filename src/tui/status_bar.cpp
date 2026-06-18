@@ -25,7 +25,7 @@ int StatusBar::color_for(const Window& w) {
 }
 
 void StatusBar::render(WindowManager& wm, int cols, const std::string& connection_info) {
-    attron(A_REVERSE);
+    attron(COLOR_PAIR(tui_color::STATUS));
     mvhline(LINES - 1, 0, ' ', cols);
 
     int x = 0;
@@ -37,7 +37,7 @@ void StatusBar::render(WindowManager& wm, int cols, const std::string& connectio
     attron(COLOR_PAIR(cur_color) | A_BOLD);
     mvprintw(LINES - 1, x, "[%d:%s] ", cur, cur_label.c_str());
     x += static_cast<int>(std::snprintf(nullptr, 0, "[%d:%s] ", cur, cur_label.c_str()));
-    attrset(A_REVERSE);
+    attrset(COLOR_PAIR(tui_color::STATUS));
 
     // Compute the right-side text so we know how much space to leave.
     std::time_t t = std::time(nullptr);
@@ -78,7 +78,7 @@ void StatusBar::render(WindowManager& wm, int cols, const std::string& connectio
         else
             mvprintw(LINES - 1, x, "%d%c%s ", idx, mark, label.c_str());
         x += label_w;
-        attrset(A_REVERSE);
+        attrset(COLOR_PAIR(tui_color::STATUS));
     }
 
     if (wins.empty()) {
@@ -89,7 +89,7 @@ void StatusBar::render(WindowManager& wm, int cols, const std::string& connectio
     if (right_x > x)
         mvprintw(LINES - 1, right_x, "%s", right.c_str());
 
-    attroff(A_REVERSE);
+    attroff(COLOR_PAIR(tui_color::STATUS));
 }
 
 } // namespace meshcli

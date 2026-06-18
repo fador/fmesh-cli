@@ -28,9 +28,11 @@ std::vector<std::string> split(const std::string& s) {
 CommandDispatcher::CommandDispatcher(MeshService& service, WindowManager& wm,
                                      StatusSink status,
                                      std::string& active_device,
-                                     std::function<void()> on_scan)
+                                     std::function<void()> on_scan,
+                                     std::function<bool(const std::string&)> on_set_theme)
     : service_(service), wm_(wm), status_(std::move(status)),
-      active_device_(active_device), on_scan_(std::move(on_scan)) {}
+      active_device_(active_device), on_scan_(std::move(on_scan)),
+      on_set_theme_(std::move(on_set_theme)) {}
 
 CommandResult CommandDispatcher::execute(const std::string& line) {
     CommandResult res;
@@ -82,6 +84,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "connect")                cmd_connect(tokens);
     else if (cmd == "disconnect" || cmd == "dc") cmd_disconnect(tokens);
     else if (cmd == "scan" || cmd == "s")      cmd_scan();
+    else if (cmd == "theme")                  cmd_theme(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -116,6 +119,7 @@ void CommandDispatcher::cmd_help() {
     status_("                              serial:<path>[:<baud>]", tui_color::INFO);
     status_("  /disconnect [id]      disconnect a device (no arg: list IDs)", tui_color::INFO);
     status_("  /scan                 open the interactive connection wizard", tui_color::INFO);
+    status_("  /theme [name]         list themes or switch to a theme", tui_color::INFO);
     status_("  /device [id]          show or switch active device", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw, Ctrl-X cycle device", tui_color::INFO);
@@ -714,6 +718,23 @@ void CommandDispatcher::cmd_scan() {
         on_scan_();
     } else {
         status_("Interactive scan is only available from the TUI.", tui_color::ERROR);
+    }
+}
+
+void CommandDispatcher::cmd_theme(const std::vector<std::string>& args) {
+    if (args.empty()) {
+        status_("Available themes:", tui_color::INFO);
+        for (const auto& t : builtin_themes())
+            status_("  " + t.name + "  - " + t.description, tui_color::CHANNEL);
+        status_("Current theme: " + std::string("?"), tui_color::INFO);
+        return;
+    }
+    if (on_set_theme_) {
+        if (on_set_theme_(args[0])) {
+            status_("Theme set to " + args[0], tui_color::INFO);
+        } else {
+            status_("Theme not found: " + args[0] + " (use /theme to list)", tui_color::ERROR);
+        }
     }
 }
 
