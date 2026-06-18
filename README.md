@@ -13,6 +13,7 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 - **Multi-device support**: connect to multiple radios simultaneously via `--device` flag or `/connect`
 - **Active device cycling**: `Ctrl+X` or `/device` switches the active device for context-sensitive commands
 - **Auto-reconnect**: per-device automatic reconnection on disconnect (up to 6 attempts, 5s intervals)
+- **Mesh Connectivity (Server/Client)**: multi-device secure mesh sharing with TLS authentication
 - **Message history**: past sessions' messages reload from SQLite on startup
 - **Device config viewer**: `/config` shows LoRa, power, position, network, Bluetooth settings
 - **Raw packet view**: `/raw` displays hex dumps of received FromRadio packets, live raw window
@@ -42,6 +43,7 @@ sudo usermod -aG bluetooth $USER   # then re-login
 - Visual Studio 2022 (with "Desktop development with C++" workload)
 - CMake
 - Git
+- OpenSSL-Win64 (optional, required for Mesh Server/Client TLS functionality)
 
 *Note: Windows dependencies (SQLite, PDCurses, Protobuf) are automatically fetched by CMake.*
 

@@ -23,6 +23,13 @@ struct AppConfig {
     bool log_debug = false;
     // Multi-device: explicit device specs from --device flags.
     std::vector<BleDeviceSpec> devices;
+    
+    // Server configuration
+    bool server_mode = false;
+    int server_port = 4404;
+    std::string server_user = "admin";
+    std::string server_password;
+    std::string config_path; // path to save/load config file
 };
 
 // Parse argv into an AppConfig. Returns false on parse error / --help.
@@ -34,5 +41,9 @@ bool parse_device_spec(const std::string& spec, BleDeviceSpec& out);
 
 // Expand ~ in paths and fill defaults for empty fields.
 void finalize_paths(AppConfig& c);
+
+// Load and save the config file for server settings and auto-generated passwords.
+void load_config(AppConfig& c);
+void save_config(const AppConfig& c);
 
 } // namespace meshcli

@@ -242,12 +242,12 @@ bool TuiApp::handle_wizard_key(int ch) {
     case M::ConnectWizard_Tab:
         if (ch == KEY_LEFT || ch == 'h') {
             int t = static_cast<int>(wizard_transport_);
-            t = (t - 1 + 3) % 3;
+            t = (t - 1 + 4) % 4;
             wizard_transport_ = static_cast<ConnTransport>(t);
             need_redraw_ = true;
         } else if (ch == KEY_RIGHT || ch == 'l' || ch == '\t') {
             int t = static_cast<int>(wizard_transport_);
-            t = (t + 1) % 3;
+            t = (t + 1) % 4;
             wizard_transport_ = static_cast<ConnTransport>(t);
             need_redraw_ = true;
         } else if (ch == '\n' || ch == KEY_ENTER) {
@@ -262,6 +262,14 @@ bool TuiApp::handle_wizard_key(int ch) {
                 wizard_field_ = 0;
                 wizard_field_cursor_[0] = static_cast<int>(wizard_tcp_host_.size());
                 wizard_field_cursor_[1] = static_cast<int>(wizard_tcp_port_.size());
+                need_redraw_ = true;
+            } else if (wizard_transport_ == ConnTransport::Mesh) {
+                mode_ = M::ConnectWizard_Mesh;
+                wizard_field_ = 0;
+                wizard_field_cursor_[0] = static_cast<int>(wizard_mesh_host_.size());
+                wizard_field_cursor_[1] = static_cast<int>(wizard_mesh_port_.size());
+                wizard_field_cursor_[2] = static_cast<int>(wizard_mesh_user_.size());
+                wizard_field_cursor_[3] = static_cast<int>(wizard_mesh_password_.size());
                 need_redraw_ = true;
             } else {
                 mode_ = M::ConnectWizard_Serial;
@@ -347,6 +355,31 @@ bool TuiApp::handle_wizard_key(int ch) {
                 spec.serial_port = wizard_serial_path_;
                 spec.serial_baud = std::atoi(wizard_serial_baud_.c_str());
                 if (spec.serial_baud <= 0) spec.serial_baud = 115200;
+                service_.connect_device(spec, false);
+            }
+            exit_wizard();
+        } else if (ch == KEY_BACKSPACE || ch == 127) {
+            if (!field->empty()) field->pop_back();
+            need_redraw_ = true;
+        } else if (ch >= 32 && ch < 127 && field->size() < 60) {
+            *field += static_cast<char>(ch);
+            need_redraw_ = true;
+        } else { handled = false; }
+        break;
+    }
+
+    case M::ConnectWizard_Mesh: {
+        std::string* fields[] = {&wizard_mesh_host_, &wizard_mesh_port_, &wizard_mesh_user_, &wizard_mesh_password_};
+        auto* field = fields[wizard_field_];
+        if (ch == '\t') {
+            wizard_field_ = (wizard_field_ + 1) % 4;
+            need_redraw_ = true;
+        } else if (ch == '\n' || ch == KEY_ENTER) {
+            if (!wizard_mesh_host_.empty()) {
+                BleDeviceSpec spec;
+                spec.mesh_host = wizard_mesh_host_ + ":" + wizard_mesh_port_;
+                spec.mesh_user = wizard_mesh_user_;
+                spec.mesh_password = wizard_mesh_password_;
                 service_.connect_device(spec, false);
             }
             exit_wizard();
@@ -646,6 +679,7 @@ void TuiApp::render() {
         case Mode::ConnectWizard_BLE:    render_wizard_ble(); break;
         case Mode::ConnectWizard_TCP:    render_wizard_tcp(); break;
         case Mode::ConnectWizard_Serial: render_wizard_serial(); break;
+        case Mode::ConnectWizard_Mesh:   render_wizard_mesh(); break;
         default: break;
         }
         refresh();
@@ -730,7 +764,6 @@ void TuiApp::render_wizard_tab() {
     std::string hdr = " Connect Device ";
     mvprintw(mid - 2, std::max(0, (cols - static_cast<int>(hdr.size())) / 2), "%s", hdr.c_str());
     attroff(A_REVERSE);
-
     auto draw = [&](int y, ConnTransport t, const char* label, const char* desc) {
         int cx = std::max(0, (cols - 48) / 2);
         if (wizard_transport_ == t) {
@@ -743,9 +776,10 @@ void TuiApp::render_wizard_tab() {
     };
     draw(0, ConnTransport::BLE, "BLE", "Nearby Meshtastic radios");
     draw(1, ConnTransport::TCP, "TCP", "Remote device over network");
-    draw(2, ConnTransport::Serial, "Serial", "Local serial port");
+    draw(2, ConnTransport::Mesh, "Mesh", "Fador's Mesh CLI network (TLS)");
+    draw(3, ConnTransport::Serial, "Serial", "Local serial port");
 
-    mvprintw(mid + 5, std::max(0, (cols - 48) / 2),
+    mvprintw(mid + 6, std::max(0, (cols - 48) / 2),
              " arrow keys or Tab to switch, ENTER to select, ESC to cancel ");
 }
 
@@ -815,7 +849,28 @@ void TuiApp::render_wizard_tcp() {
              wizard_tcp_host_.c_str(), wizard_field_ == 0 ? "|" : "",
              wizard_tcp_port_.c_str(), wizard_field_ == 1 ? "|" : "");
     mvprintw(mid + 1, cx, " Press ENTER to connect  ");
-    mvprintw(mid + 3, cx, " ENTER=connect  TAB=next field  ESC=back");
+}
+
+void TuiApp::render_wizard_mesh() {
+    int rows = LINES, cols = COLS;
+    if (rows < 10 || cols < 30) {
+        mvprintw(rows / 2, std::max(0, (cols - 18) / 2), "terminal too small");
+        return;
+    }
+    int cx = std::max(0, (cols - 60) / 2);
+    int mid = rows / 2 - 2;
+    attron(A_REVERSE);
+    mvhline(mid - 2, cx, ' ', std::min(60, cols - cx));
+    mvprintw(mid - 2, cx, " Mesh Connection (TLS) ");
+    attroff(A_REVERSE);
+    mvprintw(mid,     cx, " Host:     [%s%s]:[%s%s]",
+             wizard_mesh_host_.c_str(), wizard_field_ == 0 ? "|" : "",
+             wizard_mesh_port_.c_str(), wizard_field_ == 1 ? "|" : "");
+    mvprintw(mid + 1, cx, " User:     [%s%s]",
+             wizard_mesh_user_.c_str(), wizard_field_ == 2 ? "|" : "");
+    mvprintw(mid + 2, cx, " Password: [%s%s]",
+             wizard_mesh_password_.c_str(), wizard_field_ == 3 ? "|" : "");
+    mvprintw(mid + 4, cx, " TAB to cycle, ENTER to connect, ESC to cancel");
 }
 
 void TuiApp::render_wizard_serial() {

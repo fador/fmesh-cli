@@ -44,6 +44,11 @@ int run_app(int argc, char** argv, MeshService& service) {
     EventFd wake;
     service.set_event_sink(&queue, &wake);
 
+    if (cfg.server_mode) {
+        LOG_INFO() << "Starting mesh stream server on port " << cfg.server_port;
+        service.start_stream_server(cfg.server_port, cfg.server_user, cfg.server_password);
+    }
+
     // Connect to each device specified. If --device flags were used, use
     // those; otherwise fall back to legacy single-device flags.
     std::vector<BleDeviceSpec> specs;
@@ -164,6 +169,9 @@ int run_app(int argc, char** argv, MeshService& service) {
     TuiApp app(service, queue, wake, cfg.history_path);
     int rc = app.run();
 
+    if (cfg.server_mode) {
+        service.stop_stream_server();
+    }
     service.disconnect_all();
     return rc;
 }

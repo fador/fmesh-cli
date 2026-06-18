@@ -86,6 +86,22 @@ std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
         }
         rt->stream = std::make_unique<StreamClient>(fd, "tcp:" + spec.tcp_host, std::move(sink));
         id = rt->stream->start();
+    } else if (!spec.mesh_host.empty()) {
+        // --- Mesh server transport (TLS) ---
+        auto [host, port] = parse_tcp_host(spec.mesh_host);
+        int fd = tcp_connect(host, port);
+        if (fd < 0) {
+            EvError ev;
+            ev.device = "";
+            ev.message = "Mesh connect to " + spec.mesh_host + " failed";
+            dispatch_to_ui(std::move(ev));
+            return {};
+        }
+        rt->stream = std::make_unique<StreamClient>(fd, "mesh:" + spec.mesh_host, std::move(sink));
+#ifdef ENABLE_MESH_NET
+        rt->stream->enable_tls(spec.mesh_user, spec.mesh_password);
+#endif
+        id = rt->stream->start();
     } else if (!spec.serial_port.empty()) {
         // --- Serial transport ---
         int fd = serial_open(spec.serial_port, spec.serial_baud);
@@ -148,6 +164,15 @@ bool MeshService::reconnect_device(const std::string& device_id) {
         int fd = tcp_connect(host, port);
         if (fd < 0) return false;
         rt->stream = std::make_unique<StreamClient>(fd, "tcp:" + spec.tcp_host, std::move(sink));
+        new_id = rt->stream->start();
+    } else if (!spec.mesh_host.empty()) {
+        auto [host, port] = parse_tcp_host(spec.mesh_host);
+        int fd = tcp_connect(host, port);
+        if (fd < 0) return false;
+        rt->stream = std::make_unique<StreamClient>(fd, "mesh:" + spec.mesh_host, std::move(sink));
+#ifdef ENABLE_MESH_NET
+        rt->stream->enable_tls(spec.mesh_user, spec.mesh_password);
+#endif
         new_id = rt->stream->start();
     } else if (!spec.serial_port.empty()) {
         int fd = serial_open(spec.serial_port, spec.serial_baud);
@@ -217,6 +242,39 @@ void MeshService::disconnect_all() {
             rt->stream->stop();
         }
     }
+}
+
+void MeshService::start_stream_server(int port, const std::string& user, const std::string& password) {
+#ifdef ENABLE_MESH_NET
+    if (stream_server_) return;
+    auto sink = [this](MeshEvent ev) {
+        // StreamServer emits events here, which we can route locally.
+        dispatch_to_ui(ev);
+        // Wait, for EvSendRawToRadio we must handle it!
+        if (std::holds_alternative<EvSendRawToRadio>(ev)) {
+            // Forward it to all connected local radios.
+            auto bytes = std::get<EvSendRawToRadio>(ev).bytes;
+            std::lock_guard<std::mutex> lock(devices_mu_);
+            for (auto& [_, rt] : devices_) {
+#ifndef _WIN32
+                if (rt->client && rt->client->is_connected()) rt->client->send_to_radio(bytes);
+#endif
+                if (rt->stream && rt->stream->is_connected()) rt->stream->send_to_radio(bytes);
+            }
+        }
+    };
+    stream_server_ = std::make_unique<StreamServer>(port, user, password, sink);
+    stream_server_->start();
+#endif
+}
+
+void MeshService::stop_stream_server() {
+#ifdef ENABLE_MESH_NET
+    if (stream_server_) {
+        stream_server_->stop();
+        stream_server_.reset();
+    }
+#endif
 }
 
 uint32_t MeshService::next_packet_id() {
@@ -437,8 +495,14 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
             rt->raw_packets.push_back(e);
             if (rt->raw_packets.size() > DeviceRuntime::kMaxRawPackets)
                 rt->raw_packets.erase(rt->raw_packets.begin());
+        } else if constexpr (std::is_same_v<T, EvRawRxBytes>) {
+#ifdef ENABLE_MESH_NET
+            if (stream_server_) {
+                stream_server_->broadcast(e.bytes);
+            }
+#endif
         } else {
-            // EvConnected / EvDisconnected / EvLogLine / EvError: no DB work.
+            // EvConnected / EvDisconnected / EvLogLine / EvError / EvSendRawToRadio: no DB work.
         }
     }, ev);
 }

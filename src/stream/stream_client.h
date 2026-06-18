@@ -13,6 +13,13 @@
 #include <string>
 #include <thread>
 
+#ifdef ENABLE_MESH_NET
+extern "C" {
+    struct ssl_st;
+    struct ssl_ctx_st;
+}
+#endif
+
 namespace meshcli {
 
 // Opens a TCP connection to host:port. Returns the connected fd, or -1.
@@ -51,18 +58,31 @@ public:
     // Frame a protobuf message with the 0x94 0xC3 <len16> header.
     static std::string frame(const std::string& payload);
 
+#ifdef ENABLE_MESH_NET
+    // Enable TLS client mode with authentication
+    void enable_tls(const std::string& user, const std::string& password);
+#endif
+
 private:
     void read_loop();        // runs on background thread
     void emit(MeshEvent ev);
     void emit_error(std::string msg);
 
-    intptr_t fd_;
+    intptr_t fd_{-1};
     std::string display_name_;
     std::string device_id_;
     EventSink sink_;
     std::thread thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> connected_{false};
+
+#ifdef ENABLE_MESH_NET
+    bool use_tls_{false};
+    std::string tls_user_;
+    std::string tls_password_;
+    ::ssl_st* ssl_{nullptr};
+    ::ssl_ctx_st* ssl_ctx_{nullptr};
+#endif
 };
 
 } // namespace meshcli

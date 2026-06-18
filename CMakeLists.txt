@@ -132,6 +132,28 @@ else()
     find_library(NCURSES_LIB NAMES ncursesw ncurses)
 endif()
 
+# --- OpenSSL ----------------------------------------------------------------
+find_package(OpenSSL QUIET)
+if(NOT OpenSSL_FOUND AND WIN32)
+    message(STATUS "OpenSSL not found on Windows, fetching via FetchContent")
+    FetchContent_Declare(
+        openssl
+        GIT_REPOSITORY https://github.com/janbar/openssl-cmake.git
+        GIT_TAG master
+    )
+    FetchContent_MakeAvailable(openssl)
+    set(OPENSSL_LIBRARIES ssl crypto)
+    set(OPENSSL_INCLUDE_DIR ${openssl_SOURCE_DIR}/include)
+    set(OpenSSL_FOUND TRUE)
+endif()
+
+if(OpenSSL_FOUND OR OPENSSL_FOUND)
+    message(STATUS "OpenSSL found, enabling Mesh network features")
+    add_compile_definitions(ENABLE_MESH_NET=1)
+else()
+    message(STATUS "OpenSSL NOT found, Mesh network features disabled")
+endif()
+
 # --- main library -----------------------------------------------------------
 set(CORE_SRCS
     src/util/log.cpp
@@ -140,6 +162,7 @@ set(CORE_SRCS
     src/mesh/node_db.cpp
     src/mesh/mesh_service.cpp
     src/stream/stream_client.cpp
+    src/stream/stream_server.cpp
     src/store/database.cpp
 )
 
@@ -168,6 +191,17 @@ else()
     target_link_libraries(meshcli_core PUBLIC ws2_32 windowsapp)
 endif()
 target_include_directories(meshcli_core PUBLIC ${NCURSES_INCLUDE_DIR} ${SQLITE3_INCLUDE_DIR})
+
+if(OpenSSL_FOUND OR OPENSSL_FOUND)
+    if(TARGET OpenSSL::SSL AND TARGET OpenSSL::Crypto)
+        target_link_libraries(meshcli_core PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+    else()
+        target_link_libraries(meshcli_core PUBLIC ${OPENSSL_LIBRARIES})
+    endif()
+    if(OPENSSL_INCLUDE_DIR)
+        target_include_directories(meshcli_core PUBLIC ${OPENSSL_INCLUDE_DIR})
+    endif()
+endif()
 
 # --- TUI + executable -------------------------------------------------------
 add_library(meshcli_tui STATIC

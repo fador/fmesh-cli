@@ -107,6 +107,17 @@ struct EvRawPacket {
     uint64_t ts = 0;       // unix millis
 };
 
+// A raw byte stream chunk received from the radio (before framing/decoding)
+struct EvRawRxBytes {
+    DeviceId device;
+    std::string bytes;
+};
+
+// Request to send raw bytes to the local physical radio (from StreamServer clients)
+struct EvSendRawToRadio {
+    std::string bytes;
+};
+
 // A BLE device found during scan (for the interactive connection wizard).
 struct EvBleDeviceFound {
     DeviceId device;       // BlueZ object path
@@ -131,6 +142,8 @@ using MeshEvent = std::variant<
     EvNodeJoined,
     EvConfigLine,
     EvRawPacket,
+    EvRawRxBytes,
+    EvSendRawToRadio,
     EvBleDeviceFound
 >;
 

@@ -5,6 +5,7 @@
 #include "mesh/node_db.h"
 #include "store/database.h"
 #include "stream/stream_client.h"
+#include "stream/stream_server.h"
 #include "util/event_loop.h"
 
 #include <atomic>
@@ -64,6 +65,12 @@ public:
     // Disconnect everything.
     void disconnect_all();
 
+    // Start the mesh stream server for incoming mesh clients
+    void start_stream_server(int port, const std::string& user, const std::string& password);
+
+    // Stop the mesh stream server
+    void stop_stream_server();
+
     // Reconnect a device (e.g. after BLE disconnect). Returns false if the
     // device id is unknown.
     bool reconnect_device(const std::string& device_id);
@@ -107,6 +114,10 @@ private:
     Database db_;
     mutable std::mutex devices_mu_;
     std::map<std::string, std::shared_ptr<DeviceRuntime>> devices_;
+
+#ifdef ENABLE_MESH_NET
+    std::unique_ptr<StreamServer> stream_server_;
+#endif
 
     // Dedup: track recently seen {from_node, packet_id} pairs across
     // all devices so the same mesh message only appears once in the UI.

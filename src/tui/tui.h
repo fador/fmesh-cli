@@ -18,9 +18,9 @@ namespace meshcli {
 struct AppConfig;
 
 enum class Mode { Normal, ConnectWizard_Tab, ConnectWizard_BLE,
-                  ConnectWizard_TCP, ConnectWizard_Serial };
+                  ConnectWizard_TCP, ConnectWizard_Serial, ConnectWizard_Mesh };
 
-enum class ConnTransport { BLE, TCP, Serial };
+enum class ConnTransport { BLE, TCP, Serial, Mesh };
 
 enum class NodeListSort { Name, LastHeard, NodeId, Battery, Hops };
 
@@ -68,6 +68,7 @@ private:
     void render_wizard_ble();
     void render_wizard_tcp();
     void render_wizard_serial();
+    void render_wizard_mesh();
 
     // --- nodelist ---
     void render_nodelist(const Window& w, int top, int height, int width);
@@ -113,8 +114,12 @@ private:
     std::string wizard_tcp_port_ = "4403";
     std::string wizard_serial_path_ = "/dev/ttyUSB0";
     std::string wizard_serial_baud_ = "115200";
-    int wizard_field_ = 0;  // 0=host, 1=port (tcp) or 0=pin (ble) or 0=path,1=baud (serial)
-    int wizard_field_cursor_[2] = {0, 0};
+    std::string wizard_mesh_host_ = "";
+    std::string wizard_mesh_port_ = "4404";
+    std::string wizard_mesh_user_ = "admin";
+    std::string wizard_mesh_password_ = "";
+    int wizard_field_ = 0;  // 0=host, 1=port (tcp) or 0=pin (ble) or 0=path,1=baud (serial) or 0..3 (mesh)
+    int wizard_field_cursor_[4] = {0, 0, 0, 0};
 
     // --- nodelist state ---
     std::string nodelist_device_;       // which device's nodelist is shown

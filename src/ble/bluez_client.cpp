@@ -236,6 +236,11 @@ void BluezClient::emit_error(std::string msg) {
 }
 
 void BluezClient::emit_raw(const std::string& fromradio_bytes) {
+    EvRawRxBytes rx_ev;
+    rx_ev.device = device_id_;
+    rx_ev.bytes = fromradio_bytes;
+    if (sink_) sink_(rx_ev);
+
     EvRawPacket ev;
     ev.device = device_id_;
     ev.ts = std::chrono::duration_cast<std::chrono::milliseconds>(

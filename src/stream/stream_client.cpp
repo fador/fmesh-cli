@@ -28,6 +28,11 @@ typedef SSIZE_T ssize_t;
 #include <netinet/in.h>
 #endif
 
+#ifdef ENABLE_MESH_NET
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+#endif
+
 namespace meshcli {
 
 using namespace std::chrono_literals;
@@ -137,9 +142,44 @@ StreamClient::StreamClient(intptr_t fd, std::string display_name, EventSink sink
 
 StreamClient::~StreamClient() { stop(); }
 
+#ifdef ENABLE_MESH_NET
+void StreamClient::enable_tls(const std::string& user, const std::string& password) {
+    use_tls_ = true;
+    tls_user_ = user;
+    tls_password_ = password;
+}
+#endif
+
 std::string StreamClient::start() {
     running_ = true;
     connected_ = true;
+
+#ifdef ENABLE_MESH_NET
+    if (use_tls_) {
+        ssl_ctx_ = SSL_CTX_new(TLS_client_method());
+        if (!ssl_ctx_) {
+            emit_error("Failed to create SSL context");
+            return "";
+        }
+        // Do not verify certificates for this simple mesh demo
+        SSL_CTX_set_verify(ssl_ctx_, SSL_VERIFY_NONE, nullptr);
+        ssl_ = SSL_new(ssl_ctx_);
+        SSL_set_fd(ssl_, static_cast<int>(fd_));
+        if (SSL_connect(ssl_) <= 0) {
+            emit_error("SSL handshake failed");
+            return "";
+        }
+        std::string auth_cmd = "AUTH " + tls_user_ + " " + tls_password_ + "\n";
+        SSL_write(ssl_, auth_cmd.c_str(), auth_cmd.size());
+        char resp[16] = {0};
+        SSL_read(ssl_, resp, sizeof(resp) - 1);
+        if (std::string(resp).find("OK") == std::string::npos) {
+            emit_error("Mesh authentication failed");
+            return "";
+        }
+        LOG_INFO() << "Mesh TLS authentication successful";
+    }
+#endif
 
     EvConnected evc;
     evc.device = device_id_;
@@ -160,6 +200,17 @@ std::string StreamClient::start() {
 void StreamClient::stop() {
     if (!running_.exchange(false)) return;
     connected_ = false;
+#ifdef ENABLE_MESH_NET
+    if (use_tls_ && ssl_) {
+        SSL_shutdown(ssl_);
+        SSL_free(ssl_);
+        ssl_ = nullptr;
+    }
+    if (use_tls_ && ssl_ctx_) {
+        SSL_CTX_free(ssl_ctx_);
+        ssl_ctx_ = nullptr;
+    }
+#endif
     if (fd_ >= 0) { close(fd_); fd_ = -1; }
     if (thread_.joinable()) thread_.join();
 }
@@ -171,7 +222,23 @@ bool StreamClient::send_to_radio(const std::string& bytes) {
     int retries = 0;
     static constexpr int kMaxRetries = 10;
     while (written < framed.size() && retries < kMaxRetries) {
-        ssize_t n = ::write(fd_, framed.data() + written, framed.size() - written);
+        ssize_t n = -1;
+#ifdef ENABLE_MESH_NET
+        if (use_tls_ && ssl_) {
+            n = SSL_write(ssl_, framed.data() + written, framed.size() - written);
+            if (n <= 0) {
+                int err = SSL_get_error(ssl_, n);
+                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                    n = -1; // handle as EAGAIN
+                    errno = EAGAIN;
+                }
+            }
+        } else {
+            n = ::write(fd_, framed.data() + written, framed.size() - written);
+        }
+#else
+        n = ::write(fd_, framed.data() + written, framed.size() - written);
+#endif
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
                 ++retries;
@@ -221,7 +288,25 @@ void StreamClient::read_loop() {
         }
         if (pr == 0) continue;  // timeout
 
-        ssize_t n = read(fd_, tmp, sizeof(tmp));
+        ssize_t n = -1;
+#ifdef ENABLE_MESH_NET
+        if (use_tls_ && ssl_) {
+            n = SSL_read(ssl_, tmp, sizeof(tmp));
+            if (n <= 0) {
+                int err = SSL_get_error(ssl_, n);
+                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                    n = -1;
+                    errno = EAGAIN;
+                } else {
+                    n = 0; // treat as EOF
+                }
+            }
+        } else {
+            n = read(fd_, tmp, sizeof(tmp));
+        }
+#else
+        n = read(fd_, tmp, sizeof(tmp));
+#endif
         if (n < 0) {
 #ifdef _WIN32
             if (WSAGetLastError() == WSAEWOULDBLOCK || errno == EAGAIN || errno == EWOULDBLOCK) continue;

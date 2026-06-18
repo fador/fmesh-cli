@@ -15,6 +15,10 @@ struct BleDeviceSpec {
     std::string tcp_host;    // "host:port"
     std::string serial_port; // "/dev/ttyUSB0"
     int serial_baud = 115200;
+    // Mesh connectivity Server/Client
+    std::string mesh_host;
+    std::string mesh_user;
+    std::string mesh_password;
 };
 
 // Abstract BLE client interface. Platform-specific implementations (e.g. BlueZ, WinRT)
