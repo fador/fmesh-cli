@@ -61,6 +61,10 @@ public:
     [[nodiscard]] Window* current_window();
     [[nodiscard]] const std::vector<std::unique_ptr<Window>>& windows() const { return windows_; }
 
+    // Close the window at index (1-based) if it is a channel/dm with no messages.
+    // Returns true if the window was closed.
+    bool close_if_empty(int index);
+
     // Look up the routing target of the current window (returns nullptr if
     // the status window is active — you can't send text from there).
     [[nodiscard]] const WindowTarget* current_target() const;

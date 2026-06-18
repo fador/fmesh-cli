@@ -1063,9 +1063,27 @@ int TuiApp::run() {
                         } else if (ch2 == 'n') {
                             wm_.select_relative(1);
                             need_redraw_ = true;
-                        } else if (ch2 == 'p') {
-                            wm_.select_relative(-1);
-                            need_redraw_ = true;
+                        } else if (ch2 == '[') {
+                            int ch3 = getch();
+                            if (ch3 == 'D') { wm_.select_relative(-1); need_redraw_ = true; }
+                            else if (ch3 == 'C') { wm_.select_relative(1); need_redraw_ = true; }
+                        } else if (ch2 == 27) {
+                            int ch3 = getch();
+                            if (ch3 == '[') {
+                                int ch4 = getch();
+                                if (ch4 == 'D') { wm_.select_relative(-1); need_redraw_ = true; }
+                                else if (ch4 == 'C') { wm_.select_relative(1); need_redraw_ = true; }
+                            }
+                        } else if (ch2 == 'q' || ch2 == 'w' || ch2 == 'e' || ch2 == 'r' ||
+                                   ch2 == 't' || ch2 == 'y' || ch2 == 'u' || ch2 == 'i' ||
+                                   ch2 == 'o' || ch2 == 'p') {
+                            static const char* qrow = "qwertyuiop";
+                            int offset = 0;
+                            while (offset < 10 && qrow[offset] != ch2) ++offset;
+                            if (offset < 10) {
+                                wm_.select(11 + offset);
+                                need_redraw_ = true;
+                            }
                         }
                         ch = getch();
                         continue;
