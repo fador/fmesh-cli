@@ -453,7 +453,6 @@ bool TuiApp::handle_nodelist_key(int ch) {
         return true;
     }
     if (ch == '\n' || ch == KEY_ENTER) {
-        // Find the selected node across all devices (or single device).
         auto get_nth_node = [&](int idx) -> std::pair<std::string, std::optional<Node>> {
             std::map<uint32_t, std::pair<std::string, Node>> merged;
             auto devices = service_.device_ids();
@@ -489,38 +488,10 @@ bool TuiApp::handle_nodelist_key(int ch) {
 
         auto [dev, n] = get_nth_node(nodelist_cursor_);
         if (n) {
-            std::string nick = n->short_name.empty() ? n->long_name : n->short_name;
-            wm_.ensure_dm(dev, n->node_num, nick);
-            wm_.append_status("Node: " + n->long_name + " (" + n->short_name + ")  ID: " + n->node_id,
-                              tui_color::CHANNEL);
-            if (n->battery_level)
-                wm_.append_status("  Battery: " + std::to_string(*n->battery_level) + "%", tui_color::INFO);
-            if (n->last_heard) {
-                std::time_t t = static_cast<std::time_t>(*n->last_heard);
-                char buf[32];
-                std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&t));
-                wm_.append_status("  Last heard: " + std::string(buf), tui_color::INFO);
-            }
-            if (n->hops_away)
-                wm_.append_status("  Hops: " + std::to_string(*n->hops_away), tui_color::INFO);
-            if (n->snr) {
-                char buf[16];
-                std::snprintf(buf, sizeof(buf), "%.1f dB", *n->snr);
-                wm_.append_status("  SNR: " + std::string(buf), tui_color::INFO);
-            }
-            // Show which devices heard this node.
-            if (unified) {
-                std::string heard;
-                for (const auto& id : service_.device_ids()) {
-                    const NodeDb* db = service_.db_for(id);
-                    if (db && db->get(n->node_num)) {
-                        if (!heard.empty()) heard += ", ";
-                        heard += service_.display_name_for(id);
-                    }
-                }
-                if (!heard.empty())
-                    wm_.append_status("  Heard by: " + heard, tui_color::INFO);
-            }
+            popup_device_ = dev;
+            popup_node_ = *n;
+            popup_selection_ = 0;
+            popup_active_ = true;
         }
         need_redraw_ = true;
         return true;
@@ -665,6 +636,138 @@ void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
     }
 }
 
+// --- popup -------------------------------------------------------------------
+
+void TuiApp::render_popup() {
+    const Node& n = popup_node_;
+    int popup_w = 44;
+    int popup_h = 12;
+    int start_y = std::max(0, (LINES - popup_h) / 2);
+    int start_x = std::max(0, (COLS - popup_w) / 2);
+
+    // Dim the background by drawing the box first, then overlay
+    attron(COLOR_PAIR(tui_color::TITLE));
+    for (int y = 0; y < popup_h; ++y) {
+        mvhline(start_y + y, start_x, ' ', popup_w);
+    }
+    attroff(COLOR_PAIR(tui_color::TITLE));
+
+    // Border
+    attron(A_BOLD | COLOR_PAIR(tui_color::TITLE));
+    mvhline(start_y, start_x, ' ', popup_w);
+    std::string title = " Node Info ";
+    int title_start = start_x + (popup_w - static_cast<int>(title.size())) / 2;
+    mvprintw(start_y, title_start, "%s", title.c_str());
+    attroff(A_BOLD);
+    attroff(COLOR_PAIR(tui_color::TITLE));
+
+    int row = start_y + 1;
+
+    auto draw_line = [&](const std::string& label, const std::string& value) {
+        mvprintw(row, start_x + 2, "%s", label.c_str());
+        int val_start = start_x + popup_w - 2 - static_cast<int>(value.size());
+        mvprintw(row, std::max(start_x + 2 + static_cast<int>(label.size()) + 1, val_start), "%s", value.c_str());
+        ++row;
+    };
+
+    std::string display = n.long_name;
+    if (!n.short_name.empty() && n.short_name != n.long_name)
+        display += " (" + n.short_name + ")";
+    draw_line("Name:", display);
+
+    std::string sid = n.node_id;
+    if (sid.size() > 16) sid = sid.substr(0, 13) + "...";
+    draw_line("ID:", sid + "  #" + std::to_string(n.node_num));
+
+    if (n.battery_level) {
+        draw_line("Battery:", std::to_string(*n.battery_level) + "%");
+    }
+    if (n.last_heard) {
+        std::time_t t = static_cast<std::time_t>(*n.last_heard);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&t));
+        draw_line("Last heard:", std::string(buf));
+    }
+    if (n.hops_away)
+        draw_line("Hops:", std::to_string(*n.hops_away));
+    if (n.snr) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.1f dB", *n.snr);
+        draw_line("SNR:", std::string(buf));
+    }
+
+    // Heard by
+    std::string heard;
+    for (const auto& id : service_.device_ids()) {
+        const NodeDb* db = service_.db_for(id);
+        if (db && db->get(n.node_num)) {
+            if (!heard.empty()) heard += ", ";
+            heard += service_.display_name_for(id);
+        }
+    }
+    if (!heard.empty())
+        draw_line("Heard by:", heard);
+
+    // Separator
+    ++row;
+    for (int x = 0; x < popup_w; ++x)
+        mvaddch(start_y + 7, start_x + x, ' ');
+
+    // Options
+    std::string opt_dm = " Send DM ";
+    std::string opt_close = " Close ";
+    int total_opt_w = static_cast<int>(opt_dm.size() + opt_close.size() + 3);
+    int opt_start = start_x + (popup_w - total_opt_w) / 2;
+
+    if (popup_selection_ == 0) {
+        attron(A_REVERSE);
+        mvprintw(start_y + popup_h - 3, opt_start, "%s", opt_dm.c_str());
+        attroff(A_REVERSE);
+        mvprintw(start_y + popup_h - 3, opt_start + static_cast<int>(opt_dm.size()), " | ");
+        mvprintw(start_y + popup_h - 3, opt_start + static_cast<int>(opt_dm.size()) + 3, "%s", opt_close.c_str());
+    } else {
+        mvprintw(start_y + popup_h - 3, opt_start, "%s", opt_dm.c_str());
+        mvprintw(start_y + popup_h - 3, opt_start + static_cast<int>(opt_dm.size()), " | ");
+        attron(A_REVERSE);
+        mvprintw(start_y + popup_h - 3, opt_start + static_cast<int>(opt_dm.size()) + 3, "%s", opt_close.c_str());
+        attroff(A_REVERSE);
+    }
+
+    mvprintw(start_y + popup_h - 2, start_x + 2, "arrows/tab=select  enter=confirm  esc=close");
+}
+
+bool TuiApp::handle_popup_key(int ch) {
+    if (ch == 27) { // ESC
+        popup_active_ = false;
+        need_redraw_ = true;
+        return true;
+    }
+    if (ch == '\t') {
+        popup_selection_ = (popup_selection_ + 1) % 2;
+        need_redraw_ = true;
+        return true;
+    }
+    if (ch == KEY_LEFT || ch == KEY_RIGHT || ch == 'h' || ch == 'l') {
+        popup_selection_ = (popup_selection_ + 1) % 2;
+        need_redraw_ = true;
+        return true;
+    }
+    if (ch == '\n' || ch == KEY_ENTER) {
+        if (popup_selection_ == 0) {
+            // Send DM
+            std::string nick = popup_node_.short_name.empty()
+                ? popup_node_.long_name : popup_node_.short_name;
+            wm_.ensure_dm(popup_device_, popup_node_.node_num, nick);
+            wm_.append_status("Opened DM with " + popup_node_.long_name +
+                " (" + popup_node_.node_id + ")", tui_color::INFO);
+        }
+        popup_active_ = false;
+        need_redraw_ = true;
+        return true;
+    }
+    return false;
+}
+
 // --- rendering ---------------------------------------------------------------
 
 void TuiApp::render() {
@@ -749,6 +852,7 @@ void TuiApp::render() {
     else
         cur_prompt = "status> ";
     move(rows - 2, static_cast<int>(cur_prompt.size() + input_.cursor()));
+    if (popup_active_) render_popup();
     refresh();
 }
 
@@ -1014,9 +1118,27 @@ int TuiApp::run() {
                         } else if (ch2 == 'n') {
                             wm_.select_relative(1);
                             need_redraw_ = true;
-                        } else if (ch2 == 'p') {
-                            wm_.select_relative(-1);
-                            need_redraw_ = true;
+                        } else if (ch2 == '[') {
+                            int ch3 = getch();
+                            if (ch3 == 'D') { wm_.select_relative(-1); need_redraw_ = true; }
+                            else if (ch3 == 'C') { wm_.select_relative(1); need_redraw_ = true; }
+                        } else if (ch2 == 27) {
+                            int ch3 = getch();
+                            if (ch3 == '[') {
+                                int ch4 = getch();
+                                if (ch4 == 'D') { wm_.select_relative(-1); need_redraw_ = true; }
+                                else if (ch4 == 'C') { wm_.select_relative(1); need_redraw_ = true; }
+                            }
+                        } else if (ch2 == 'q' || ch2 == 'w' || ch2 == 'e' || ch2 == 'r' ||
+                                   ch2 == 't' || ch2 == 'y' || ch2 == 'u' || ch2 == 'i' ||
+                                   ch2 == 'o' || ch2 == 'p') {
+                            static const char* qrow = "qwertyuiop";
+                            int offset = 0;
+                            while (offset < 10 && qrow[offset] != ch2) ++offset;
+                            if (offset < 10) {
+                                wm_.select(11 + offset);
+                                need_redraw_ = true;
+                            }
                         }
                         ch = getch();
                         continue;
@@ -1070,23 +1192,13 @@ int TuiApp::run() {
                         nodelist_offset_ = std::max(0, nodelist_cursor_ - (LINES - 5));
                         need_redraw_ = true;
                     } else if (auto* w = wm_.current_window()) {
-                        w->scroll_by(1);
-                        need_redraw_ = true;
-                    }
-                } else if (ch == KEY_NPAGE) {
-                    if (wm_.current_window() && wm_.current_window()->target().kind == "nodelist") {
-                        const NodeDb* db = service_.db_for(nodelist_device_);
-                        if (db) {
-                            int total = static_cast<int>(db->all().size());
-                            int pg = std::max(1, LINES - 4);
-                            nodelist_cursor_ = std::min(total - 1, nodelist_cursor_ + pg);
-                            nodelist_offset_ = std::max(0, nodelist_cursor_ - (LINES - 5));
-                            need_redraw_ = true;
-                        }
-                    } else if (auto* w = wm_.current_window()) {
                         w->scroll_by(-1);
                         need_redraw_ = true;
                     }
+                } else if (popup_active_ && handle_popup_key(ch)) {
+                    // Popup key handled.
+                } else if (popup_active_) {
+                    // Ignore other keys while popup is active.
                 } else if (wm_.current_window() && wm_.current_window()->target().kind == "nodelist"
                            && handle_nodelist_key(ch)) {
                     // Nodelist key handled (arrows, enter, 's').

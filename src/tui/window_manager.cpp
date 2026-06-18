@@ -265,6 +265,12 @@ void WindowManager::append_outgoing(const std::string& device,
 }
 
 void WindowManager::select(int index) {
+    if (current_ >= 1 && current_ <= static_cast<int>(windows_.size()) && current_ != index) {
+        int old_cur = current_;
+        if (close_if_empty(old_cur) && old_cur < index) {
+            --index;
+        }
+    }
     if (index < 1 || index > static_cast<int>(windows_.size())) return;
     current_ = index;
     if (auto* w = current_window()) {
@@ -274,7 +280,6 @@ void WindowManager::select(int index) {
 }
 
 void WindowManager::select_next_active() {
-    // Find the next window with activity, wrapping around.
     int n = static_cast<int>(windows_.size());
     for (int i = 1; i <= n; ++i) {
         int idx = ((current_ - 1 + i) % n) + 1;
@@ -290,6 +295,28 @@ void WindowManager::select_relative(int delta) {
     if (n == 0) return;
     int idx = ((current_ - 1 + delta) % n + n) % n + 1;
     select(idx);
+}
+
+bool WindowManager::close_if_empty(int index) {
+    if (index < 1 || index > static_cast<int>(windows_.size())) return false;
+    if (index == 1) return false;
+    Window& w = *windows_[index - 1];
+    const auto& t = w.target();
+    if (!w.lines().empty()) return false;
+    bool is_empty_dm = (t.kind == "dm");
+    bool is_unnamed_channel = (t.kind == "channel") &&
+        (w.title().find("#ch") == 0) &&
+        (w.title().size() > 3 && std::isdigit(w.title()[3]));
+    if (!is_empty_dm && !is_unnamed_channel) return false;
+    std::string key = t.device + "|" + t.kind + "|" + std::to_string(t.target);
+    by_key_.erase(key);
+    windows_.erase(windows_.begin() + (index - 1));
+    for (auto& [k, idx] : by_key_) {
+        if (idx > index) --idx;
+    }
+    if (current_ > index) --current_;
+    if (current_ > static_cast<int>(windows_.size())) current_ = static_cast<int>(windows_.size());
+    return true;
 }
 
 Window* WindowManager::current_window() {
