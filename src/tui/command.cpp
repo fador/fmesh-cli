@@ -29,10 +29,11 @@ CommandDispatcher::CommandDispatcher(MeshService& service, WindowManager& wm,
                                      StatusSink status,
                                      std::string& active_device,
                                      std::function<void()> on_scan,
-                                     std::function<bool(const std::string&)> on_set_theme)
+                                     std::function<bool(const std::string&)> on_set_theme,
+                                     std::function<void(bool)> on_server_config)
     : service_(service), wm_(wm), status_(std::move(status)),
       active_device_(active_device), on_scan_(std::move(on_scan)),
-      on_set_theme_(std::move(on_set_theme)) {}
+      on_set_theme_(std::move(on_set_theme)), on_server_config_(std::move(on_server_config)) {}
 
 CommandResult CommandDispatcher::execute(const std::string& line) {
     CommandResult res;
@@ -85,6 +86,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "disconnect" || cmd == "dc") cmd_disconnect(tokens);
     else if (cmd == "scan" || cmd == "s")      cmd_scan();
     else if (cmd == "theme")                  cmd_theme(tokens);
+    else if (cmd == "server")                 cmd_server(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -119,6 +121,7 @@ void CommandDispatcher::cmd_help() {
     status_("                              serial:<path>[:<baud>]", tui_color::INFO);
     status_("  /disconnect [id]      disconnect a device (no arg: list IDs)", tui_color::INFO);
     status_("  /scan                 open the interactive connection wizard", tui_color::INFO);
+    status_("  /server [on|off]      open the mesh sync stream server configuration or turn it off", tui_color::INFO);
     status_("  /theme [name]         list themes or switch to a theme", tui_color::INFO);
     status_("  /device [id]          show or switch active device", tui_color::INFO);
     status_("  /quit                 exit fmesh-cli", tui_color::INFO);
@@ -739,6 +742,18 @@ void CommandDispatcher::cmd_theme(const std::vector<std::string>& args) {
         } else {
             status_("Theme not found: " + args[0] + " (use /theme to list)", tui_color::ERROR);
         }
+    }
+}
+
+void CommandDispatcher::cmd_server(const std::vector<std::string>& args) {
+    if (args.empty() || (args[0] != "on" && args[0] != "off")) {
+        status_("Usage: /server on|off", tui_color::ERROR);
+        return;
+    }
+    if (args[0] == "on") {
+        if (on_server_config_) on_server_config_(true);
+    } else if (args[0] == "off") {
+        if (on_server_config_) on_server_config_(false);
     }
 }
 

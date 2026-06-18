@@ -175,7 +175,7 @@ int run_app(int argc, char** argv, MeshService& service) {
         return 0;
     }
 
-    TuiApp app(service, queue, wake, cfg.history_path);
+    TuiApp app(service, queue, wake, cfg);
     int rc = app.run();
 
     if (cfg.server_mode) {

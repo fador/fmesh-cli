@@ -5,6 +5,7 @@
 #include "status_bar.h"
 #include "theme.h"
 #include "util/event_loop.h"
+#include "app/config.h"
 #include "window_manager.h"
 
 #include <atomic>
@@ -18,7 +19,8 @@ namespace meshcli {
 struct AppConfig;
 
 enum class Mode { Normal, ConnectWizard_Tab, ConnectWizard_BLE,
-                  ConnectWizard_TCP, ConnectWizard_Serial, ConnectWizard_Mesh };
+                  ConnectWizard_TCP, ConnectWizard_Serial, ConnectWizard_Mesh,
+                  ServerConfig };
 
 enum class ConnTransport { BLE, TCP, Serial, Mesh };
 
@@ -34,7 +36,7 @@ struct BleScanEntry {
 class TuiApp {
 public:
     TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake,
-           const std::string& history_path);
+           AppConfig& config);
     ~TuiApp();
 
     int run();
@@ -69,6 +71,8 @@ private:
     void render_wizard_tcp();
     void render_wizard_serial();
     void render_wizard_mesh();
+    void render_server_config();
+    bool handle_server_config_key(int ch);
 
     // --- nodelist ---
     void render_nodelist(const Window& w, int top, int height, int width);
@@ -87,12 +91,12 @@ private:
     EventFd& wake_;
 
     WindowManager wm_;
+    AppConfig& config_;
     InputLine input_;
     StatusBar status_bar_;
     bool quit_ = false;
     bool ncurses_ok_ = false;
     bool need_redraw_ = true;
-    std::string history_path_;
 
     std::string active_device_;
 
@@ -116,12 +120,17 @@ private:
     std::string wizard_pin_ = "123456";
     std::string wizard_tcp_host_ = "";
     std::string wizard_tcp_port_ = "4403";
-    std::string wizard_serial_path_ = "/dev/ttyUSB0";
-    std::string wizard_serial_baud_ = "115200";
+    std::string wizard_serial_path_;
+    std::string wizard_serial_baud_;
     std::string wizard_mesh_host_ = "";
     std::string wizard_mesh_port_ = "4404";
     std::string wizard_mesh_user_ = "admin";
     std::string wizard_mesh_password_ = "";
+
+    std::string wizard_server_port_;
+    std::string wizard_server_user_;
+    std::string wizard_server_password_;
+
     int wizard_field_ = 0;  // 0=host, 1=port (tcp) or 0=pin (ble) or 0=path,1=baud (serial) or 0..3 (mesh)
     int wizard_field_cursor_[4] = {0, 0, 0, 0};
 

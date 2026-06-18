@@ -86,15 +86,15 @@ time_t TuiApp::s_last_reconnect_attempt = 0;
 TuiApp* TuiApp::s_instance_ = nullptr;
 
 TuiApp::TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake,
-               const std::string& history_path)
+               AppConfig& config)
     : service_(service), queue_(queue), wake_(wake), wm_(service),
-      history_path_(history_path) { s_instance_ = this; }
+      config_(config) { s_instance_ = this; }
 
 TuiApp::~TuiApp() {
     stop_scan();
     s_instance_ = nullptr;
-    if (!history_path_.empty())
-        input_.save_history(history_path_);
+    if (!config_.history_path.empty())
+        input_.save_history(config_.history_path);
     teardown_ncurses();
 }
 
@@ -134,8 +134,8 @@ void TuiApp::init_ncurses() {
     }
     Logger::instance().set_console(false);
     Logger::instance().set_level(LogLevel::Info);
-    if (!history_path_.empty())
-        input_.load_history(history_path_);
+    if (!config_.history_path.empty())
+        input_.load_history(config_.history_path);
     #ifndef _WIN32
     std::signal(SIGWINCH, on_sigwinch);
 #endif
@@ -443,6 +443,46 @@ bool TuiApp::handle_wizard_key(int ch) {
         break;
     }
     return handled;
+}
+
+bool TuiApp::handle_server_config_key(int ch) {
+    if (ch == 27) { // ESC
+        mode_ = Mode::Normal;
+        erase();
+        clearok(stdscr, TRUE);
+        need_redraw_ = true;
+        return true;
+    }
+
+    std::string* fields[] = {&wizard_server_port_, &wizard_server_user_, &wizard_server_password_};
+    auto* field = fields[wizard_field_];
+
+    if (ch == '\t') {
+        wizard_field_ = (wizard_field_ + 1) % 3;
+        need_redraw_ = true;
+    } else if (ch == '\n' || ch == KEY_ENTER) {
+        config_.server_mode = true;
+        config_.server_port = std::atoi(wizard_server_port_.c_str());
+        if (config_.server_port <= 0) config_.server_port = 4404;
+        config_.server_user = wizard_server_user_;
+        config_.server_password = wizard_server_password_;
+        save_config(config_);
+
+        service_.start_stream_server(config_.server_port, config_.server_user, config_.server_password);
+        wm_.append_status("Started Mesh Sync Stream Server on port " + std::to_string(config_.server_port), tui_color::INFO);
+
+        mode_ = Mode::Normal;
+        erase();
+        clearok(stdscr, TRUE);
+        need_redraw_ = true;
+    } else if (ch == KEY_BACKSPACE || ch == 127) {
+        if (!field->empty()) field->pop_back();
+        need_redraw_ = true;
+    } else if (ch >= 32 && ch < 127 && field->size() < 60) {
+        *field += static_cast<char>(ch);
+        need_redraw_ = true;
+    }
+    return true;
 }
 
 // --- themes ---
@@ -840,6 +880,7 @@ void TuiApp::render() {
         case Mode::ConnectWizard_TCP:    render_wizard_tcp(); break;
         case Mode::ConnectWizard_Serial: render_wizard_serial(); break;
         case Mode::ConnectWizard_Mesh:   render_wizard_mesh(); break;
+        case Mode::ServerConfig:         render_server_config(); break;
         default: break;
         }
         refresh();
@@ -1054,6 +1095,27 @@ void TuiApp::render_wizard_serial() {
     mvprintw(mid + 4, cx, " ENTER=connect  TAB=next field  ESC=back");
 }
 
+void TuiApp::render_server_config() {
+    int rows = LINES, cols = COLS;
+    if (rows < 10 || cols < 30) {
+        mvprintw(rows / 2, std::max(0, (cols - 18) / 2), "terminal too small");
+        return;
+    }
+    int cx = std::max(0, (cols - 50) / 2);
+    int mid = rows / 2 - 2;
+    attron(A_REVERSE);
+    mvhline(mid - 2, cx, ' ', std::min(50, cols - cx));
+    mvprintw(mid - 2, cx, " Mesh Sync Stream Server ");
+    attroff(A_REVERSE);
+    mvprintw(mid,     cx, " Port:     [%s%s]",
+             wizard_server_port_.c_str(), wizard_field_ == 0 ? "|" : "");
+    mvprintw(mid + 1, cx, " User:     [%s%s]",
+             wizard_server_user_.c_str(), wizard_field_ == 1 ? "|" : "");
+    mvprintw(mid + 2, cx, " Password: [%s%s]",
+             wizard_server_password_.c_str(), wizard_field_ == 2 ? "|" : "");
+    mvprintw(mid + 4, cx, " TAB to cycle, ENTER to start server, ESC to cancel");
+}
+
 void TuiApp::render_scrollback(const Window& w, int top, int height, int width) {
     const auto& lines = w.lines();
     if (lines.empty()) {
@@ -1169,7 +1231,11 @@ int TuiApp::run() {
                 // In wizard mode, handle keys differently.
                 if (mode_ != Mode::Normal) {
                     if (ch == 3) { quit_ = true; break; }  // Ctrl-C still quits
-                    if (!handle_wizard_key(ch)) { /* unhandled */ }
+                    if (mode_ == Mode::ServerConfig) {
+                        if (!handle_server_config_key(ch)) { /* unhandled */ }
+                    } else {
+                        if (!handle_wizard_key(ch)) { /* unhandled */ }
+                    }
                     ch = getch();
                     continue;
                 }
@@ -1281,7 +1347,22 @@ int TuiApp::run() {
                             [this](const std::string& s, int c) { wm_.append_status(s, c); },
                             active_device_,
                             [this]() { enter_wizard(); },
-                            [this](const std::string& name) { return set_theme(name); });
+                            [this](const std::string& name) { return set_theme(name); },
+                            [this](bool turn_on) {
+                                if (turn_on) {
+                                    wizard_server_port_ = std::to_string(config_.server_port > 0 ? config_.server_port : 4404);
+                                    wizard_server_user_ = config_.server_user;
+                                    wizard_server_password_ = config_.server_password;
+                                    wizard_field_ = 0;
+                                    mode_ = Mode::ServerConfig;
+                                    need_redraw_ = true;
+                                } else {
+                                    service_.stop_stream_server();
+                                    config_.server_mode = false;
+                                    save_config(config_);
+                                    wm_.append_status("Mesh Sync Stream Server stopped.", tui_color::INFO);
+                                }
+                            });
                         auto res = disp.execute(submitted);
                         if (res.quit) quit_ = true;
                     } else {
