@@ -44,6 +44,9 @@ int run_app(int argc, char** argv, MeshService& service) {
     EventFd wake;
     service.set_event_sink(&queue, &wake);
 
+    LOG_INFO() << "Database path: " << cfg.db_path;
+    LOG_INFO() << "Config path: " << cfg.config_path;
+
     if (cfg.server_mode) {
         LOG_INFO() << "Starting mesh stream server on port " << cfg.server_port;
         service.start_stream_server(cfg.server_port, cfg.server_user, cfg.server_password);
