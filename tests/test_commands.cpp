@@ -55,7 +55,7 @@ public:
         Capture c;
         CommandDispatcher disp(svc_, wm_,
             [&](const std::string& s, int) { c.lines.push_back(s); },
-            "");
+            active_dev_);
         auto res = disp.execute(line);
         c.quit = res.quit;
         return c;
@@ -64,6 +64,7 @@ public:
 protected:
     MeshService svc_;
     WindowManager wm_;
+    std::string active_dev_;
     std::string db_path_;
 };
 

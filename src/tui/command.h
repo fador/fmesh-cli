@@ -24,7 +24,8 @@ public:
     using StatusSink = std::function<void(const std::string&, int)>;
 
     CommandDispatcher(MeshService& service, WindowManager& wm, StatusSink status,
-                      const std::string& active_device);
+                      std::string& active_device,
+                      std::function<void()> on_scan = {});
 
     // Execute a full input line (may be a command or plain text). Returns
     // a CommandResult (quit flag etc.).
@@ -34,7 +35,8 @@ private:
     MeshService& service_;
     WindowManager& wm_;
     StatusSink status_;
-    std::string active_device_;
+    std::string& active_device_;
+    std::function<void()> on_scan_;
 
     void cmd_help();
     void cmd_list();
@@ -47,7 +49,8 @@ private:
     void cmd_clear();
     void cmd_info();
     void cmd_quit(CommandResult& res);
-    void cmd_reconnect();
+    void cmd_reconnect(const std::vector<std::string>& args);
+    void cmd_device(const std::vector<std::string>& args);
     void cmd_me(const std::vector<std::string>& args);
     void cmd_config(const std::vector<std::string>& args);
     void cmd_whois(const std::vector<std::string>& args);
@@ -57,6 +60,7 @@ private:
     void cmd_lastlog(const std::vector<std::string>& args);
     void cmd_connect(const std::vector<std::string>& args);
     void cmd_disconnect(const std::vector<std::string>& args);
+    void cmd_scan();
 };
 
 } // namespace meshcli

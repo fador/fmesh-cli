@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <ctime>
+#include <cctype>
 #include <poll.h>
 #include <sstream>
 #include <string>
@@ -22,20 +24,32 @@
 namespace meshcli {
 
 time_t TuiApp::s_last_reconnect_attempt = 0;
-
-namespace {
-
-} // namespace
+TuiApp* TuiApp::s_instance_ = nullptr;
 
 TuiApp::TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake,
                const std::string& history_path)
     : service_(service), queue_(queue), wake_(wake), wm_(service),
-      history_path_(history_path) {}
+      history_path_(history_path) { s_instance_ = this; }
 
 TuiApp::~TuiApp() {
+    stop_scan();
+    s_instance_ = nullptr;
     if (!history_path_.empty())
         input_.save_history(history_path_);
     teardown_ncurses();
+}
+
+void TuiApp::on_sigwinch(int) {
+    if (s_instance_) {
+        endwin();
+        refresh();
+        clearok(stdscr, TRUE);
+        s_instance_->need_redraw_ = true;
+    }
+}
+
+void TuiApp::handle_resize() {
+    need_redraw_ = true;
 }
 
 void TuiApp::init_ncurses() {
@@ -59,11 +73,11 @@ void TuiApp::init_ncurses() {
         init_pair(tui_color::ERROR,   COLOR_RED,   -1);
         init_pair(tui_color::INFO,    COLOR_CYAN,  -1);
     }
-    // Disable logging to stderr now that ncurses owns the screen.
     Logger::instance().set_console(false);
     Logger::instance().set_level(LogLevel::Info);
     if (!history_path_.empty())
         input_.load_history(history_path_);
+    std::signal(SIGWINCH, on_sigwinch);
     clear();
     refresh();
 }
@@ -80,7 +94,6 @@ std::string TuiApp::connection_info() const {
     auto devices = service_.device_ids();
     if (devices.empty()) return "no device";
     std::string s;
-    // Show active device marker when multiple devices.
     if (devices.size() > 1) {
         std::string active_name = service_.display_name_for(active_device_);
         if (!active_name.empty())
@@ -109,16 +122,13 @@ std::string TuiApp::connection_info() const {
 
 void TuiApp::maybe_reconnect() {
     if (reconnect_attempts_.empty()) return;
-
     time_t now = std::time(nullptr);
     if (now - s_last_reconnect_attempt < kReconnectIntervalS) return;
     s_last_reconnect_attempt = now;
 
     auto ids = service_.device_ids();
     std::vector<std::string> to_remove;
-
     for (auto& [device_id, attempts] : reconnect_attempts_) {
-        // Skip if device reconnected on its own.
         bool already = false;
         for (const auto& id : ids)
             if (id == device_id) { already = true; break; }
@@ -127,7 +137,6 @@ void TuiApp::maybe_reconnect() {
             to_remove.push_back(device_id);
             continue;
         }
-
         ++attempts;
         if (attempts > reconnect_max_attempts_) {
             wm_.append_status("*** Auto-reconnect gave up for " + device_id
@@ -136,7 +145,6 @@ void TuiApp::maybe_reconnect() {
             to_remove.push_back(device_id);
             continue;
         }
-
         wm_.append_status("*** Reconnect attempt " +
                           std::to_string(attempts) + "/" +
                           std::to_string(reconnect_max_attempts_) +
@@ -147,12 +155,532 @@ void TuiApp::maybe_reconnect() {
             to_remove.push_back(device_id);
         }
     }
-
     for (const auto& id : to_remove)
         reconnect_attempts_.erase(id);
     if (!to_remove.empty())
         need_redraw_ = true;
 }
+
+// --- connection wizard -------------------------------------------------------
+
+void TuiApp::enter_wizard() {
+    mode_ = Mode::ConnectWizard_Tab;
+    wizard_transport_ = ConnTransport::BLE;
+    wizard_field_ = 0;
+    wizard_field_cursor_[0] = 0;
+    wizard_field_cursor_[1] = 0;
+    scan_entries_.clear();
+    scan_selection_ = 0;
+    scan_entries_offset_ = 0;
+    scan_complete_ = false;
+    wizard_pin_ = "123456";
+}
+
+void TuiApp::exit_wizard() {
+    stop_scan();
+    mode_ = Mode::Normal;
+    need_redraw_ = true;
+}
+
+void TuiApp::start_scan() {
+    stop_scan();
+    scan_entries_.clear();
+    scan_selection_ = 0;
+    scan_complete_ = false;
+    scan_running_ = true;
+    scan_thread_ = std::thread([this]() {
+        std::unique_ptr<sdbus::IConnection> conn;
+        try { conn = sdbus::createSystemBusConnection(); }
+        catch (const sdbus::Error& e) {
+            scan_running_ = false;
+            EvBleDeviceFound ev;
+            ev.scan_complete = true;
+            queue_.push(std::move(ev));
+            wake_.notify();
+            return;
+        }
+        // Find adapter
+        std::string adapter_path;
+        try {
+            auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
+            std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
+            obj_mgr->callMethod("GetManagedObjects")
+                .onInterface("org.freedesktop.DBus.ObjectManager")
+                .storeResultsTo(objects);
+            for (const auto& [path, ifaces] : objects) {
+                if (ifaces.find("org.bluez.Adapter1") != ifaces.end()) {
+                    adapter_path = path; break;
+                }
+            }
+        } catch (const sdbus::Error&) {}
+        if (adapter_path.empty()) {
+            scan_running_ = false;
+            EvBleDeviceFound ev;
+            ev.scan_complete = true;
+            queue_.push(std::move(ev));
+            wake_.notify();
+            return;
+        }
+        // Start discovery
+        try {
+            auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
+            adapter->callMethod("StartDiscovery").onInterface("org.bluez.Adapter1");
+        } catch (const sdbus::Error&) {}
+        // Scan loop
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (scan_running_ && std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            if (!scan_running_) break;
+            try {
+                auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
+                std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
+                obj_mgr->callMethod("GetManagedObjects")
+                    .onInterface("org.freedesktop.DBus.ObjectManager")
+                    .storeResultsTo(objects);
+                for (const auto& [path, ifaces] : objects) {
+                    auto it = ifaces.find("org.bluez.Device1");
+                    if (it == ifaces.end()) continue;
+                    if (path.find(adapter_path + "/") != 0) continue;
+                    const auto& props = it->second;
+                    auto name_it = props.find("Name");
+                    auto alias_it = props.find("Alias");
+                    auto addr_it = props.find("Address");
+                    auto rssi_it = props.find("RSSI");
+                    if (name_it == props.end() && alias_it == props.end()) continue;
+                    std::string nm, addr;
+                    if (name_it != props.end()) nm = name_it->second.get<std::string>();
+                    else if (alias_it != props.end()) nm = alias_it->second.get<std::string>();
+                    if (addr_it != props.end()) addr = addr_it->second.get<std::string>();
+                    // Deduplicate
+                    bool dup = false;
+                    for (auto& e : scan_entries_)
+                        if (e.device_path == path) { dup = true; break; }
+                    if (dup) continue;
+                    EvBleDeviceFound ev;
+                    ev.device = path;
+                    ev.name = nm;
+                    ev.address = addr;
+                    if (rssi_it != props.end())
+                        ev.rssi = static_cast<int16_t>(rssi_it->second.get<int16_t>());
+                    queue_.push(std::move(ev));
+                    wake_.notify();
+                }
+            } catch (const sdbus::Error&) {}
+        }
+        // Stop discovery
+        try {
+            auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
+            adapter->callMethod("StopDiscovery").onInterface("org.bluez.Adapter1");
+        } catch (const sdbus::Error&) {}
+        scan_running_ = false;
+        EvBleDeviceFound done;
+        done.scan_complete = true;
+        queue_.push(std::move(done));
+        wake_.notify();
+    });
+}
+
+void TuiApp::stop_scan() {
+    scan_running_ = false;
+    if (scan_thread_.joinable()) {
+        scan_thread_.join();
+    }
+}
+
+bool TuiApp::handle_wizard_key(int ch) {
+    using M = Mode;
+    bool handled = true;
+
+    if (ch == 27) { // ESC — go back or exit
+        if (mode_ == M::ConnectWizard_Tab) { exit_wizard(); }
+        else { mode_ = M::ConnectWizard_Tab; need_redraw_ = true; }
+        return true;
+    }
+
+    switch (mode_) {
+    case M::ConnectWizard_Tab:
+        if (ch == KEY_LEFT || ch == 'h') {
+            int t = static_cast<int>(wizard_transport_);
+            t = (t - 1 + 3) % 3;
+            wizard_transport_ = static_cast<ConnTransport>(t);
+            need_redraw_ = true;
+        } else if (ch == KEY_RIGHT || ch == 'l' || ch == '\t') {
+            int t = static_cast<int>(wizard_transport_);
+            t = (t + 1) % 3;
+            wizard_transport_ = static_cast<ConnTransport>(t);
+            need_redraw_ = true;
+        } else if (ch == '\n' || ch == KEY_ENTER) {
+            if (wizard_transport_ == ConnTransport::BLE) {
+                start_scan();
+                mode_ = M::ConnectWizard_BLE;
+                wizard_field_ = 0;
+                wizard_field_cursor_[0] = 0;
+                need_redraw_ = true;
+            } else if (wizard_transport_ == ConnTransport::TCP) {
+                mode_ = M::ConnectWizard_TCP;
+                wizard_field_ = 0;
+                wizard_field_cursor_[0] = static_cast<int>(wizard_tcp_host_.size());
+                wizard_field_cursor_[1] = static_cast<int>(wizard_tcp_port_.size());
+                need_redraw_ = true;
+            } else {
+                mode_ = M::ConnectWizard_Serial;
+                wizard_field_ = 0;
+                wizard_field_cursor_[0] = static_cast<int>(wizard_serial_path_.size());
+                wizard_field_cursor_[1] = static_cast<int>(wizard_serial_baud_.size());
+                need_redraw_ = true;
+            }
+        } else { handled = false; }
+        break;
+
+    case M::ConnectWizard_BLE:
+        if (ch == '\t') {
+            wizard_field_ = (wizard_field_ == 0) ? 1 : 0;
+            need_redraw_ = true;
+        } else if (ch == '\n' || ch == KEY_ENTER) {
+            if (scan_selection_ >= 0 && static_cast<size_t>(scan_selection_) < scan_entries_.size()) {
+                const auto& e = scan_entries_[scan_selection_];
+                BleDeviceSpec spec;
+                spec.name = e.name;
+                spec.address = e.address;
+                spec.pin = wizard_pin_;
+                service_.connect_device(spec, false);
+            }
+            exit_wizard();
+        } else if (ch == KEY_UP || ch == 'k') {
+            if (scan_selection_ > 0) {
+                --scan_selection_;
+                if (scan_selection_ < scan_entries_offset_)
+                    scan_entries_offset_ = scan_selection_;
+                need_redraw_ = true;
+            }
+        } else if (ch == KEY_DOWN || ch == 'j') {
+            if (static_cast<size_t>(scan_selection_ + 1) < scan_entries_.size()) {
+                ++scan_selection_;
+                int max_lines = std::max(1, LINES - 7);
+                if (scan_selection_ >= scan_entries_offset_ + max_lines)
+                    scan_entries_offset_ = scan_selection_ - max_lines + 1;
+                need_redraw_ = true;
+            }
+        } else if (wizard_field_ == 1) {
+            // Edit PIN field
+            if (ch == KEY_BACKSPACE || ch == 127) {
+                if (!wizard_pin_.empty()) wizard_pin_.pop_back();
+                need_redraw_ = true;
+            } else if (ch >= 32 && ch < 127 && wizard_pin_.size() < 6) {
+                wizard_pin_ += static_cast<char>(ch);
+                need_redraw_ = true;
+            } else { handled = false; }
+        } else { handled = false; }
+        break;
+
+    case M::ConnectWizard_TCP: {
+        auto* field = (wizard_field_ == 0) ? &wizard_tcp_host_ : &wizard_tcp_port_;
+        if (ch == '\t') {
+            wizard_field_ = (wizard_field_ + 1) % 2;
+            need_redraw_ = true;
+        } else if (ch == '\n' || ch == KEY_ENTER) {
+            if (!wizard_tcp_host_.empty()) {
+                BleDeviceSpec spec;
+                spec.tcp_host = wizard_tcp_host_ + ":" + wizard_tcp_port_;
+                service_.connect_device(spec, false);
+            }
+            exit_wizard();
+        } else if (ch == KEY_BACKSPACE || ch == 127) {
+            if (!field->empty()) field->pop_back();
+            need_redraw_ = true;
+        } else if (ch >= 32 && ch < 127 && field->size() < 60) {
+            *field += static_cast<char>(ch);
+            need_redraw_ = true;
+        } else { handled = false; }
+        break;
+    }
+
+    case M::ConnectWizard_Serial: {
+        auto* field = (wizard_field_ == 0) ? &wizard_serial_path_ : &wizard_serial_baud_;
+        if (ch == '\t') {
+            wizard_field_ = (wizard_field_ + 1) % 2;
+            need_redraw_ = true;
+        } else if (ch == '\n' || ch == KEY_ENTER) {
+            if (!wizard_serial_path_.empty()) {
+                BleDeviceSpec spec;
+                spec.serial_port = wizard_serial_path_;
+                spec.serial_baud = std::atoi(wizard_serial_baud_.c_str());
+                if (spec.serial_baud <= 0) spec.serial_baud = 115200;
+                service_.connect_device(spec, false);
+            }
+            exit_wizard();
+        } else if (ch == KEY_BACKSPACE || ch == 127) {
+            if (!field->empty()) field->pop_back();
+            need_redraw_ = true;
+        } else if (ch >= 32 && ch < 127 && field->size() < 60) {
+            *field += static_cast<char>(ch);
+            need_redraw_ = true;
+        } else { handled = false; }
+        break;
+    }
+
+    default:
+        handled = false;
+        break;
+    }
+    return handled;
+}
+
+// --- rendering ---------------------------------------------------------------
+
+void TuiApp::render() {
+    int rows = LINES;
+    int cols = COLS;
+
+    if (mode_ != Mode::Normal) {
+        // Wizard takes over the full screen.
+        erase();
+        switch (mode_) {
+        case Mode::ConnectWizard_Tab:    render_wizard_tab(); break;
+        case Mode::ConnectWizard_BLE:    render_wizard_ble(); break;
+        case Mode::ConnectWizard_TCP:    render_wizard_tcp(); break;
+        case Mode::ConnectWizard_Serial: render_wizard_serial(); break;
+        default: break;
+        }
+        refresh();
+        return;
+    }
+
+    // Minimum terminal size guard.
+    if (rows < 4 || cols < 20) {
+        erase();
+        const char* msg = "terminal too small";
+        mvprintw(rows / 2, std::max(0, (cols - 18) / 2), "%s", msg);
+        refresh();
+        return;
+    }
+
+    erase();
+
+    Window* w = wm_.current_window();
+    if (!w) {
+        mvprintw(0, 0, "(no window)");
+        refresh();
+        return;
+    }
+
+    int scrollback_top = 1;
+    int scrollback_h = std::max(1, rows - 3);
+
+    // Title bar with overlap protection.
+    attron(A_REVERSE);
+    mvhline(0, 0, ' ', cols);
+    std::string title = "[" + std::to_string(wm_.current_index()) + ":" + w->title() + "]";
+    std::string conn = connection_info();
+    int title_w = static_cast<int>(title.size());
+    int conn_w = static_cast<int>(conn.size());
+    int avail = cols - title_w - 1;
+    if (conn_w > avail && avail > 3) {
+        conn = conn.substr(0, avail - 3) + "...";
+        conn_w = static_cast<int>(conn.size());
+    }
+    if (conn_w <= avail) {
+        mvprintw(0, 0, "%s", title.c_str());
+        mvprintw(0, std::max(title_w + 1, cols - conn_w), "%s", conn.c_str());
+    } else {
+        mvprintw(0, 0, "%s", title.c_str());
+    }
+    attroff(A_REVERSE);
+
+    render_scrollback(*w, scrollback_top, scrollback_h, cols);
+    render_input(rows - 2, cols);
+    status_bar_.render(wm_, cols, conn);
+
+    Window* cw = wm_.current_window();
+    std::string cur_prompt;
+    const std::string& ib = input_.buf();
+    if (!ib.empty() && ib[0] == '/')
+        cur_prompt = "cmd> ";
+    else if (cw && cw->target().kind == "channel")
+        cur_prompt = cw->title() + "> ";
+    else if (cw && cw->target().kind == "dm")
+        cur_prompt = cw->title() + "> ";
+    else
+        cur_prompt = "status> ";
+    move(rows - 2, static_cast<int>(cur_prompt.size() + input_.cursor()));
+    refresh();
+}
+
+void TuiApp::render_wizard_tab() {
+    int rows = LINES, cols = COLS;
+    if (rows < 8 || cols < 30) {
+        mvprintw(rows / 2, std::max(0, (cols - 18) / 2), "terminal too small");
+        return;
+    }
+    int mid = rows / 2 - 3;
+    attron(A_REVERSE);
+    mvhline(mid - 2, std::max(0, (cols - 48) / 2), ' ', std::min(48, cols));
+    std::string hdr = " Connect Device ";
+    mvprintw(mid - 2, std::max(0, (cols - static_cast<int>(hdr.size())) / 2), "%s", hdr.c_str());
+    attroff(A_REVERSE);
+
+    auto draw = [&](int y, ConnTransport t, const char* label, const char* desc) {
+        int cx = std::max(0, (cols - 48) / 2);
+        if (wizard_transport_ == t) {
+            attron(A_REVERSE);
+            mvprintw(mid + y, cx, " %c %-8s %-36s", 0xE2, label, desc[0] ? desc : "");
+            attroff(A_REVERSE);
+        } else {
+            mvprintw(mid + y, cx, "   %-8s %-36s", label, desc);
+        }
+    };
+    draw(0, ConnTransport::BLE, "BLE", "Nearby Meshtastic radios");
+    draw(1, ConnTransport::TCP, "TCP", "Remote device over network");
+    draw(2, ConnTransport::Serial, "Serial", "Local serial port");
+
+    mvprintw(mid + 5, std::max(0, (cols - 48) / 2),
+             " arrow keys or Tab to switch, ENTER to select, ESC to cancel ");
+}
+
+void TuiApp::render_wizard_ble() {
+    int rows = LINES, cols = COLS;
+    if (rows < 6 || cols < 30) {
+        mvprintw(rows / 2, std::max(0, (cols - 18) / 2), "terminal too small");
+        return;
+    }
+    int cx = std::max(0, (cols - 56) / 2);
+    // Title
+    attron(A_REVERSE);
+    mvhline(0, cx, ' ', std::min(56, cols - cx));
+    mvprintw(0, cx, " BLE Scan - select device with arrows, ENTER to connect ");
+    attroff(A_REVERSE);
+    // Device list
+    int list_top = 1, list_h = std::max(1, rows - 5);
+    if (scan_entries_.empty()) {
+        if (scan_complete_)
+            mvprintw(2, cx, "  (no devices found)");
+        else
+            mvprintw(2, cx, "  Scanning...");
+    } else {
+        size_t end = std::min(scan_entries_.size(), static_cast<size_t>(scan_entries_offset_ + list_h));
+        for (size_t i = scan_entries_offset_; i < end; ++i) {
+            int y = list_top + static_cast<int>(i - scan_entries_offset_);
+            const auto& e = scan_entries_[i];
+            if (static_cast<int>(i) == scan_selection_) {
+                attron(A_REVERSE);
+                mvprintw(y, cx, "> %-24s %s", e.name.c_str(), e.address.c_str());
+                if (e.rssi != 0) printw("  %d dBm", e.rssi);
+                attroff(A_REVERSE);
+            } else {
+                mvprintw(y, cx, "  %-24s %s", e.name.c_str(), e.address.c_str());
+                if (e.rssi != 0) printw("  %d dBm", e.rssi);
+            }
+        }
+    }
+    // Footer
+    int footer = rows - 2;
+    mvprintw(footer, cx, " PIN: [%s%s]", wizard_pin_.c_str(),
+             wizard_field_ == 1 ? "|" : "");
+    std::string status;
+    if (scan_complete_)
+        status = "Scan complete - " + std::to_string(scan_entries_.size()) + " devices";
+    else if (scan_running_)
+        status = "Scanning...";
+    else
+        status = "Scan stopped";
+    mvprintw(footer, cx + 40, "%s", status.c_str());
+    mvprintw(rows - 1, cx, " ENTER=connect  TAB=edit PIN  ESC=back");
+}
+
+void TuiApp::render_wizard_tcp() {
+    int rows = LINES, cols = COLS;
+    if (rows < 8 || cols < 30) {
+        mvprintw(rows / 2, std::max(0, (cols - 18) / 2), "terminal too small");
+        return;
+    }
+    int cx = std::max(0, (cols - 50) / 2);
+    int mid = rows / 2 - 1;
+    attron(A_REVERSE);
+    mvhline(mid - 2, cx, ' ', std::min(50, cols - cx));
+    mvprintw(mid - 2, cx, " TCP Connection ");
+    attroff(A_REVERSE);
+    mvprintw(mid,     cx, " Host: [%s%s]:[%s%s]",
+             wizard_tcp_host_.c_str(), wizard_field_ == 0 ? "|" : "",
+             wizard_tcp_port_.c_str(), wizard_field_ == 1 ? "|" : "");
+    mvprintw(mid + 1, cx, " Press ENTER to connect  ");
+    mvprintw(mid + 3, cx, " ENTER=connect  TAB=next field  ESC=back");
+}
+
+void TuiApp::render_wizard_serial() {
+    int rows = LINES, cols = COLS;
+    if (rows < 8 || cols < 30) {
+        mvprintw(rows / 2, std::max(0, (cols - 18) / 2), "terminal too small");
+        return;
+    }
+    int cx = std::max(0, (cols - 50) / 2);
+    int mid = rows / 2 - 2;
+    attron(A_REVERSE);
+    mvhline(mid - 2, cx, ' ', std::min(50, cols - cx));
+    mvprintw(mid - 2, cx, " Serial Connection ");
+    attroff(A_REVERSE);
+    mvprintw(mid,     cx, " Device: [%s%s]",
+             wizard_serial_path_.c_str(), wizard_field_ == 0 ? "|" : "");
+    mvprintw(mid + 1, cx, " Baud:   [%s%s]",
+             wizard_serial_baud_.c_str(), wizard_field_ == 1 ? "|" : "");
+    mvprintw(mid + 2, cx, " Press ENTER to connect  ");
+    mvprintw(mid + 4, cx, " ENTER=connect  TAB=next field  ESC=back");
+}
+
+void TuiApp::render_scrollback(const Window& w, int top, int height, int width) {
+    const auto& lines = w.lines();
+    if (lines.empty()) {
+        mvprintw(top, 0, "(empty)");
+        return;
+    }
+    int total = static_cast<int>(lines.size());
+    int end_idx = total - w.scroll_offset();
+    int start_idx = std::max(0, end_idx - height);
+    int row = top + (height - (end_idx - start_idx));
+    for (int i = start_idx; i < end_idx; ++i, ++row) {
+        const Line& ln = lines[i];
+        if (ln.color_pair) attron(COLOR_PAIR(ln.color_pair));
+        if (ln.is_meta) attron(A_DIM);
+        std::string s = ln.text;
+        if (static_cast<int>(s.size()) > width) s = s.substr(0, width);
+        mvhline(row, 0, ' ', width);
+        mvprintw(row, 0, "%s", s.c_str());
+        if (ln.is_meta) attroff(A_DIM);
+        if (ln.color_pair) attroff(COLOR_PAIR(ln.color_pair));
+    }
+}
+
+void TuiApp::render_input(int row, int width) {
+    mvhline(row, 0, ' ', width);
+    Window* w = wm_.current_window();
+    std::string prompt;
+    int prompt_color = 0;
+    const std::string& buf = input_.buf();
+    if (!buf.empty() && buf[0] == '/') {
+        prompt = "cmd> ";
+        prompt_color = tui_color::META;
+    } else if (w && w->target().kind == "channel") {
+        prompt = w->title() + "> ";
+        prompt_color = tui_color::CHANNEL;
+    } else if (w && w->target().kind == "dm") {
+        prompt = w->title() + "> ";
+        prompt_color = tui_color::DM;
+    } else {
+        prompt = "status> ";
+        prompt_color = tui_color::META;
+    }
+    if (prompt_color) attron(COLOR_PAIR(prompt_color) | A_BOLD);
+    mvprintw(row, 0, "%s", prompt.c_str());
+    if (prompt_color) attroff(COLOR_PAIR(prompt_color) | A_BOLD);
+    int prompt_w = static_cast<int>(prompt.size());
+    std::string s = buf;
+    if (static_cast<int>(s.size()) > width - prompt_w) {
+        size_t start = s.size() - (width - prompt_w);
+        s = s.substr(start);
+    }
+    mvprintw(row, prompt_w, "%s", s.c_str());
+}
+
+// --- event processing --------------------------------------------------------
 
 int TuiApp::run() {
     init_ncurses();
@@ -167,13 +695,12 @@ int TuiApp::run() {
             need_redraw_ = false;
         }
 
-        // Poll stdin + eventfd.
         struct pollfd pfds[2];
         pfds[0].fd = STDIN_FILENO;
         pfds[0].events = POLLIN;
         pfds[1].fd = wake_.fd();
         pfds[1].events = POLLIN;
-        int pr = ::poll(pfds, 2, 1000);   // 1s timeout for clock refresh
+        int pr = ::poll(pfds, 2, 1000);
         if (pr < 0) {
             if (errno == EINTR) continue;
             break;
@@ -186,15 +713,19 @@ int TuiApp::run() {
         if (pfds[0].revents & POLLIN) {
             int ch = getch();
             while (ch != ERR) {
-                // Handle Alt+key (ESC prefix).  In nodelay mode the second
-                // byte of an ESC-sequence may not be available immediately,
-                // so temporarily switch to a short blocking timeout.
+                // In wizard mode, handle keys differently.
+                if (mode_ != Mode::Normal) {
+                    if (ch == 3) { quit_ = true; break; }  // Ctrl-C still quits
+                    if (!handle_wizard_key(ch)) { /* unhandled */ }
+                    ch = getch();
+                    continue;
+                }
+                // Alt+key handling
                 if (ch == 27) {
-                    timeout(50);               // 50ms window for the next byte
+                    timeout(50);
                     int ch2 = getch();
-                    nodelay(stdscr, TRUE);     // restore non-blocking
+                    nodelay(stdscr, TRUE);
                     if (ch2 != ERR) {
-                        // Alt+1..0 window switch.
                         if (ch2 >= '0' && ch2 <= '9') {
                             int idx = (ch2 == '0') ? 10 : (ch2 - '0');
                             wm_.select(idx);
@@ -217,7 +748,7 @@ int TuiApp::run() {
                     need_redraw_ = true;
                 } else if (ch == 12) {  // Ctrl-L
                     need_redraw_ = true;
-                } else if (ch == 24) {   // Ctrl-X: cycle active device
+                } else if (ch == 24) {   // Ctrl-X
                     auto devices = service_.device_ids();
                     if (devices.size() > 1) {
                         int cur = 0;
@@ -250,7 +781,8 @@ int TuiApp::run() {
                         need_redraw_ = true;
                         CommandDispatcher disp(service_, wm_,
                             [this](const std::string& s, int c) { wm_.append_status(s, c); },
-                            active_device_);
+                            active_device_,
+                            [this]() { enter_wizard(); });
                         auto res = disp.execute(submitted);
                         if (res.quit) quit_ = true;
                     } else {
@@ -260,7 +792,6 @@ int TuiApp::run() {
                 ch = getch();
             }
         }
-        // Auto-reconnect check (runs on every ~1s poll cycle).
         maybe_reconnect();
     }
     return 0;
@@ -282,7 +813,6 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             }
         } else if constexpr (std::is_same_v<T, EvDisconnected>) {
             wm_.append_status("*** Disconnected: " + e.reason, tui_color::ERROR);
-            // If the active device disconnected, pick another.
             if (e.device == active_device_) {
                 auto devices = service_.device_ids();
                 active_device_.clear();
@@ -290,7 +820,6 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                     if (id != e.device) { active_device_ = id; break; }
                 }
             }
-            // Start auto-reconnect for this device.
             if (reconnect_attempts_.find(e.device) == reconnect_attempts_.end()) {
                 reconnect_attempts_[e.device] = 0;
                 s_last_reconnect_attempt = std::time(nullptr);
@@ -305,7 +834,7 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                                "  HW: " + e.hw_model, tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvConfigComplete>) {
             wm_.append_status(e.rebooted ? "*** Config complete (device rebooted)"
-                                         : "*** Config complete",
+                                          : "*** Config complete",
                               tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
             const NodeDb* db = service_.db_for(e.device);
@@ -313,7 +842,6 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                             true, "*** Node updated: " + e.node.long_name +
                             " (" + e.node.node_id + ")",
                             static_cast<uint32_t>(std::time(nullptr)), db);
-            // Refresh the DM window title in case the node's nick changed.
             std::string nick = e.node.short_name.empty()
                                    ? e.node.long_name : e.node.short_name;
             wm_.ensure_dm(e.device, e.node.node_num, nick);
@@ -332,16 +860,13 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             std::string ack_text = "*** ACK " + std::to_string(e.packet_id) +
                 (e.success ? " OK" : " FAIL: " + e.error_reason);
             int ack_color = e.success ? tui_color::INFO : tui_color::ERROR;
-            // Route to the window where the message was sent.
             auto m = service_.database().find_by_packet_id(e.packet_id);
             if (m && !m->window_kind.empty()) {
                 wm_.append_meta(m->device, m->window_kind, m->window_target,
                                 ack_text, ack_color);
             }
-            // Also show in status.
             wm_.append_status(ack_text, ack_color);
         } else if constexpr (std::is_same_v<T, EvLogLine>) {
-            // Route device log lines to status as low-priority meta.
             if (!e.message.empty())
                 wm_.append_status("[" + e.source + "] " + e.message, tui_color::META);
         } else if constexpr (std::is_same_v<T, EvError>) {
@@ -358,14 +883,12 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             ::localtime_r(&secs, &tm);
             std::snprintf(tsbuf, sizeof(tsbuf), "%02d:%02d:%02d",
                           tm.tm_hour, tm.tm_min, tm.tm_sec);
-            // Header line.
             Line header;
             header.text = "[" + std::string(tsbuf) + "] " + e.summary +
                           "  " + std::to_string(e.hex.size()) + " bytes";
             header.is_meta = true;
             header.color_pair = tui_color::CHANNEL;
             w.append_line(header);
-            // Hex lines.
             std::istringstream iss(e.hex);
             std::string hline;
             while (std::getline(iss, hline)) {
@@ -376,126 +899,19 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             }
             if (idx != wm_.current_index()) w.bump_activity(1);
             else { w.mark_read(); w.scroll_to_bottom(); }
+        } else if constexpr (std::is_same_v<T, EvBleDeviceFound>) {
+            if (e.scan_complete) {
+                scan_complete_ = true;
+            } else {
+                BleScanEntry entry;
+                entry.name = e.name;
+                entry.address = e.address;
+                entry.device_path = e.device;
+                entry.rssi = e.rssi;
+                scan_entries_.push_back(std::move(entry));
+            }
         }
     }, ev);
-}
-
-void TuiApp::render() {
-    int rows = LINES;
-    int cols = COLS;
-    erase();
-
-    Window* w = wm_.current_window();
-    if (!w) {
-        mvprintw(0, 0, "(no window)");
-        refresh();
-        return;
-    }
-
-    // Layout:
-    //   line 0      : title bar
-    //   lines 1..H  : scrollback (H = rows-3)
-    //   line rows-2 : input
-    //   line rows-1 : status bar
-    int scrollback_top = 1;
-    int scrollback_h = std::max(1, rows - 3);
-
-    // Title bar.
-    attron(A_REVERSE);
-    mvhline(0, 0, ' ', cols);
-    std::string title = "[" + std::to_string(wm_.current_index()) + ":" + w->title() + "]";
-    mvprintw(0, 0, "%s", title.c_str());
-    std::string conn = connection_info();
-    mvprintw(0, std::max(0, cols - static_cast<int>(conn.size())), "%s", conn.c_str());
-    attroff(A_REVERSE);
-
-    render_scrollback(*w, scrollback_top, scrollback_h, cols);
-    render_input(rows - 2, cols);
-    status_bar_.render(wm_, cols, conn);
-
-    // Place the cursor at the input line, after the prompt.
-    Window* cw = wm_.current_window();
-    std::string cur_prompt;
-    const std::string& ib = input_.buf();
-    if (!ib.empty() && ib[0] == '/')
-        cur_prompt = "cmd> ";
-    else if (cw && cw->target().kind == "channel")
-        cur_prompt = cw->title() + "> ";
-    else if (cw && cw->target().kind == "dm")
-        cur_prompt = cw->title() + "> ";
-    else
-        cur_prompt = "status> ";
-    move(rows - 2, static_cast<int>(cur_prompt.size() + input_.cursor()));
-    refresh();
-}
-
-void TuiApp::render_scrollback(const Window& w, int top, int height, int width) {
-    const auto& lines = w.lines();
-    if (lines.empty()) {
-        mvprintw(top, 0, "(empty)");
-        return;
-    }
-    // Determine the window of lines to show, accounting for scroll offset.
-    int total = static_cast<int>(lines.size());
-    int end_idx = total - w.scroll_offset();          // exclusive
-    int start_idx = std::max(0, end_idx - height);     // inclusive
-    int row = top + (height - (end_idx - start_idx));  // bottom-align
-    for (int i = start_idx; i < end_idx; ++i, ++row) {
-        const Line& ln = lines[i];
-        if (ln.color_pair) attron(COLOR_PAIR(ln.color_pair));
-        if (ln.is_meta) attron(A_DIM);
-        // Truncate to width.
-        std::string s = ln.text;
-        if (static_cast<int>(s.size()) > width) s = s.substr(0, width);
-        mvhline(row, 0, ' ', width);
-        mvprintw(row, 0, "%s", s.c_str());
-        if (ln.is_meta) attroff(A_DIM);
-        if (ln.color_pair) attroff(COLOR_PAIR(ln.color_pair));
-    }
-}
-
-void TuiApp::render_input(int row, int width) {
-    mvhline(row, 0, ' ', width);
-
-    // Build a context prompt that shows where text will go:
-    //   status window : ">" greyed, with a hint
-    //   channel       : "#name>"
-    //   dm            : "nick>"
-    // If the input starts with '/', show "/" as the prompt to make it
-    // obvious a command is being typed.
-    Window* w = wm_.current_window();
-    std::string prompt;
-    int prompt_color = 0;
-    const std::string& buf = input_.buf();
-
-    if (!buf.empty() && buf[0] == '/') {
-        // Command mode — always show "cmd" regardless of window.
-        prompt = "cmd> ";
-        prompt_color = tui_color::META;     // cyan
-    } else if (w && w->target().kind == "channel") {
-        prompt = w->title() + "> ";    // e.g. "#EdgeFastLow> "
-        prompt_color = tui_color::CHANNEL;
-    } else if (w && w->target().kind == "dm") {
-        prompt = w->title() + "> ";    // e.g. "Bob> "
-        prompt_color = tui_color::DM;
-    } else {
-        // Status window: plain text can't be sent.
-        prompt = "status> ";
-        prompt_color = tui_color::META;
-    }
-
-    if (prompt_color) attron(COLOR_PAIR(prompt_color) | A_BOLD);
-    mvprintw(row, 0, "%s", prompt.c_str());
-    if (prompt_color) attroff(COLOR_PAIR(prompt_color) | A_BOLD);
-
-    int prompt_w = static_cast<int>(prompt.size());
-    std::string s = buf;
-    if (static_cast<int>(s.size()) > width - prompt_w) {
-        // Show the tail so the cursor stays visible.
-        size_t start = s.size() - (width - prompt_w);
-        s = s.substr(start);
-    }
-    mvprintw(row, prompt_w, "%s", s.c_str());
 }
 
 } // namespace meshcli

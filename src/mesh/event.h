@@ -103,6 +103,15 @@ struct EvRawPacket {
     uint64_t ts = 0;       // unix millis
 };
 
+// A BLE device found during scan (for the interactive connection wizard).
+struct EvBleDeviceFound {
+    DeviceId device;       // BlueZ object path
+    std::string name;
+    std::string address;
+    int16_t rssi = 0;
+    bool scan_complete = false;  // true on the final sentinel event
+};
+
 using MeshEvent = std::variant<
     EvConnected,
     EvDisconnected,
@@ -117,7 +126,8 @@ using MeshEvent = std::variant<
     EvError,
     EvNodeJoined,
     EvConfigLine,
-    EvRawPacket
+    EvRawPacket,
+    EvBleDeviceFound
 >;
 
 } // namespace meshcli

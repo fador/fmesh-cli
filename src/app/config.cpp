@@ -99,7 +99,7 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
                 "  -h, --help        show this help\n\n"
                 "TUI commands: /help /list /nodes /query /msg /channel /window\n"
                 "              /close /clear /info /me /reconnect /config /whois\n"
-                "              /raw /stats /connect /disconnect /quit\n",
+                "              /raw /stats /scan /connect /disconnect /device /quit\n",
                 out.device_name.c_str(), out.pin.c_str());
             return false;
         } else if (a == "--device" && need(v)) {

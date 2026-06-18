@@ -9,23 +9,32 @@
 #include <atomic>
 #include <map>
 #include <string>
+#include <thread>
+#include <vector>
 
 namespace meshcli {
 
 struct AppConfig;
 
-// The ncurses application: owns the screen, the window manager, the input
-// line, and the main poll loop. Runs on the main thread.
+enum class Mode { Normal, ConnectWizard_Tab, ConnectWizard_BLE,
+                  ConnectWizard_TCP, ConnectWizard_Serial };
+
+enum class ConnTransport { BLE, TCP, Serial };
+
+struct BleScanEntry {
+    std::string name;
+    std::string address;
+    std::string device_path;
+    int16_t rssi = 0;
+};
+
 class TuiApp {
 public:
     TuiApp(MeshService& service, ConcurrentQueue<MeshEvent>& queue, EventFd& wake,
            const std::string& history_path);
     ~TuiApp();
 
-    // Enter the ncurses event loop. Returns when the user quits. Returns an
-    // exit code (0 = clean).
     int run();
-    // Returns true if ncurses was successfully initialized.
     [[nodiscard]] bool ncurses_ok() const { return ncurses_ok_; }
 
 private:
@@ -37,7 +46,23 @@ private:
     void process_events();
     void handle_event(const MeshEvent& ev);
     std::string connection_info() const;
-    void maybe_reconnect();    // called every ~1s from the poll loop
+    void maybe_reconnect();
+
+    // --- resize support ---
+    static void on_sigwinch(int);
+    static TuiApp* s_instance_;
+    void handle_resize();
+
+    // --- connection wizard ---
+    void enter_wizard();
+    void exit_wizard();
+    void start_scan();
+    void stop_scan();
+    bool handle_wizard_key(int ch);
+    void render_wizard_tab();
+    void render_wizard_ble();
+    void render_wizard_tcp();
+    void render_wizard_serial();
 
     MeshService& service_;
     ConcurrentQueue<MeshEvent>& queue_;
@@ -51,15 +76,32 @@ private:
     bool need_redraw_ = true;
     std::string history_path_;
 
-    // Active device for context-sensitive commands (cycled with Ctrl+X).
     std::string active_device_;
 
-    // Auto-reconnect state (per-device attempt counters)
+    // Auto-reconnect state
     std::map<std::string, int> reconnect_attempts_;
     int reconnect_delay_s_ = 5;
     int reconnect_max_attempts_ = 6;
     static constexpr int kReconnectIntervalS = 5;
     static time_t s_last_reconnect_attempt;
+
+    // --- wizard state ---
+    Mode mode_ = Mode::Normal;
+    ConnTransport wizard_transport_ = ConnTransport::BLE;
+    std::vector<BleScanEntry> scan_entries_;
+    int scan_selection_ = 0;
+    int scan_entries_offset_ = 0;
+    std::thread scan_thread_;
+    std::atomic<bool> scan_running_{false};
+    bool scan_complete_ = false;
+    // Wizard form fields
+    std::string wizard_pin_ = "123456";
+    std::string wizard_tcp_host_ = "";
+    std::string wizard_tcp_port_ = "4403";
+    std::string wizard_serial_path_ = "/dev/ttyUSB0";
+    std::string wizard_serial_baud_ = "115200";
+    int wizard_field_ = 0;  // 0=host, 1=port (tcp) or 0=pin (ble) or 0=path,1=baud (serial)
+    int wizard_field_cursor_[2] = {0, 0};
 };
 
 } // namespace meshcli

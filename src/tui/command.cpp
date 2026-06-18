@@ -27,9 +27,10 @@ std::vector<std::string> split(const std::string& s) {
 
 CommandDispatcher::CommandDispatcher(MeshService& service, WindowManager& wm,
                                      StatusSink status,
-                                     const std::string& active_device)
+                                     std::string& active_device,
+                                     std::function<void()> on_scan)
     : service_(service), wm_(wm), status_(std::move(status)),
-      active_device_(active_device) {}
+      active_device_(active_device), on_scan_(std::move(on_scan)) {}
 
 CommandResult CommandDispatcher::execute(const std::string& line) {
     CommandResult res;
@@ -69,7 +70,8 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "clear")                   cmd_clear();
     else if (cmd == "info" || cmd == "i")      cmd_info();
     else if (cmd == "quit" || cmd == "exit")   cmd_quit(res);
-    else if (cmd == "reconnect")               cmd_reconnect();
+    else if (cmd == "reconnect")               cmd_reconnect(tokens);
+    else if (cmd == "device" || cmd == "dev")  cmd_device(tokens);
     else if (cmd == "me")                      cmd_me(tokens);
     else if (cmd == "config" || cmd == "cfg")  cmd_config(tokens);
     else if (cmd == "whois" || cmd == "wi")    cmd_whois(tokens);
@@ -79,6 +81,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "lastlog" || cmd == "l")   cmd_lastlog(tokens);
     else if (cmd == "connect")                cmd_connect(tokens);
     else if (cmd == "disconnect" || cmd == "dc") cmd_disconnect(tokens);
+    else if (cmd == "scan" || cmd == "s")      cmd_scan();
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -97,13 +100,13 @@ void CommandDispatcher::cmd_help() {
     status_("  /window <N>           switch to window N", tui_color::INFO);
     status_("  /close                close the current (non-status) window", tui_color::INFO);
     status_("  /clear                clear the current window's scrollback", tui_color::INFO);
-    status_("  /info                 show connection info", tui_color::INFO);
+    status_("  /info                 show connection info (all devices)", tui_color::INFO);
     status_("  /me <text>            send an action (italic *nick text*)", tui_color::INFO);
-    status_("  /reconnect            reconnect the device", tui_color::INFO);
-    status_("  /config [section]     show device config (optional filter)", tui_color::INFO);
+    status_("  /reconnect [id]       reconnect active/all devices (or specify ID)", tui_color::INFO);
+    status_("  /config [section]     show device config (all devices, optional filter)", tui_color::INFO);
     status_("  /whois <node|nick>    show detailed node information", tui_color::INFO);
-    status_("  /raw [N]              show last N raw packets (default 5)", tui_color::INFO);
-    status_("  /stats                show packet statistics", tui_color::INFO);
+    status_("  /raw [N]              show last N raw packets (all devices, default 5)", tui_color::INFO);
+    status_("  /stats                show packet statistics (all devices)", tui_color::INFO);
     status_("  /topic                show current channel details", tui_color::INFO);
     status_("  /lastlog <pattern>    search scrollback for pattern", tui_color::INFO);
     status_("  /connect <spec>       connect a new device at runtime", tui_color::INFO);
@@ -112,6 +115,8 @@ void CommandDispatcher::cmd_help() {
     status_("                              tcp:<host>[:<port>]", tui_color::INFO);
     status_("                              serial:<path>[:<baud>]", tui_color::INFO);
     status_("  /disconnect [id]      disconnect a device (no arg: list IDs)", tui_color::INFO);
+    status_("  /scan                 open the interactive connection wizard", tui_color::INFO);
+    status_("  /device [id]          show or switch active device", tui_color::INFO);
     status_("  /quit                 exit mesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw, Ctrl-X cycle device", tui_color::INFO);
 }
@@ -170,20 +175,23 @@ void CommandDispatcher::cmd_query(const std::vector<std::string>& args) {
     std::string q = args[0];
     auto devices = service_.device_ids();
     if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
-    // Try each device's node DB for a fuzzy match.
-    for (const auto& id : devices) {
+    // Try active device first, then the rest.
+    auto try_device = [&](const std::string& id) -> bool {
         const NodeDb* db = service_.db_for(id);
-        if (!db) continue;
+        if (!db) return false;
         auto n = db->find_fuzzy(q);
         if (n) {
             wm_.ensure_dm(id, n->node_num, n->short_name.empty() ? n->long_name : n->short_name);
-            wm_.select(wm_.windows().size());  // select the newly created/last
-            // Better: find the index of the dm window we just ensured.
-            // ensure_dm returns the index but we don't have it here; re-find.
-            // (For simplicity we select the last window.)
+            wm_.select(wm_.windows().size());
             status_("Now talking to " + n->long_name + " (" + n->node_id + ")", tui_color::INFO);
-            return;
+            return true;
         }
+        return false;
+    };
+    if (!active_device_.empty() && try_device(active_device_)) return;
+    for (const auto& id : devices) {
+        if (id == active_device_) continue;
+        if (try_device(id)) return;
     }
     status_("No node matched '" + q + "'", tui_color::ERROR);
 }
@@ -197,16 +205,21 @@ void CommandDispatcher::cmd_msg(const std::vector<std::string>& args) {
         text += args[i];
     }
     auto devices = service_.device_ids();
-    for (const auto& id : devices) {
+    auto try_device = [&](const std::string& id) -> bool {
         const NodeDb* db = service_.db_for(id);
-        if (!db) continue;
+        if (!db) return false;
         auto n = db->find_fuzzy(q);
         if (n) {
             service_.send_text(id, n->node_num, 0, text, true);
-            // Echo immediately in the DM window.
             wm_.append_outgoing(id, "dm", n->node_num, text, db);
-            return;
+            return true;
         }
+        return false;
+    };
+    if (!active_device_.empty() && try_device(active_device_)) return;
+    for (const auto& id : devices) {
+        if (id == active_device_) continue;
+        if (try_device(id)) return;
     }
     status_("No node matched '" + q + "'", tui_color::ERROR);
 }
@@ -234,9 +247,15 @@ void CommandDispatcher::cmd_channel(const std::vector<std::string>& args) {
         uint32_t idx = static_cast<uint32_t>(std::stoul(args[0]));
         auto devices = service_.device_ids();
         if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
-        // Use the active device (set via Ctrl+X), falling back to first device.
+        // Use the active device (set via Ctrl+X or /device), falling back to
+        // the first available device with a valid DB.
         std::string dev = active_device_;
-        if (dev.empty() || !service_.db_for(dev)) dev = devices[0];
+        if (dev.empty() || !service_.db_for(dev)) {
+            for (const auto& d : devices) {
+                if (service_.db_for(d)) { dev = d; break; }
+            }
+            if (dev.empty()) dev = devices[0];
+        }
         std::string name;
         std::string role;
         if (auto* db = service_.db_for(dev)) {
@@ -501,71 +520,96 @@ void CommandDispatcher::cmd_whois(const std::vector<std::string>& args) {
     std::string q = args[0];
     auto devices = service_.device_ids();
     if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
-    for (const auto& id : devices) {
-        const NodeDb* db = service_.db_for(id);
-        if (!db) continue;
-        auto n = db->find_fuzzy(q);
-        if (!n) continue;
-
-        status_("Node: " + n->long_name + " (" + n->short_name + ")", tui_color::CHANNEL);
-        status_("  ID:       " + n->node_id, tui_color::INFO);
-        if (!n->hw_model.empty())
-            status_("  HW:       " + n->hw_model, tui_color::INFO);
-        if (!n->role.empty())
-            status_("  Role:     " + n->role, tui_color::INFO);
-        if (n->battery_level)
-            status_("  Battery:  " + std::to_string(*n->battery_level) + "%", tui_color::INFO);
-        if (n->voltage) {
+    auto show = [&](const std::string& id, const Node& n) {
+        status_("Node: " + n.long_name + " (" + n.short_name + ")"
+                + "  [device: " + service_.display_name_for(id) + "]",
+                tui_color::CHANNEL);
+        status_("  ID:       " + n.node_id, tui_color::INFO);
+        if (!n.hw_model.empty())
+            status_("  HW:       " + n.hw_model, tui_color::INFO);
+        if (!n.role.empty())
+            status_("  Role:     " + n.role, tui_color::INFO);
+        if (n.battery_level)
+            status_("  Battery:  " + std::to_string(*n.battery_level) + "%", tui_color::INFO);
+        if (n.voltage) {
             char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.2f", *n->voltage);
+            std::snprintf(buf, sizeof(buf), "%.2f", *n.voltage);
             status_("  Voltage:  " + std::string(buf) + " V", tui_color::INFO);
         }
-        if (n->snr) {
+        if (n.snr) {
             char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.1f", *n->snr);
+            std::snprintf(buf, sizeof(buf), "%.1f", *n.snr);
             status_("  SNR:      " + std::string(buf) + " dB", tui_color::INFO);
         }
-        if (n->channel_util) {
+        if (n.channel_util) {
             char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.1f", *n->channel_util * 100.0f);
+            std::snprintf(buf, sizeof(buf), "%.1f", *n.channel_util * 100.0f);
             status_("  Ch util:  " + std::string(buf) + "%", tui_color::INFO);
         }
-        if (n->air_util_tx) {
+        if (n.air_util_tx) {
             char buf[16];
-            std::snprintf(buf, sizeof(buf), "%.1f", *n->air_util_tx * 100.0f);
+            std::snprintf(buf, sizeof(buf), "%.1f", *n.air_util_tx * 100.0f);
             status_("  Air util: " + std::string(buf) + "%", tui_color::INFO);
         }
-        if (n->hops_away)
-            status_("  Hops:     " + std::to_string(*n->hops_away), tui_color::INFO);
-        if (n->last_heard) {
-            std::time_t t = static_cast<std::time_t>(*n->last_heard);
+        if (n.hops_away)
+            status_("  Hops:     " + std::to_string(*n.hops_away), tui_color::INFO);
+        if (n.last_heard) {
+            std::time_t t = static_cast<std::time_t>(*n.last_heard);
             char buf[32];
             std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&t));
             status_("  Heard:    " + std::string(buf), tui_color::INFO);
         }
-        if (n->latitude && n->longitude) {
+        if (n.latitude && n.longitude) {
             char buf[80];
             std::snprintf(buf, sizeof(buf), "  Pos:      %.6f, %.6f  alt=%d m",
-                          *n->latitude, *n->longitude, n->altitude.value_or(0));
+                          *n.latitude, *n.longitude, n.altitude.value_or(0));
             status_(buf, tui_color::INFO);
         }
         status_("  Flags:    " +
-                std::string(n->is_favorite ? "fav " : "") +
-                std::string(n->is_muted ? "muted " : "") +
-                std::string(n->is_key_verified ? "verified " : "") +
-                std::string(n->has_public_key ? "PKI" : ""),
+                std::string(n.is_favorite ? "fav " : "") +
+                std::string(n.is_muted ? "muted " : "") +
+                std::string(n.is_key_verified ? "verified " : "") +
+                std::string(n.has_public_key ? "PKI" : ""),
                 tui_color::INFO);
-        return;
+    };
+    auto try_device = [&](const std::string& id) -> bool {
+        const NodeDb* db = service_.db_for(id);
+        if (!db) return false;
+        auto n = db->find_fuzzy(q);
+        if (n) { show(id, *n); return true; }
+        return false;
+    };
+    if (!active_device_.empty() && try_device(active_device_)) return;
+    for (const auto& id : devices) {
+        if (id == active_device_) continue;
+        if (try_device(id)) return;
     }
     status_("No node matched '" + q + "'", tui_color::ERROR);
 }
 
-void CommandDispatcher::cmd_reconnect() {
+void CommandDispatcher::cmd_reconnect(const std::vector<std::string>& args) {
     auto devices = service_.device_ids();
     if (devices.empty()) {
         status_("(no devices connected)", tui_color::ERROR);
         return;
     }
+    if (!args.empty()) {
+        // Per-device reconnect: partial match on device ID.
+        std::string q = args[0];
+        for (const auto& id : devices) {
+            if (id.find(q) != std::string::npos || q == id) {
+                if (service_.reconnect_device(id)) {
+                    status_("Reconnecting to " + id + "...", tui_color::INFO);
+                } else {
+                    status_("Reconnect failed for " + id, tui_color::ERROR);
+                }
+                return;
+            }
+        }
+        status_("No device matched: " + q, tui_color::ERROR);
+        return;
+    }
+    // Reconnect all.
     for (const auto& id : devices) {
         if (service_.reconnect_device(id)) {
             status_("Reconnecting to " + id + "...", tui_color::INFO);
@@ -638,6 +682,46 @@ void CommandDispatcher::cmd_disconnect(const std::vector<std::string>& args) {
         }
     }
     status_("No device matched: " + id, tui_color::ERROR);
+}
+
+void CommandDispatcher::cmd_device(const std::vector<std::string>& args) {
+    auto devices = service_.device_ids();
+    if (devices.empty()) {
+        status_("(no devices connected)", tui_color::ERROR);
+        return;
+    }
+    if (args.empty()) {
+        // List devices, marking the active one.
+        status_("Connected devices:", tui_color::INFO);
+        for (const auto& id : devices) {
+            std::string marker = (id == active_device_) ? " *" : "  ";
+            status_("  " + marker + " " + service_.display_name_for(id)
+                    + "  (" + id + ")",
+                    (id == active_device_) ? tui_color::CHANNEL : tui_color::INFO);
+        }
+        return;
+    }
+    // Switch active device by partial match on ID or display name.
+    std::string q = args[0];
+    for (const auto& id : devices) {
+        std::string dname = service_.display_name_for(id);
+        if (id.find(q) != std::string::npos
+            || dname.find(q) != std::string::npos
+            || q == id) {
+            active_device_ = id;
+            status_("Active device: " + dname + " (" + id + ")", tui_color::INFO);
+            return;
+        }
+    }
+    status_("No device matched: " + q, tui_color::ERROR);
+}
+
+void CommandDispatcher::cmd_scan() {
+    if (on_scan_) {
+        on_scan_();
+    } else {
+        status_("Interactive scan is only available from the TUI.", tui_color::ERROR);
+    }
 }
 
 } // namespace meshcli

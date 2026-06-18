@@ -170,6 +170,7 @@ struct CmdFixture {
     WindowManager wm;
     std::vector<std::string> status_lines;
     int status_color = 0;
+    std::string active_dev_;
 
     CmdFixture() : wm(svc) {
         SetUp();
@@ -200,7 +201,7 @@ struct CmdFixture {
         CommandDispatcher disp(svc, wm, [this](const std::string& s, int c) {
             status_lines.push_back(s);
             status_color = c;
-        }, "");
+        }, active_dev_);
         return disp.execute(cmd);
     }
 };
