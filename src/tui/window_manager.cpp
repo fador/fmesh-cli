@@ -118,9 +118,17 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
     std::string key = device + "|dm|" + std::to_string(peer_node);
     auto it = by_key_.find(key);
     if (it != by_key_.end()) {
-        // Update title if a better nick arrived (e.g. from NodeInfo).
-        if (!nick.empty() && windows_[it->second - 1]->title() != nick)
-            windows_[it->second - 1]->set_title(dm_title(device, peer_node, nick));
+        if (!nick.empty()) {
+            std::string new_title = dm_title(device, peer_node, nick);
+            const std::string& cur_title = windows_[it->second - 1]->title();
+            // Only update if the new title differs and we're not downgrading
+            // from a real name to a placeholder.
+            bool cur_is_placeholder = (cur_title.empty() || cur_title[0] == '!' ||
+                                       cur_title[0] == '?');
+            bool new_is_placeholder = (nick.size() <= 1 && (nick[0] == '?' || nick.empty()));
+            if (cur_title != new_title && (cur_is_placeholder || !new_is_placeholder))
+                windows_[it->second - 1]->set_title(new_title);
+        }
         return it->second;
     }
     auto w = std::make_unique<Window>(
@@ -257,7 +265,7 @@ void WindowManager::append_meta(const std::string& device,
     if (kind == "channel") {
         idx = ensure_channel(device, target, "");
     } else if (kind == "dm") {
-        idx = ensure_dm(device, target, "?");
+        idx = ensure_dm(device, target, "");
     } else {
         append_status(text, color_pair);
         return;

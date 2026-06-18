@@ -527,6 +527,31 @@ TEST(MeshServiceEdge, ConfigLinesForUnknownDevice) {
     EXPECT_TRUE(svc.config_lines_for("nonexistent").empty());
 }
 
+TEST(WindowManagerEdge, DmTitlePreservedOnOutgoing) {
+    MeshService svc;
+    WindowManager wm(svc);
+    int idx = wm.ensure_dm("dev", 0xDEADu, "Bob");
+    EXPECT_EQ(wm.windows()[idx - 1]->title(), "Bob");
+    // Outgoing message with placeholder nick should not overwrite the title.
+    wm.append_outgoing("dev", "dm", 0xDEADu, "hello", nullptr);
+    EXPECT_EQ(wm.windows()[idx - 1]->title(), "Bob");
+}
+
+TEST(WindowManagerEdge, DmTitleUpgradedFromHash) {
+    MeshService svc;
+    WindowManager wm(svc);
+    // Create DM with empty nick → title = !deadbeef
+    int idx = wm.ensure_dm("dev", 0xDEADu, "");
+    std::string hash_title = wm.windows()[idx - 1]->title();
+    EXPECT_EQ(hash_title[0], '!');
+    // Later, real nick arrives → title should upgrade.
+    wm.ensure_dm("dev", 0xDEADu, "Bob");
+    EXPECT_EQ(wm.windows()[idx - 1]->title(), "Bob");
+    // Placeholder nick should not downgrade the title.
+    wm.ensure_dm("dev", 0xDEADu, "?");
+    EXPECT_EQ(wm.windows()[idx - 1]->title(), "Bob");
+}
+
 TEST(WindowManagerEdge, ReceiveDmRoutesToDmWindow) {
     MeshService svc;
     WindowManager wm(svc);
