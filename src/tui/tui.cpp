@@ -1278,10 +1278,8 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                               tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
             const NodeDb* db = service_.db_for(e.device);
-            wm_.append_text(e.device, e.node.node_num, kBroadcastNodeNum, 0,
-                            true, "*** Node updated: " + e.node.long_name +
-                            " (" + e.node.node_id + ")",
-                            static_cast<uint32_t>(std::time(nullptr)), db);
+            wm_.append_status("*** Node updated: " + e.node.long_name +
+                              " (" + e.node.node_id + ")", tui_color::INFO);
             std::string nick = e.node.short_name.empty()
                                    ? e.node.long_name : e.node.short_name;
             wm_.update_dm_nick(e.device, e.node.node_num, nick);
