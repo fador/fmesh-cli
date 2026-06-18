@@ -240,6 +240,8 @@ void TuiApp::enter_wizard() {
 void TuiApp::exit_wizard() {
     stop_scan();
     mode_ = Mode::Normal;
+    erase();
+    clearok(stdscr, TRUE);
     need_redraw_ = true;
 }
 
