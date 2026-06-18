@@ -323,7 +323,8 @@ std::optional<std::string> BluezClient::scan_for_device(int timeout_s) {
 bool BluezClient::ensure_paired_and_connected(bool do_pair) {
     auto device = sdbus::createProxy(*conn_, "org.bluez", device_path_);
 
-    // Read current state.
+    // Read current state — the device may not be immediately visible on
+    // D-Bus right after scanning, so tolerate a transient ENXIO here.
     bool paired = false, connected = false, services_resolved = false;
     try {
         device->callMethod("Get").onInterface("org.freedesktop.DBus.Properties")
@@ -336,7 +337,7 @@ bool BluezClient::ensure_paired_and_connected(bool do_pair) {
             .withArguments(std::string("org.bluez.Device1"), std::string("ServicesResolved"))
             .storeResultsTo(services_resolved);
     } catch (const sdbus::Error& e) {
-        LOG_WARN() << "could not read device state: " << e.what();
+        LOG_DEBUG() << "device state not yet available (expected transient): " << e.what();
     }
     LOG_DEBUG() << "device state: paired=" << paired << " connected=" << connected
                 << " services_resolved=" << services_resolved;
@@ -407,11 +408,13 @@ bool BluezClient::ensure_paired_and_connected(bool do_pair) {
                 device->callMethod("Get").onInterface("org.freedesktop.DBus.Properties")
                     .withArguments(std::string("org.bluez.Device1"), std::string("ServicesResolved"))
                     .storeResultsTo(resolved);
-        } catch (const std::exception& e) {
-            LOG_WARN() << "agent event loop registration failed: " << e.what();
-        } catch (...) {
-            LOG_WARN() << "agent event loop registration failed (unknown error)";
-        }
+            } catch (const std::exception& e) {
+                if (i == 0)
+                    LOG_DEBUG() << "waiting for ServicesResolved (transient): " << e.what();
+            } catch (...) {
+                if (i == 0)
+                    LOG_DEBUG() << "waiting for ServicesResolved (unknown transient)";
+            }
             if (resolved) { LOG_DEBUG() << "services resolved"; break; }
             std::this_thread::sleep_for(200ms);
         }
