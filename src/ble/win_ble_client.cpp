@@ -7,6 +7,7 @@
 #include <chrono>
 #include <iomanip>
 #include <sstream>
+#include <winrt/Windows.Foundation.Collections.h>
 
 using namespace winrt;
 using namespace winrt::Windows::Foundation;
@@ -137,7 +138,7 @@ void WinBleClient::run_connect_flow() {
             fromradio_token_ = fromradio_char_.ValueChanged([this](GattCharacteristic const&, GattValueChangedEventArgs const& args) {
                 auto reader = DataReader::FromBuffer(args.CharacteristicValue());
                 std::string data(reader.UnconsumedBufferLength(), '\0');
-                reader.ReadBytes(winrt::array_view<uint8_t>(reinterpret_cast<uint8_t*>(data.data()), data.size()));
+                reader.ReadBytes(winrt::array_view<uint8_t>(reinterpret_cast<uint8_t*>(data.data()), static_cast<uint32_t>(data.size())));
                 emit_raw(data);
             });
         } else {
@@ -152,7 +153,7 @@ void WinBleClient::run_connect_flow() {
                 fromnum_token_ = fromnum_char_.ValueChanged([this](GattCharacteristic const&, GattValueChangedEventArgs const& args) {
                     auto reader = DataReader::FromBuffer(args.CharacteristicValue());
                     std::string data(reader.UnconsumedBufferLength(), '\0');
-                    reader.ReadBytes(winrt::array_view<uint8_t>(reinterpret_cast<uint8_t*>(data.data()), data.size()));
+                    reader.ReadBytes(winrt::array_view<uint8_t>(reinterpret_cast<uint8_t*>(data.data()), static_cast<uint32_t>(data.size())));
                     emit_raw(data);
                 });
             }
@@ -182,7 +183,7 @@ bool WinBleClient::send_to_radio(const std::string& bytes) {
     if (!connected_ || !toradio_char_) return false;
 
     DataWriter writer;
-    writer.WriteBytes(winrt::array_view<const uint8_t>(reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()));
+    writer.WriteBytes(winrt::array_view<const uint8_t>(reinterpret_cast<const uint8_t*>(bytes.data()), static_cast<uint32_t>(bytes.size())));
     
     // Send without waiting for response to avoid blocking UI thread
     toradio_char_.WriteValueAsync(writer.DetachBuffer(), GattWriteOption::WriteWithoutResponse);

@@ -1,6 +1,6 @@
 #include "tui.h"
 
-#include "app.h"
+#include "app/app.h"
 #include "ble/ble_client.h"
 #include "colors.h"
 #include "command.h"

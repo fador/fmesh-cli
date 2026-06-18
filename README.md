@@ -37,6 +37,14 @@ sudo apt install -y build-essential cmake git libncursesw5-dev libsqlite3-dev \
 sudo usermod -aG bluetooth $USER   # then re-login
 ```
 
+### Prerequisites (Windows 10/11)
+
+- Visual Studio 2022 (with "Desktop development with C++" workload)
+- CMake
+- Git
+
+*Note: Windows dependencies (SQLite, PDCurses, Protobuf) are automatically fetched by CMake.*
+
 ### Compile
 
 ```sh
@@ -50,6 +58,7 @@ cmake --build build -j$(nproc)
 
 ```sh
 ./build/fmesh-cli-tests
+# (On Windows, run .\build\Release\fmesh-cli-tests.exe)
 ```
 
 ## Usage
@@ -57,6 +66,7 @@ cmake --build build -j$(nproc)
 ```sh
 # Connect to the default test device (Fad3_0330, PIN 123456)
 ./build/fmesh-cli
+# (On Windows, use .\build\Release\fmesh-cli.exe instead)
 
 # Pair first, then connect
 ./build/fmesh-cli pair

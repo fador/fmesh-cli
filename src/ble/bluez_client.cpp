@@ -686,4 +686,3 @@ void BleClient::stop_scan() {
 }
 
 } // namespace meshcli
-#endif
