@@ -302,7 +302,12 @@ bool WindowManager::close_if_empty(int index) {
     if (index == 1) return false;
     Window& w = *windows_[index - 1];
     const auto& t = w.target();
-    if ((t.kind != "channel" && t.kind != "dm") || !w.lines().empty()) return false;
+    if (!w.lines().empty()) return false;
+    bool is_empty_dm = (t.kind == "dm");
+    bool is_unnamed_channel = (t.kind == "channel") &&
+        (w.title().find("#ch") == 0) &&
+        (w.title().size() > 3 && std::isdigit(w.title()[3]));
+    if (!is_empty_dm && !is_unnamed_channel) return false;
     std::string key = t.device + "|" + t.kind + "|" + std::to_string(t.target);
     by_key_.erase(key);
     windows_.erase(windows_.begin() + (index - 1));
