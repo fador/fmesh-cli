@@ -31,6 +31,7 @@ public:
 
 private:
     void run_connect_flow();
+    void drain_from_radio();
     void emit(MeshEvent ev);
     void emit_error(const std::string& msg);
     void emit_raw(const std::string& fromradio_bytes);
@@ -51,6 +52,7 @@ private:
     winrt::event_token fromnum_token_;
     winrt::event_token connection_status_token_;
 
+    uint32_t config_id_{0};
     mutable std::mutex mu_;
 };
 

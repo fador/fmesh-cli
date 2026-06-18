@@ -140,22 +140,25 @@ void WinBleClient::run_connect_flow() {
                 auto reader = DataReader::FromBuffer(args.CharacteristicValue());
                 std::string data(reader.UnconsumedBufferLength(), '\0');
                 reader.ReadBytes(winrt::array_view<uint8_t>(reinterpret_cast<uint8_t*>(data.data()), static_cast<uint32_t>(data.size())));
+                if (data.empty()) return;
                 emit_raw(data);
+                uint32_t cid = 0;
+                auto ev = MeshCodec::decode_from_radio(data, device_id_, cid);
+                if (ev) emit(*ev);
+                if (cid != 0) config_id_ = cid;
             });
         } else {
             emit_error("Failed to subscribe to FromRadio.");
             return;
         }
 
-        // Subscribe to FromNum notifications
+        // Subscribe to FromNum notifications — when FromNum changes,
+        // drain FromRadio by reading it repeatedly until empty.
         if (fromnum_char_) {
             auto numStatus = fromnum_char_.WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify).get();
             if (numStatus == GattCommunicationStatus::Success) {
-                fromnum_token_ = fromnum_char_.ValueChanged([this](GattCharacteristic const&, GattValueChangedEventArgs const& args) {
-                    auto reader = DataReader::FromBuffer(args.CharacteristicValue());
-                    std::string data(reader.UnconsumedBufferLength(), '\0');
-                    reader.ReadBytes(winrt::array_view<uint8_t>(reinterpret_cast<uint8_t*>(data.data()), static_cast<uint32_t>(data.size())));
-                    emit_raw(data);
+                fromnum_token_ = fromnum_char_.ValueChanged([this](GattCharacteristic const&, GattValueChangedEventArgs const&) {
+                    drain_from_radio();
                 });
             }
         }
@@ -170,8 +173,60 @@ void WinBleClient::run_connect_flow() {
         std::random_device rd;
         std::mt19937 gen(rd());
         std::uniform_int_distribution<uint32_t> dist(1, 0xFFFFFFFF);
-        uint32_t config_id = dist(gen);
-        send_to_radio(MeshCodec::encode_want_config(config_id));
+        config_id_ = dist(gen);
+        send_to_radio(MeshCodec::encode_want_config(config_id_));
+
+        // Poll-drain FromRadio until config handshake completes or timeout.
+        bool got_config = false;
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (running_ && connected_ && !got_config &&
+               std::chrono::steady_clock::now() < deadline) {
+            try {
+                auto readResult = fromradio_char_.ReadValueAsync().get();
+                if (readResult.Status() == GattCommunicationStatus::Success) {
+                    auto reader = DataReader::FromBuffer(readResult.Value());
+                    uint32_t len = reader.UnconsumedBufferLength();
+                    if (len > 0) {
+                        std::string bytes(len, '\0');
+                        reader.ReadBytes(winrt::array_view<uint8_t>(
+                            reinterpret_cast<uint8_t*>(bytes.data()),
+                            static_cast<uint32_t>(bytes.size())));
+                        emit_raw(bytes);
+                        uint32_t cid = 0;
+                        auto ev = MeshCodec::decode_from_radio(bytes, device_id_, cid);
+                        if (ev) emit(*ev);
+                        if (cid != 0) {
+                            got_config = true;
+                        }
+                        continue; // keep draining without delay
+                    }
+                }
+            } catch (...) {}
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
+        // Drain any residual messages after config complete.
+        if (got_config) {
+            for (int i = 0; i < 5 && running_; ++i) {
+                try {
+                    auto readResult = fromradio_char_.ReadValueAsync().get();
+                    if (readResult.Status() == GattCommunicationStatus::Success) {
+                        auto reader = DataReader::FromBuffer(readResult.Value());
+                        uint32_t len = reader.UnconsumedBufferLength();
+                        if (len > 0) {
+                            std::string bytes(len, '\0');
+                            reader.ReadBytes(winrt::array_view<uint8_t>(
+                                reinterpret_cast<uint8_t*>(bytes.data()),
+                                static_cast<uint32_t>(bytes.size())));
+                            emit_raw(bytes);
+                            auto ev = MeshCodec::decode_from_radio(bytes, device_id_, config_id_);
+                            if (ev) emit(*ev);
+                        }
+                    }
+                } catch (...) {}
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
 
         // Block thread to keep async handlers alive
         while (running_ && connected_) {
@@ -221,6 +276,29 @@ void WinBleClient::emit_raw(const std::string& fromradio_bytes) {
     ev.summary = MeshCodec::from_radio_summary(fromradio_bytes);
     ev.hex = MeshCodec::hex_dump(fromradio_bytes);
     if (sink_) sink_(std::move(ev));
+}
+
+void WinBleClient::drain_from_radio() {
+    if (!fromradio_char_ || !connected_ || !running_) return;
+    while (running_) {
+        try {
+            auto readResult = fromradio_char_.ReadValueAsync().get();
+            if (readResult.Status() != GattCommunicationStatus::Success) break;
+            auto reader = DataReader::FromBuffer(readResult.Value());
+            uint32_t len = reader.UnconsumedBufferLength();
+            if (len == 0) break;
+            std::string bytes(len, '\0');
+            reader.ReadBytes(winrt::array_view<uint8_t>(
+                reinterpret_cast<uint8_t*>(bytes.data()),
+                static_cast<uint32_t>(bytes.size())));
+            emit_raw(bytes);
+            uint32_t cid = 0;
+            auto ev = MeshCodec::decode_from_radio(bytes, device_id_, cid);
+            if (ev) emit(*ev);
+        } catch (...) {
+            break;
+        }
+    }
 }
 
 // Global scanner state
