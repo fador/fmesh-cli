@@ -5,14 +5,17 @@
 #include <functional>
 #include <mutex>
 #include <queue>
+#ifndef _WIN32
 #include <sys/eventfd.h>
-#include <thread>
 #include <unistd.h>
+#endif
+
 #include <utility>
 #include <vector>
 
 namespace meshcli {
 
+#ifndef _WIN32
 // A flag file descriptor. Writing to it wakes anyone poll()ing on it; reading
 // drains the counter. Used to wake the ncurses main loop from other threads.
 class EventFd {
@@ -43,6 +46,23 @@ public:
 private:
     int fd_;
 };
+#else
+// On Windows, we use a 50ms timeout in getch() instead of polling a file descriptor.
+// This is a dummy implementation to satisfy the interface.
+class EventFd {
+public:
+    EventFd() = default;
+    ~EventFd() = default;
+    EventFd(const EventFd&) = delete;
+    EventFd& operator=(const EventFd&) = delete;
+    EventFd(EventFd&&) noexcept {}
+    EventFd& operator=(EventFd&&) noexcept { return *this; }
+
+    void notify() {}
+    void drain() {}
+    [[nodiscard]] int fd() const { return -1; }
+};
+#endif
 
 // Thread-safe FIFO used to hand work from background threads to a consumer.
 template <typename T>

@@ -339,7 +339,11 @@ void CommandDispatcher::cmd_raw(const std::vector<std::string>& args) {
             char tsbuf[16];
             std::time_t secs = static_cast<std::time_t>(p.ts / 1000);
             std::tm tm{};
+            #ifdef _WIN32
+            ::localtime_s(&tm, &secs);
+#else
             ::localtime_r(&secs, &tm);
+#endif
             std::snprintf(tsbuf, sizeof(tsbuf), "%02d:%02d:%02d",
                           tm.tm_hour, tm.tm_min, tm.tm_sec);
             status_(std::string(tsbuf) + " [" + std::to_string(i) + "] "

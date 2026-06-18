@@ -5,17 +5,28 @@
 #include <chrono>
 #include <cstring>
 #include <fcntl.h>
-#include <poll.h>
 #include <random>
-#include <sys/socket.h>
 #include <thread>
 #include <sys/types.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#define close closesocket
+#define read(fd, buf, len) recv(fd, buf, len, 0)
+#define write(fd, buf, len) send(fd, (const char*)buf, len, 0)
+#define poll WSAPoll
+#else
+#include <poll.h>
+#include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>
-
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#endif
 
 namespace meshcli {
 
@@ -23,7 +34,15 @@ using namespace std::chrono_literals;
 
 // ---- transport openers -------------------------------------------------
 
-int tcp_connect(const std::string& host, uint16_t port) {
+intptr_t tcp_connect(const std::string& host, uint16_t port) {
+#ifdef _WIN32
+    static bool wsa_init = false;
+    if (!wsa_init) {
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+        wsa_init = true;
+    }
+#endif
     struct addrinfo hints{}, *res = nullptr;
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
@@ -34,7 +53,7 @@ int tcp_connect(const std::string& host, uint16_t port) {
         LOG_ERROR() << "getaddrinfo(" << host << "): " << gai_strerror(rc);
         return -1;
     }
-    int fd = -1;
+    intptr_t fd = -1;
     for (auto* rp = res; rp; rp = rp->ai_next) {
         fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (fd < 0) continue;
@@ -48,14 +67,23 @@ int tcp_connect(const std::string& host, uint16_t port) {
         return -1;
     }
     // Set non-blocking.
+#ifdef _WIN32
+    u_long mode = 1;
+    ioctlsocket(fd, FIONBIO, &mode);
+#else
     int flags = fcntl(fd, F_GETFL, 0);
     fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+#endif
     LOG_INFO() << "TCP connected to " << host << ":" << port;
     return fd;
 }
 
-int serial_open(const std::string& device, int baud) {
-    int fd = open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
+intptr_t serial_open(const std::string& device, int baud) {
+#ifdef _WIN32
+    LOG_ERROR() << "Serial port is not yet supported on Windows";
+    return -1;
+#else
+    intptr_t fd = open(device.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (fd < 0) {
         LOG_ERROR() << "serial_open(" << device << "): " << std::strerror(errno);
         return -1;
@@ -97,11 +125,12 @@ int serial_open(const std::string& device, int baud) {
     }
     LOG_INFO() << "serial opened " << device << " @ " << baud;
     return fd;
+#endif
 }
 
 // ---- StreamClient ------------------------------------------------------
 
-StreamClient::StreamClient(int fd, std::string display_name, EventSink sink)
+StreamClient::StreamClient(intptr_t fd, std::string display_name, EventSink sink)
     : fd_(fd), display_name_(std::move(display_name)), sink_(std::move(sink)) {
     device_id_ = "stream:" + display_name_;
 }
@@ -149,6 +178,13 @@ bool StreamClient::send_to_radio(const std::string& bytes) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
                 continue;
             }
+#ifdef _WIN32
+            if (WSAGetLastError() == WSAEWOULDBLOCK) {
+                ++retries;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+#endif
             LOG_WARN() << "stream write error: " << std::strerror(errno);
             return false;
         }
@@ -187,7 +223,11 @@ void StreamClient::read_loop() {
 
         ssize_t n = read(fd_, tmp, sizeof(tmp));
         if (n < 0) {
+#ifdef _WIN32
+            if (WSAGetLastError() == WSAEWOULDBLOCK || errno == EAGAIN || errno == EWOULDBLOCK) continue;
+#else
             if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+#endif
             emit_error("stream read error: " + std::string(std::strerror(errno)));
             return;
         }

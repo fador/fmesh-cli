@@ -11,6 +11,10 @@
 #include <sys/types.h>
 #include <thread>
 
+#ifdef _WIN32
+#include <direct.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace meshcli;
 
@@ -22,7 +26,11 @@ std::string default_log_path() {
     if (!home || !*home) home = "/tmp";
     std::string dir = std::string(home) + "/.local/share/mesh-cli";
     // mkdir is best-effort; logger init will also try create_directories.
+#ifdef _WIN32
+    ::_mkdir(dir.c_str());
+#else
     ::mkdir(dir.c_str(), 0755);
+#endif
     try {
         std::filesystem::create_directories(dir);
     } catch (...) {}
@@ -79,7 +87,11 @@ void Logger::write(LogLevel level, std::string_view msg) {
     auto t = system_clock::to_time_t(now);
     auto ms = duration_cast<milliseconds>(now.time_since_epoch()) % 1000;
     std::tm tm{};
+#ifdef _WIN32
+    ::localtime_s(&tm, &t);
+#else
     ::localtime_r(&t, &tm);
+#endif
 
     char ts[48];
     std::snprintf(ts, sizeof(ts), "%04d-%02d-%02d %02d:%02d:%02d.%03d",

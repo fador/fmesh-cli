@@ -16,11 +16,11 @@
 namespace meshcli {
 
 // Opens a TCP connection to host:port. Returns the connected fd, or -1.
-int tcp_connect(const std::string& host, uint16_t port);
+intptr_t tcp_connect(const std::string& host, uint16_t port);
 
 // Opens a serial port at `device` with the given baud rate.
 // Returns the fd, or -1.
-int serial_open(const std::string& device, int baud);
+intptr_t serial_open(const std::string& device, int baud);
 
 class StreamClient {
 public:
@@ -29,7 +29,7 @@ public:
     // `fd` must be a connected, non-blocking file descriptor (socket or
     // serial port). `display_name` is shown in the UI (e.g. "tcp:host:port").
     // The client takes ownership of `fd` and will close it on stop().
-    StreamClient(int fd, std::string display_name, EventSink sink);
+    StreamClient(intptr_t fd, std::string display_name, EventSink sink);
     ~StreamClient();
 
     StreamClient(const StreamClient&) = delete;
@@ -56,7 +56,7 @@ private:
     void emit(MeshEvent ev);
     void emit_error(std::string msg);
 
-    int fd_;
+    intptr_t fd_;
     std::string display_name_;
     std::string device_id_;
     EventSink sink_;

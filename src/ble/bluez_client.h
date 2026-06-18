@@ -3,7 +3,9 @@
 #include "mesh/event.h"
 #include "util/event_loop.h"
 
+#ifndef _WIN32
 #include <sdbus-c++/sdbus-c++.h>
+#endif
 
 #include <atomic>
 #include <functional>
@@ -26,6 +28,7 @@ struct BleDeviceSpec {
     int serial_baud = 115200;
 };
 
+#ifndef _WIN32
 // A single BLE connection to one Meshtastic device, built on BlueZ over
 // sdbus-c++. Owns its own D-Bus connection + event-loop thread. Decoded
 // FromRadio bytes are turned into MeshEvents and pushed to the supplied queue
@@ -116,5 +119,6 @@ private:
     void write_char_locked(const std::string& path, const std::string& bytes);
     void write_char(const std::string& path, const std::string& bytes);
 };
+#endif
 
 } // namespace meshcli

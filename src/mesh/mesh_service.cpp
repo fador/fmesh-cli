@@ -94,9 +94,17 @@ std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
         id = rt->stream->start();
     } else {
         // --- BLE transport (default) ---
+#ifndef _WIN32
         rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
         id = rt->client->start(pair);
         if (id.empty()) return {};
+#else
+        EvError ev;
+        ev.device = "";
+        ev.message = "BLE is not supported on Windows yet.";
+        dispatch_to_ui(std::move(ev));
+        return {};
+#endif
     }
 
     std::lock_guard<std::mutex> lock(devices_mu_);
@@ -120,7 +128,9 @@ bool MeshService::reconnect_device(const std::string& device_id) {
     }
 
     // Stop the old transport.
+#ifndef _WIN32
     if (rt->client) { rt->client->stop(); rt->client.reset(); }
+#endif
     if (rt->stream) { rt->stream->stop(); rt->stream.reset(); }
 
     // Recreate the event sink.
@@ -145,9 +155,13 @@ bool MeshService::reconnect_device(const std::string& device_id) {
         rt->stream = std::make_unique<StreamClient>(fd, "serial:" + spec.serial_port, std::move(sink));
         new_id = rt->stream->start();
     } else {
+#ifndef _WIN32
         rt->client = std::make_unique<BluezClient>(spec, std::move(sink));
         new_id = rt->client->start(/*pair=*/false);
         if (new_id.empty()) return false;
+#else
+        return false;
+#endif
     }
 
     // Update the map key if the device path changed.
@@ -171,10 +185,12 @@ bool MeshService::disconnect_device(const std::string& device_id) {
         rt = it->second;
         devices_.erase(it);
     }
+#ifndef _WIN32
     if (rt->client) {
         rt->client->send_to_radio(MeshCodec::encode_disconnect());
         rt->client->stop();
     }
+#endif
     if (rt->stream) {
         rt->stream->send_to_radio(MeshCodec::encode_disconnect());
         rt->stream->stop();
@@ -190,10 +206,12 @@ void MeshService::disconnect_all() {
         tmp.swap(devices_);
     }
     for (auto& [_, rt] : tmp) {
+#ifndef _WIN32
         if (rt->client) {
             rt->client->send_to_radio(MeshCodec::encode_disconnect());
             rt->client->stop();
         }
+#endif
         if (rt->stream) {
             rt->stream->send_to_radio(MeshCodec::encode_disconnect());
             rt->stream->stop();
@@ -224,8 +242,12 @@ uint32_t MeshService::send_text(const std::string& device_id,
         if (it == devices_.end()) return 0;
         rt = it->second;
     }
+#ifndef _WIN32
     if (!rt->client && !rt->stream) return 0;
     if (rt->client && !rt->client->is_connected()) return 0;
+#else
+    if (!rt->stream) return 0;
+#endif
     if (rt->stream && !rt->stream->is_connected()) return 0;
 
     uint32_t pid = next_packet_id();
@@ -237,7 +259,9 @@ uint32_t MeshService::send_text(const std::string& device_id,
     }
     auto bytes = MeshCodec::encode_text_packet(pid, to_node, channel_idx,
                                                text, want_ack, 0, pubkey);
+#ifndef _WIN32
     if (rt->client && !rt->client->send_to_radio(bytes)) return 0;
+#endif
     if (rt->stream && !rt->stream->send_to_radio(bytes)) return 0;
 
     // Persist the outgoing message.

@@ -7,7 +7,11 @@
 #include "mesh/mesh_service.h"
 #include "util/log.h"
 
+#ifdef _WIN32
+#include <curses.h>
+#else
 #include <ncurses.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -15,12 +19,15 @@
 #include <cstdio>
 #include <ctime>
 #include <cctype>
-#include <map>
+#ifndef _WIN32
 #include <poll.h>
+#endif
 #include <set>
 #include <sstream>
 #include <string>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <variant>
 
 namespace meshcli {
@@ -41,7 +48,9 @@ TuiApp::~TuiApp() {
     teardown_ncurses();
 }
 
+#ifndef _WIN32
 void TuiApp::on_sigwinch(int) {
+
     if (s_instance_) {
         endwin();
         refresh();
@@ -49,6 +58,7 @@ void TuiApp::on_sigwinch(int) {
         s_instance_->need_redraw_ = true;
     }
 }
+#endif
 
 void TuiApp::handle_resize() {
     need_redraw_ = true;
@@ -75,7 +85,9 @@ void TuiApp::init_ncurses() {
     Logger::instance().set_level(LogLevel::Info);
     if (!history_path_.empty())
         input_.load_history(history_path_);
+    #ifndef _WIN32
     std::signal(SIGWINCH, on_sigwinch);
+#endif
     clear();
     refresh();
 }
@@ -187,89 +199,94 @@ void TuiApp::start_scan() {
     scan_complete_ = false;
     scan_running_ = true;
     scan_thread_ = std::thread([this]() {
+        #ifndef _WIN32
         std::unique_ptr<sdbus::IConnection> conn;
-        try { conn = sdbus::createSystemBusConnection(); }
-        catch (const sdbus::Error& e) {
-            scan_running_ = false;
-            EvBleDeviceFound ev;
-            ev.scan_complete = true;
-            queue_.push(std::move(ev));
-            wake_.notify();
-            return;
-        }
-        // Find adapter
-        std::string adapter_path;
-        try {
-            auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
-            std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
-            obj_mgr->callMethod("GetManagedObjects")
-                .onInterface("org.freedesktop.DBus.ObjectManager")
-                .storeResultsTo(objects);
-            for (const auto& [path, ifaces] : objects) {
-                if (ifaces.find("org.bluez.Adapter1") != ifaces.end()) {
-                    adapter_path = path; break;
-                }
-            }
-        } catch (const sdbus::Error&) {}
-        if (adapter_path.empty()) {
-            scan_running_ = false;
-            EvBleDeviceFound ev;
-            ev.scan_complete = true;
-            queue_.push(std::move(ev));
-            wake_.notify();
-            return;
-        }
-        // Start discovery
-        try {
-            auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
-            adapter->callMethod("StartDiscovery").onInterface("org.bluez.Adapter1");
-        } catch (const sdbus::Error&) {}
-        // Scan loop
-        auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-        while (scan_running_ && std::chrono::steady_clock::now() < deadline) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-            if (!scan_running_) break;
-            try {
-                auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
-                std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
-                obj_mgr->callMethod("GetManagedObjects")
-                    .onInterface("org.freedesktop.DBus.ObjectManager")
-                    .storeResultsTo(objects);
-                for (const auto& [path, ifaces] : objects) {
-                    auto it = ifaces.find("org.bluez.Device1");
-                    if (it == ifaces.end()) continue;
-                    if (path.find(adapter_path + "/") != 0) continue;
-                    const auto& props = it->second;
-                    auto name_it = props.find("Name");
-                    auto alias_it = props.find("Alias");
-                    auto addr_it = props.find("Address");
-                    auto rssi_it = props.find("RSSI");
-                    if (name_it == props.end() && alias_it == props.end()) continue;
-                    std::string nm, addr;
-                    if (name_it != props.end()) nm = name_it->second.get<std::string>();
-                    else if (alias_it != props.end()) nm = alias_it->second.get<std::string>();
-                    if (addr_it != props.end()) addr = addr_it->second.get<std::string>();
-                    // Deduplicate
-                    bool dup = false;
-                    for (auto& e : scan_entries_)
-                        if (e.device_path == path) { dup = true; break; }
-                    if (dup) continue;
+                try { conn = sdbus::createSystemBusConnection(); }
+                catch (const sdbus::Error& e) {
+                    scan_running_ = false;
                     EvBleDeviceFound ev;
-                    ev.device = path;
-                    ev.name = nm;
-                    ev.address = addr;
-                    if (rssi_it != props.end())
-                        ev.rssi = static_cast<int16_t>(rssi_it->second.get<int16_t>());
+                    ev.scan_complete = true;
                     queue_.push(std::move(ev));
                     wake_.notify();
+                    return;
                 }
-            } catch (const sdbus::Error&) {}
-        }
-        // Stop discovery
-        try {
-            auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
-            adapter->callMethod("StopDiscovery").onInterface("org.bluez.Adapter1");
-        } catch (const sdbus::Error&) {}
+                // Find adapter
+                std::string adapter_path;
+                try {
+                    auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
+                    std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
+                    obj_mgr->callMethod("GetManagedObjects")
+                        .onInterface("org.freedesktop.DBus.ObjectManager")
+                        .storeResultsTo(objects);
+                    for (const auto& [path, ifaces] : objects) {
+                        if (ifaces.find("org.bluez.Adapter1") != ifaces.end()) {
+                            adapter_path = path; break;
+                        }
+                    }
+                } catch (const sdbus::Error&) {}
+                if (adapter_path.empty()) {
+                    scan_running_ = false;
+                    EvBleDeviceFound ev;
+                    ev.scan_complete = true;
+                    queue_.push(std::move(ev));
+                    wake_.notify();
+                    return;
+                }
+                // Start discovery
+                try {
+                    auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
+                    adapter->callMethod("StartDiscovery").onInterface("org.bluez.Adapter1");
+                } catch (const sdbus::Error&) {}
+                // Scan loop
+                auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+                while (scan_running_ && std::chrono::steady_clock::now() < deadline) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    if (!scan_running_) break;
+                    try {
+                        auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
+                        std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
+                        obj_mgr->callMethod("GetManagedObjects")
+                            .onInterface("org.freedesktop.DBus.ObjectManager")
+                            .storeResultsTo(objects);
+                        for (const auto& [path, ifaces] : objects) {
+                            auto it = ifaces.find("org.bluez.Device1");
+                            if (it == ifaces.end()) continue;
+                            if (path.find(adapter_path + "/") != 0) continue;
+                            const auto& props = it->second;
+                            auto name_it = props.find("Name");
+                            auto alias_it = props.find("Alias");
+                            auto addr_it = props.find("Address");
+                            auto rssi_it = props.find("RSSI");
+                            if (name_it == props.end() && alias_it == props.end()) continue;
+                            std::string nm, addr;
+                            if (name_it != props.end()) nm = name_it->second.get<std::string>();
+                            else if (alias_it != props.end()) nm = alias_it->second.get<std::string>();
+                            if (addr_it != props.end()) addr = addr_it->second.get<std::string>();
+                            // Deduplicate
+                            bool dup = false;
+                            for (auto& e : scan_entries_)
+                                if (e.device_path == path) { dup = true; break; }
+                            if (dup) continue;
+                            EvBleDeviceFound ev;
+                            ev.device = path;
+                            ev.name = nm;
+                            ev.address = addr;
+                            if (rssi_it != props.end())
+                                ev.rssi = static_cast<int16_t>(rssi_it->second.get<int16_t>());
+                            queue_.push(std::move(ev));
+                            wake_.notify();
+                        }
+                    } catch (const sdbus::Error&) {}
+                }
+                // Stop discovery
+                try {
+                    auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
+                    adapter->callMethod("StopDiscovery").onInterface("org.bluez.Adapter1");
+                } catch (const sdbus::Error&) {}
+#else
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+#endif
+
         scan_running_ = false;
         EvBleDeviceFound done;
         done.scan_complete = true;
@@ -964,6 +981,7 @@ int TuiApp::run() {
             need_redraw_ = false;
         }
 
+#ifndef _WIN32
         struct pollfd pfds[2];
         pfds[0].fd = STDIN_FILENO;
         pfds[0].events = POLLIN;
@@ -981,6 +999,16 @@ int TuiApp::run() {
         }
         if (pfds[0].revents & POLLIN) {
             int ch = getch();
+#else
+        if (!queue_.empty()) {
+            process_events();
+            need_redraw_ = true;
+        }
+        int ch = getch();
+        if (ch == ERR) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        } else {
+#endif
             while (ch != ERR) {
                 // In wizard mode, handle keys differently.
                 if (mode_ != Mode::Normal) {
@@ -1194,7 +1222,11 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             char tsbuf[16];
             std::time_t secs = static_cast<std::time_t>(e.ts / 1000);
             std::tm tm{};
+            #ifdef _WIN32
+            ::localtime_s(&tm, &secs);
+#else
             ::localtime_r(&secs, &tm);
+#endif
             std::snprintf(tsbuf, sizeof(tsbuf), "%02d:%02d:%02d",
                           tm.tm_hour, tm.tm_min, tm.tm_sec);
             Line header;

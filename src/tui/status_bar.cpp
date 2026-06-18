@@ -1,7 +1,11 @@
 #include "status_bar.h"
 #include "colors.h"
 
+#ifdef _WIN32
+#include <curses.h>
+#else
 #include <ncurses.h>
+#endif
 
 #include <cstdio>
 #include <ctime>
@@ -42,7 +46,11 @@ void StatusBar::render(WindowManager& wm, int cols, const std::string& connectio
     // Compute the right-side text so we know how much space to leave.
     std::time_t t = std::time(nullptr);
     std::tm tm{};
+    #ifdef _WIN32
+    ::localtime_s(&tm, &t);
+#else
     ::localtime_r(&t, &tm);
+#endif
     char clk[8];
     std::snprintf(clk, sizeof(clk), "%02d:%02d", tm.tm_hour, tm.tm_min);
     std::string right = clk;

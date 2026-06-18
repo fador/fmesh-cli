@@ -4,6 +4,9 @@
 #include <cstring>
 #include <sstream>
 #include <sys/stat.h>
+#ifdef _WIN32
+#include <direct.h>
+#endif
 
 namespace meshcli {
 
@@ -162,7 +165,11 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
 
 void finalize_paths(AppConfig& c) {
     std::string dir = default_data_dir();
+    #ifdef _WIN32
+    ::_mkdir(dir.c_str());
+#else
     ::mkdir(dir.c_str(), 0755);
+#endif
     if (c.db_path.empty())  c.db_path  = dir + "/mesh.db";
     if (c.log_path.empty()) c.log_path = dir + "/mesh-cli.log";
     if (c.history_path.empty()) c.history_path = dir + "/history";
