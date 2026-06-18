@@ -7,8 +7,12 @@
 
 #include <cstring>
 #include <thread>
+#ifndef _WIN32
 #include <sys/socket.h>
 #include <unistd.h>
+#else
+#include <winsock2.h>
+#endif
 
 using namespace meshcli;
 
@@ -93,6 +97,7 @@ TEST(CodecRobust, FromRadioSummaryEmpty) {
     EXPECT_EQ(s, "type=0");
 }
 
+#ifndef _WIN32
 // -- EventFd robustness --
 
 TEST(EventFdRobust, NotifyAndDrain) {
@@ -120,6 +125,8 @@ TEST(EventFdRobust, DrainWithoutNotify) {
     EventFd ef;
     ef.drain(); // should not hang or crash
 }
+
+#endif // _WIN32
 
 // -- ConcurrentQueue tests --
 
@@ -159,13 +166,13 @@ TEST(ConcurrentQueue, ConcurrentPushPop) {
 
     std::vector<std::thread> producers;
     for (int t = 0; t < kNumProducers; ++t) {
-        producers.emplace_back([&q, t] {
+        producers.emplace_back([&q, t, kNumPerThread] {
             for (int i = 0; i < kNumPerThread; ++i)
                 q.push(t * 10000 + i);
         });
     }
 
-    std::thread consumer([&q, &sum] {
+    std::thread consumer([&q, &sum, kNumPerThread, kNumProducers] {
         int drained = 0;
         while (drained < kNumPerThread * kNumProducers) {
             auto batch = q.drain_all();

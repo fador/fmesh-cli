@@ -52,7 +52,9 @@ private:
     void maybe_reconnect();
 
     // --- resize support ---
+#ifndef _WIN32
     static void on_sigwinch(int);
+#endif
     static TuiApp* s_instance_;
     void handle_resize();
 

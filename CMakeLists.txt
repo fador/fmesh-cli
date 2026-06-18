@@ -10,18 +10,47 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+find_package(Threads REQUIRED)
 
-add_compile_options(
-    -Wall
-    -Wextra
-    -Wpedantic
-    -Wno-unused-parameter
-    -Wno-deprecated-declarations
-)
+if(WIN32)
+    set(PDC_SDL2_BUILD OFF CACHE BOOL "Disable SDL2" FORCE)
+    set(PDC_SDL2_DEPS_BUILD OFF CACHE BOOL "Disable SDL2 Deps" FORCE)
+    set(PDC_GL_BUILD OFF CACHE BOOL "Disable GL" FORCE)
+    set(PDC_WINCON_BUILD ON CACHE BOOL "Enable WinCon" FORCE)
+endif()
+
+if(MSVC)
+    add_compile_options(/W3)
+else()
+    add_compile_options(
+        -Wall
+        -Wextra
+        -Werror
+        -Wno-unused-parameter
+        -Wno-deprecated-declarations
+    )
+endif()
+
+include(FetchContent)
 
 # --- protobuf ---------------------------------------------------------------
 # Generate C++ from the meshtastic protobufs (vendored as a git submodule).
-find_package(Protobuf REQUIRED)
+find_package(Protobuf)
+if(NOT Protobuf_FOUND)
+    message(STATUS "Protobuf not found, fetching via FetchContent")
+    set(protobuf_BUILD_TESTS OFF CACHE BOOL "Build tests" FORCE)
+    set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared" FORCE)
+    set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "Use MD instead of MT" FORCE)
+    FetchContent_Declare(
+        protobuf
+        GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
+        GIT_TAG v3.21.12
+    )
+    FetchContent_MakeAvailable(protobuf)
+    set(Protobuf_PROTOC_EXECUTABLE protoc)
+    set(Protobuf_LIBRARIES libprotobuf)
+    set(Protobuf_INCLUDE_DIRS "${protobuf_SOURCE_DIR}/src")
+endif()
 
 set(PROTO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobufs")
 file(GLOB MESHTASTIC_PROTOS "${PROTO_ROOT}/meshtastic/*.proto")
@@ -53,6 +82,7 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E make_directory "${GENERATED_PROTO_DIR}/meshtastic"
     COMMAND ${Protobuf_PROTOC_EXECUTABLE}
         --proto_path=${PROTO_ROOT}
+        --proto_path=${protobuf_SOURCE_DIR}/src
         --cpp_out=${GENERATED_PROTO_DIR}
         ${ALL_PROTOS}
     DEPENDS ${ALL_PROTOS}
@@ -65,34 +95,74 @@ target_include_directories(meshtastic_protos PUBLIC ${GENERATED_PROTO_DIR} ${Pro
 target_link_libraries(meshtastic_protos PUBLIC ${Protobuf_LIBRARIES})
 
 # --- sdbus-c++ --------------------------------------------------------------
-find_package(sdbus-c++ CONFIG REQUIRED)
+if(NOT WIN32)
+    find_package(sdbus-c++ CONFIG REQUIRED)
+endif()
 
 # --- ncurses / sqlite -------------------------------------------------------
-find_path(NCURSES_INCLUDE_DIR ncurses.h)
-find_library(NCURSES_LIB NAMES ncursesw ncurses)
-find_library(SQLITE3_LIB NAMES sqlite3)
-find_path(SQLITE3_INCLUDE_DIR sqlite3.h)
+find_package(SQLite3)
+if(NOT SQLite3_FOUND)
+    message(STATUS "SQLite3 not found, fetching amalgamation via FetchContent")
+    FetchContent_Declare(
+        sqlite3
+        URL https://sqlite.org/2023/sqlite-amalgamation-3410200.zip
+    )
+    FetchContent_Populate(sqlite3)
+    add_library(sqlite3 STATIC ${sqlite3_SOURCE_DIR}/sqlite3.c)
+    target_include_directories(sqlite3 PUBLIC ${sqlite3_SOURCE_DIR})
+    set(SQLITE3_LIB sqlite3)
+    set(SQLITE3_INCLUDE_DIR ${sqlite3_SOURCE_DIR})
+else()
+    set(SQLITE3_LIB SQLite::SQLite3)
+endif()
+
+if(WIN32)
+    message(STATUS "Windows detected, fetching PDCursesMod via FetchContent")
+    set(PDC_BUILD_SHARED OFF CACHE BOOL "Build static PDCurses" FORCE)
+    FetchContent_Declare(
+        pdcurses
+        GIT_REPOSITORY https://github.com/Bill-Gray/PDCursesMod.git
+        GIT_TAG master
+    )
+    FetchContent_MakeAvailable(pdcurses)
+    set(NCURSES_LIB wincon_pdcursesstatic)
+    set(NCURSES_INCLUDE_DIR "${pdcurses_SOURCE_DIR}")
+else()
+    find_path(NCURSES_INCLUDE_DIR ncurses.h)
+    find_library(NCURSES_LIB NAMES ncursesw ncurses)
+endif()
 
 # --- main library -----------------------------------------------------------
-add_library(meshcli_core STATIC
+set(CORE_SRCS
     src/util/log.cpp
     src/util/event_loop.cpp
     src/mesh/mesh_codec.cpp
     src/mesh/node_db.cpp
     src/mesh/mesh_service.cpp
-    src/ble/bluez_agent.cpp
-    src/ble/bluez_client.cpp
     src/stream/stream_client.cpp
     src/store/database.cpp
 )
+
+if(NOT WIN32)
+    list(APPEND CORE_SRCS
+        src/ble/bluez_agent.cpp
+        src/ble/bluez_client.cpp
+    )
+endif()
+
+add_library(meshcli_core STATIC ${CORE_SRCS})
 target_include_directories(meshcli_core PUBLIC src ${GENERATED_PROTO_DIR})
 target_link_libraries(meshcli_core PUBLIC
     meshtastic_protos
-    sdbus-c++
     ${NCURSES_LIB}
     ${SQLITE3_LIB}
     Threads::Threads
 )
+if(NOT WIN32)
+    target_link_libraries(meshcli_core PUBLIC sdbus-c++)
+else()
+    target_link_libraries(meshcli_core PUBLIC ws2_32)
+endif()
 target_include_directories(meshcli_core PUBLIC ${NCURSES_INCLUDE_DIR} ${SQLITE3_INCLUDE_DIR})
 
 # --- TUI + executable -------------------------------------------------------
@@ -109,6 +179,9 @@ target_link_libraries(meshcli_tui PUBLIC meshcli_core)
 
 add_executable(mesh-cli src/main.cpp src/app/app.cpp src/app/config.cpp)
 target_link_libraries(mesh-cli PRIVATE meshcli_tui)
+if(WIN32)
+    target_link_libraries(mesh-cli PRIVATE winmm)
+endif()
 
 # --- tests ------------------------------------------------------------------
 enable_testing()
@@ -125,12 +198,18 @@ add_executable(mesh-cli-tests
     src/app/config.cpp
 )
 target_link_libraries(mesh-cli-tests PRIVATE meshcli_tui)
+if(WIN32)
+    target_link_libraries(mesh-cli-tests PRIVATE winmm)
+endif()
 target_include_directories(mesh-cli-tests PRIVATE src ${GENERATED_PROTO_DIR} tests)
 add_test(NAME mesh-cli-tests COMMAND mesh-cli-tests)
 
 # Live integration test (requires a real paired device; not part of ctest).
 add_executable(mesh-cli-live tests/test_live_send.cpp src/app/config.cpp)
 target_link_libraries(mesh-cli-live PRIVATE meshcli_tui)
+if(WIN32)
+    target_link_libraries(mesh-cli-live PRIVATE winmm)
+endif()
 target_include_directories(mesh-cli-live PRIVATE src ${GENERATED_PROTO_DIR})
 
 install(TARGETS mesh-cli RUNTIME DESTINATION bin)

@@ -16,7 +16,11 @@ std::string fmt_time(uint32_t ts) {
     if (!ts) return "??:??:??";
     std::time_t t = static_cast<std::time_t>(ts);
     std::tm tm{};
+#ifdef _WIN32
+    ::localtime_s(&tm, &t);
+#else
     ::localtime_r(&t, &tm);
+#endif
     char buf[10];
     std::snprintf(buf, sizeof(buf), "%02d:%02d:%02d",
                   tm.tm_hour, tm.tm_min, tm.tm_sec);

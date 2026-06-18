@@ -17,7 +17,7 @@ public:
         // Use a temp file so tests are isolated.
         char tmppath[256];
         std::snprintf(tmppath, sizeof(tmppath),
-                      "/tmp/mesh-cli-test-db-%d.db",
+                      "mesh-cli-test-db-%d.db",
                       static_cast<int>(std::random_device{}()));
         db_path_ = tmppath;
         // Remove any stale file.

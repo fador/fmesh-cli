@@ -20,7 +20,9 @@ namespace meshcli {
 
 struct DeviceRuntime {
     BleDeviceSpec spec;             // stored for reconnection
+#ifndef _WIN32
     std::unique_ptr<BluezClient> client;       // BLE transport
+#endif
     std::unique_ptr<class StreamClient> stream; // TCP/serial transport
     std::unique_ptr<NodeDb> db;
     std::string display_name;
