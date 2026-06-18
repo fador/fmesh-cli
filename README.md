@@ -5,21 +5,27 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 ## Features
 
 - **BLE connectivity** via BlueZ D-Bus (sdbus-c++)
+- **TCP + serial** transport via `--tcp` and `--serial` CLI options
 - **irssi-style TUI**: multiple windows, status bar, activity marks, Alt+N switching, colored prompts
 - **Channels + DMs**: broadcast channel windows + direct-message query windows
+- **Interactive nodelist**: `/nodes` opens a scrollable, sortable node list window with selection
+- **Connection wizard**: `/scan` opens an interactive wizard for BLE scanning, TCP, or serial connection
+- **Multi-device support**: connect to multiple radios simultaneously via `--device` flag or `/connect`
+- **Active device cycling**: `Ctrl+X` or `/device` switches the active device for context-sensitive commands
+- **Auto-reconnect**: per-device automatic reconnection on disconnect (up to 6 attempts, 5s intervals)
 - **Message history**: past sessions' messages reload from SQLite on startup
 - **Device config viewer**: `/config` shows LoRa, power, position, network, Bluetooth settings
 - **Raw packet view**: `/raw` displays hex dumps of received FromRadio packets, live raw window
 - **Node inspection**: `/whois` shows detailed node info (ID, HW, battery, position, SNR, flags)
-- **TCP + serial**: `--tcp` and `--serial` CLI options for non-BLE connectivity
-- **Auto-reconnect**: automatically reconnects on BLE disconnect (up to 6 attempts, 5s intervals)
-- **Log rotation**: log file automatically rotates when it exceeds 5 MB
-- **WAL checkpoint**: periodic SQLite WAL checkpoint prevents unbounded file growth
-- **Outgoing echo**: sent messages appear immediately in the window (no delay for mesh echo)
 - **Auto-pairing**: built-in `org.bluez.Agent1` that supplies the PIN automatically
 - **SQLite persistence**: messages, nodes, channels, and ACK state survive restarts
-- **Multi-device ready**: `MeshService` supports multiple concurrent BLE connections
 - **PKI DM support**: public-key encryption for direct messages on recent firmware
+- **Terminal resize**: responsive layout with minimum-size guards and SIGWINCH handling
+- **Outgoing echo**: sent messages appear immediately in the window (no delay for mesh echo)
+- **Log rotation**: log file automatically rotates when it exceeds 5 MB
+- **WAL checkpoint**: periodic SQLite WAL checkpoint prevents unbounded file growth
+- **Fault tolerance**: write retries, buffer protection, thread safety, input bounds, scroll clamping
+- **Color themes**: configurable color schemes with several built-in presets
 
 ## Build
 
@@ -76,6 +82,13 @@ cmake --build build -j$(nproc)
 # Connect via serial port
 ./build/mesh-cli --serial /dev/ttyUSB0
 ./build/mesh-cli --serial /dev/ttyACM0 --serial-baud 921600
+
+# Multi-device: connect to several devices at once
+./build/mesh-cli --device ble:NodeA:123456 --device tcp:192.168.1.50 --device serial:/dev/ttyUSB0
+
+# Device spec formats:
+#   ble:<name>[:<pin>]      addr:<mac>[:<pin>]
+#   tcp:<host>[:<port>]     serial:<path>[:<baud>]
 ```
 
 ## Key bindings
@@ -85,9 +98,29 @@ cmake --build build -j$(nproc)
 | Alt+1..0 | Switch to window N |
 | Alt+a | Next active window |
 | Alt+n / Alt+p | Next / previous window |
-| PgUp / PgDn | Scroll scrollback |
+| PgUp / PgDn | Scroll scrollback (navigate pages in nodelist) |
+| Ctrl+X | Cycle active device (for multi-device) |
 | Ctrl+L | Redraw screen |
 | Ctrl+C or /quit | Exit |
+
+**Nodelist window keys (when `/nodes` is active):**
+
+| Key | Action |
+|-----|--------|
+| ↑ / ↓ or j / k | Move selection |
+| PgUp / PgDn | Page up/down |
+| Enter | Show node info + open DM window |
+| s | Cycle sort: Name → Last heard → Node ID → Battery → Hops |
+
+**Connection wizard keys (`/scan`):**
+
+| Key | Action |
+|-----|--------|
+| ← / → or Tab | Cycle BLE / TCP / Serial |
+| ↑ / ↓ or j / k | Navigate BLE device list |
+| Enter | Connect / confirm |
+| Tab | Switch field (PIN, host, port, etc.) |
+| Esc | Go back / cancel |
 
 ## Commands
 
@@ -95,22 +128,26 @@ cmake --build build -j$(nproc)
 |---------|-------------|
 | `/help` | Show help |
 | `/list` | List windows |
-| `/nodes` | List known nodes |
-| `/query <node\|nick>` | Open a DM window |
-| `/msg <node\|nick> <text>` | Send a DM without switching |
-| `/channel <n>` | Switch to channel N |
+| `/nodes` | Open interactive node list window (arrows=select, enter=info, s=sort) |
+| `/query <node\|nick>` | Open a DM window (prefers active device) |
+| `/msg <node\|nick> <text>` | Send a DM without switching (prefers active device) |
+| `/channel <n>` | Switch to channel N (uses active device; Ctrl+X to cycle) |
 | `/window <N>` | Switch to window N |
 | `/close` | Switch away from current window |
 | `/clear` | Clear scrollback |
-| `/info` | Show connection info |
+| `/info` | Show connection info (all devices) |
 | `/me <text>` | Send an action |
-| `/reconnect` | Reconnect device |
-| `/config` | Show device configuration |
-| `/whois <node\|nick>` | Show detailed node information |
-| `/raw [N]` | Show last N raw packets (hex dump) |
-| `/stats` | Show packet type counts |
+| `/reconnect [id]` | Reconnect all devices, or a specific device by ID |
+| `/config [section]` | Show device configuration (all devices, optional filter) |
+| `/whois <node\|nick>` | Show detailed node information (prefers active device) |
+| `/raw [N]` | Show last N raw packets (all devices, default 5) |
+| `/stats` | Show packet type counts (all devices) |
 | `/topic` | Show channel/DM details |
 | `/lastlog <pattern>` | Search scrollback |
+| `/connect <spec>` | Connect a new device at runtime |
+| `/disconnect [id]` | Disconnect a device (no arg: list devices) |
+| `/device [id]` | Show or switch active device |
+| `/scan` | Open the interactive connection wizard (BLE scan / TCP / serial) |
 | `/quit` | Exit |
 
 Plain text (without leading `/`) sends to the current window's target: channel broadcast or DM.
@@ -133,9 +170,10 @@ text will do:
 src/
   app/          CLI args, config, top-level wiring
   ble/          BlueZ D-Bus: BLE scan/connect/GATT + pairing agent
-  mesh/         Protocol codec (protobuf), node DB, mesh service
+  mesh/         Protocol codec (protobuf), node DB, mesh service, events
   store/        SQLite persistence
-  tui/          ncurses TUI: windows, input, status bar, commands
+  stream/       TCP and serial transport
+  tui/          ncurses TUI: windows, input, status bar, commands, wizard
   util/         Logging, thread-safe queue, eventfd
   tests/        Custom minitest unit tests (header-only framework)
 ```

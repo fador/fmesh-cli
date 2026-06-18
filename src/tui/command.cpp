@@ -92,7 +92,7 @@ void CommandDispatcher::cmd_help() {
     status_("Commands:", tui_color::INFO);
     status_("  /help                 this help", tui_color::INFO);
     status_("  /list                 list windows", tui_color::INFO);
-    status_("  /nodes                list known nodes", tui_color::INFO);
+    status_("  /nodes                open interactive node list (arrows, enter, s=sort)", tui_color::INFO);
     status_("  /query <node|nick>    open a DM window with a node", tui_color::INFO);
     status_("  /msg <node|nick> <text>  send a DM without switching windows", tui_color::INFO);
     status_("  /channel <n>          switch to / create channel window n", tui_color::INFO);
@@ -150,24 +150,17 @@ void CommandDispatcher::cmd_list() {
 void CommandDispatcher::cmd_nodes() {
     auto devices = service_.device_ids();
     if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
-    for (const auto& id : devices) {
-        const NodeDb* db = service_.db_for(id);
-        if (!db) continue;
-        status_("Nodes on " + id + ":", tui_color::INFO);
-        auto nodes = db->all();
-        std::sort(nodes.begin(), nodes.end(),
-                  [](const Node& a, const Node& b) {
-                      return a.long_name < b.long_name;
-                  });
-        for (const auto& n : nodes) {
-            char buf[160];
-            std::snprintf(buf, sizeof(buf), "  %-16s %-6s %s  batt=%d%%",
-                          n.long_name.c_str(), n.short_name.c_str(),
-                          n.node_id.c_str(),
-                          n.battery_level.value_or(0));
-            status_(buf, tui_color::CHANNEL);
+    // Use active device, falling back to first.
+    std::string dev = active_device_;
+    if (dev.empty() || !service_.db_for(dev)) {
+        for (const auto& d : devices) {
+            if (service_.db_for(d)) { dev = d; break; }
         }
+        if (dev.empty()) dev = devices[0];
     }
+    int idx = wm_.ensure_nodelist(dev);
+    wm_.select(idx);
+    status_("Nodes for " + service_.display_name_for(dev) + " (arrows=select, enter=info, s=sort)", tui_color::INFO);
 }
 
 void CommandDispatcher::cmd_query(const std::vector<std::string>& args) {

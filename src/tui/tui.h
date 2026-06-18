@@ -21,6 +21,8 @@ enum class Mode { Normal, ConnectWizard_Tab, ConnectWizard_BLE,
 
 enum class ConnTransport { BLE, TCP, Serial };
 
+enum class NodeListSort { Name, LastHeard, NodeId, Battery, Hops };
+
 struct BleScanEntry {
     std::string name;
     std::string address;
@@ -64,6 +66,10 @@ private:
     void render_wizard_tcp();
     void render_wizard_serial();
 
+    // --- nodelist ---
+    void render_nodelist(const Window& w, int top, int height, int width);
+    bool handle_nodelist_key(int ch);
+
     MeshService& service_;
     ConcurrentQueue<MeshEvent>& queue_;
     EventFd& wake_;
@@ -102,6 +108,12 @@ private:
     std::string wizard_serial_baud_ = "115200";
     int wizard_field_ = 0;  // 0=host, 1=port (tcp) or 0=pin (ble) or 0=path,1=baud (serial)
     int wizard_field_cursor_[2] = {0, 0};
+
+    // --- nodelist state ---
+    std::string nodelist_device_;       // which device's nodelist is shown
+    int nodelist_cursor_ = 0;
+    int nodelist_offset_ = 0;
+    NodeListSort nodelist_sort_ = NodeListSort::Name;
 };
 
 } // namespace meshcli

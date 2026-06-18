@@ -136,6 +136,17 @@ int WindowManager::ensure_raw(const std::string& device) {
     return add_window(std::move(w));
 }
 
+int WindowManager::ensure_nodelist(const std::string& device) {
+    std::string key = device + "|nodelist|0";
+    auto it = by_key_.find(key);
+    if (it != by_key_.end()) return it->second;
+    std::string dname = service_.display_name_for(device);
+    std::string title = dname.empty() ? "Nodes" : "Nodes " + dname;
+    auto w = std::make_unique<Window>(
+        WindowTarget{device, "nodelist", 0}, title);
+    return add_window(std::move(w));
+}
+
 void WindowManager::append_text(const std::string& device, uint32_t from_node,
                                 uint32_t to_node, uint32_t channel_idx,
                                 bool broadcast, const std::string& text,

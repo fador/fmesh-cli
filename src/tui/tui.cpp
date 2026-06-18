@@ -426,6 +426,167 @@ bool TuiApp::handle_wizard_key(int ch) {
     return handled;
 }
 
+// --- nodelist interactive mode -----------------------------------------------
+
+bool TuiApp::handle_nodelist_key(int ch) {
+    // Always pick up current device from the active window.
+    if (auto* w = wm_.current_window())
+        nodelist_device_ = w->target().device;
+
+    if (ch == KEY_UP || ch == 'k') {
+        if (nodelist_cursor_ > 0) {
+            --nodelist_cursor_;
+            if (nodelist_cursor_ < nodelist_offset_)
+                nodelist_offset_ = nodelist_cursor_;
+            need_redraw_ = true;
+        }
+        return true;
+    }
+    if (ch == KEY_DOWN || ch == 'j') {
+        const NodeDb* db = service_.db_for(nodelist_device_);
+        if (db) {
+            int max = static_cast<int>(db->all().size()) - 1;
+            if (nodelist_cursor_ < max) {
+                ++nodelist_cursor_;
+                need_redraw_ = true;
+            }
+        }
+        return true;
+    }
+    if (ch == '\n' || ch == KEY_ENTER) {
+        const NodeDb* db = service_.db_for(nodelist_device_);
+        if (db) {
+            auto nodes = db->all();
+            std::sort(nodes.begin(), nodes.end(), [this](const Node& a, const Node& b) {
+                switch (nodelist_sort_) {
+                case NodeListSort::LastHeard:
+                    return a.last_heard.value_or(0) > b.last_heard.value_or(0);
+                case NodeListSort::NodeId:
+                    return a.node_id < b.node_id;
+                case NodeListSort::Battery:
+                    return a.battery_level.value_or(0) > b.battery_level.value_or(0);
+                case NodeListSort::Hops:
+                    return a.hops_away.value_or(99) < b.hops_away.value_or(99);
+                default:
+                    return a.long_name < b.long_name;
+                }
+            });
+            if (nodelist_cursor_ >= 0 && static_cast<size_t>(nodelist_cursor_) < nodes.size()) {
+                const Node& n = nodes[nodelist_cursor_];
+                std::string nick = n.short_name.empty() ? n.long_name : n.short_name;
+                // Open a DM window for this node and show /whois info in status.
+                wm_.ensure_dm(nodelist_device_, n.node_num, nick);
+                wm_.append_status("Node: " + n.long_name + " (" + n.short_name + ")  ID: " + n.node_id,
+                                  tui_color::CHANNEL);
+                if (n.battery_level)
+                    wm_.append_status("  Battery: " + std::to_string(*n.battery_level) + "%", tui_color::INFO);
+                if (n.last_heard) {
+                    std::time_t t = static_cast<std::time_t>(*n.last_heard);
+                    char buf[32];
+                    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&t));
+                    wm_.append_status("  Last heard: " + std::string(buf), tui_color::INFO);
+                }
+                if (n.hops_away)
+                    wm_.append_status("  Hops: " + std::to_string(*n.hops_away), tui_color::INFO);
+                if (n.snr) {
+                    char buf[16];
+                    std::snprintf(buf, sizeof(buf), "%.1f dB", *n.snr);
+                    wm_.append_status("  SNR: " + std::string(buf), tui_color::INFO);
+                }
+            }
+        }
+        need_redraw_ = true;
+        return true;
+    }
+    if (ch == 's') {
+        // Cycle sort order.
+        int s = static_cast<int>(nodelist_sort_);
+        s = (s + 1) % 5;
+        nodelist_sort_ = static_cast<NodeListSort>(s);
+        nodelist_cursor_ = 0;
+        nodelist_offset_ = 0;
+        const char* names[] = {"Name", "Last heard", "Node ID", "Battery", "Hops"};
+        wm_.append_status("Sort by: " + std::string(names[s]), tui_color::INFO);
+        need_redraw_ = true;
+        return true;
+    }
+    return false;
+}
+
+void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
+    (void)w;
+    const NodeDb* db = service_.db_for(nodelist_device_);
+    if (!db) {
+        mvprintw(top, 0, "(no device selected)");
+        return;
+    }
+    auto nodes = db->all();
+    if (nodes.empty()) {
+        mvprintw(top, 0, "(no nodes known)");
+        return;
+    }
+    // Sort
+    std::sort(nodes.begin(), nodes.end(), [this](const Node& a, const Node& b) {
+        switch (nodelist_sort_) {
+        case NodeListSort::LastHeard:
+            return a.last_heard.value_or(0) > b.last_heard.value_or(0);
+        case NodeListSort::NodeId:
+            return a.node_id < b.node_id;
+        case NodeListSort::Battery:
+            return a.battery_level.value_or(0) > b.battery_level.value_or(0);
+        case NodeListSort::Hops:
+            return a.hops_away.value_or(99) < b.hops_away.value_or(99);
+        default:
+            return a.long_name < b.long_name;
+        }
+    });
+    // Clamp cursor and offset
+    int total = static_cast<int>(nodes.size());
+    if (nodelist_cursor_ >= total) nodelist_cursor_ = std::max(0, total - 1);
+    if (nodelist_offset_ > nodelist_cursor_) nodelist_offset_ = nodelist_cursor_;
+    if (nodelist_offset_ < nodelist_cursor_ - height + 2)
+        nodelist_offset_ = std::max(0, nodelist_cursor_ - height + 2);
+
+    // Header
+    attron(A_BOLD);
+    const char* sort_label = "name";
+    switch (nodelist_sort_) {
+    case NodeListSort::LastHeard: sort_label = "last heard"; break;
+    case NodeListSort::NodeId:    sort_label = "node id"; break;
+    case NodeListSort::Battery:   sort_label = "battery"; break;
+    case NodeListSort::Hops:      sort_label = "hops"; break;
+    default: break;
+    }
+    mvhline(top, 0, ' ', width);
+    mvprintw(top, 0, " Nodes (%d)  sort: %s  arrows=select  enter=info  s=cycle sort",
+             total, sort_label);
+    attroff(A_BOLD);
+
+    int row = top + 1;
+    for (int i = nodelist_offset_; i < total && row < top + height; ++i, ++row) {
+        const Node& n = nodes[i];
+        bool sel = (i == nodelist_cursor_);
+        // Clear line
+        mvhline(row, 0, ' ', width);
+        if (sel) attron(A_REVERSE);
+        // Format: "  name  short  !id  batt%  hops"
+        char buf[200];
+        std::string sid = n.node_id;
+        if (sid.size() > 10) sid = sid.substr(0, 10);
+        int batt = n.battery_level.value_or(-1);
+        int hops = n.hops_away.value_or(0);
+        std::snprintf(buf, sizeof(buf), "  %-20s %-8s %-12s  batt=%d%%  hops=%d",
+                      n.long_name.c_str(),
+                      n.short_name.c_str(),
+                      sid.c_str(),
+                      batt, hops);
+        if (sel) attron(COLOR_PAIR(tui_color::CHANNEL));
+        mvprintw(row, 0, "%s", buf);
+        if (sel) attroff(COLOR_PAIR(tui_color::CHANNEL));
+        if (sel) attroff(A_REVERSE);
+    }
+}
+
 // --- rendering ---------------------------------------------------------------
 
 void TuiApp::render() {
@@ -487,7 +648,13 @@ void TuiApp::render() {
     }
     attroff(A_REVERSE);
 
-    render_scrollback(*w, scrollback_top, scrollback_h, cols);
+    bool is_nodelist = (w->target().kind == "nodelist");
+    if (is_nodelist) {
+        nodelist_device_ = w->target().device;
+        render_nodelist(*w, scrollback_top, scrollback_h, cols);
+    } else {
+        render_scrollback(*w, scrollback_top, scrollback_h, cols);
+    }
     render_input(rows - 2, cols);
     status_bar_.render(wm_, cols, conn);
 
@@ -766,15 +933,36 @@ int TuiApp::run() {
                     quit_ = true;
                     break;
                 } else if (ch == KEY_PPAGE) {
-                    if (auto* w = wm_.current_window()) {
+                    // Nodelist: page up.
+                    if (wm_.current_window() && wm_.current_window()->target().kind == "nodelist") {
+                        const NodeDb* db = service_.db_for(nodelist_device_);
+                        if (db) {
+                            int pg = std::max(1, LINES - 4);
+                            nodelist_cursor_ = std::max(0, nodelist_cursor_ - pg);
+                            nodelist_offset_ = std::max(0, nodelist_offset_ - pg);
+                            need_redraw_ = true;
+                        }
+                    } else if (auto* w = wm_.current_window()) {
                         w->scroll_by(1);
                         need_redraw_ = true;
                     }
                 } else if (ch == KEY_NPAGE) {
-                    if (auto* w = wm_.current_window()) {
+                    if (wm_.current_window() && wm_.current_window()->target().kind == "nodelist") {
+                        const NodeDb* db = service_.db_for(nodelist_device_);
+                        if (db) {
+                            int total = static_cast<int>(db->all().size());
+                            int pg = std::max(1, LINES - 4);
+                            nodelist_cursor_ = std::min(total - 1, nodelist_cursor_ + pg);
+                            nodelist_offset_ = std::max(0, nodelist_cursor_ - (LINES - 5));
+                            need_redraw_ = true;
+                        }
+                    } else if (auto* w = wm_.current_window()) {
                         w->scroll_by(-1);
                         need_redraw_ = true;
                     }
+                } else if (wm_.current_window() && wm_.current_window()->target().kind == "nodelist"
+                           && handle_nodelist_key(ch)) {
+                    // Nodelist key handled (arrows, enter, 's').
                 } else {
                     std::string submitted;
                     if (input_.handle_key(ch, submitted)) {

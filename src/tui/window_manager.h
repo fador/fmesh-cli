@@ -32,6 +32,9 @@ public:
     // Ensure a raw-packet capture window exists (used for live hex dump).
     int ensure_raw(const std::string& device);
 
+    // Ensure an interactive node-list window exists for the given device.
+    int ensure_nodelist(const std::string& device);
+
     // Append a received text message to the right window and bump activity.
     void append_text(const std::string& device, uint32_t from_node,
                      uint32_t to_node, uint32_t channel_idx, bool broadcast,
