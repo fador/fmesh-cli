@@ -237,6 +237,7 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
         line.color_pair = mention ? 4 : (broadcast ? 2 : 3);
     }
     line.sender_node = from_node;
+    line.ts = ts;
     w.append_line(line);
 
     if (idx != current_) {
@@ -252,9 +253,11 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
 void WindowManager::append_status(const std::string& text, int color_pair) {
     Window& w = *windows_[0];
     Line line;
-    line.text = "[" + fmt_time(static_cast<uint32_t>(std::time(nullptr))) + "] " + text;
+    uint32_t ts = static_cast<uint32_t>(std::time(nullptr));
+    line.text = "[" + fmt_time(ts) + "] " + text;
     line.color_pair = color_pair;
     line.is_meta = true;
+    line.ts = ts;
     w.append_line(line);
     if (current_ != 1) w.bump_activity(1);
 }
@@ -273,9 +276,11 @@ void WindowManager::append_meta(const std::string& device,
     }
     Window& w = *windows_[idx - 1];
     Line line;
-    line.text = "[" + fmt_time(static_cast<uint32_t>(std::time(nullptr))) + "] " + text;
+    uint32_t ts = static_cast<uint32_t>(std::time(nullptr));
+    line.text = "[" + fmt_time(ts) + "] " + text;
     line.color_pair = color_pair;
     line.is_meta = true;
+    line.ts = ts;
     w.append_line(line);
     if (idx != current_) w.bump_activity(1);
 }
@@ -294,10 +299,11 @@ void WindowManager::append_outgoing(const std::string& device,
     uint32_t me = db ? db->my_node_num() : 0;
     std::string nick = short_nick(db, me);
     Line line;
-    line.text = "[" + fmt_time(static_cast<uint32_t>(std::time(nullptr)))
-                + "] <" + nick + "> " + text;
+    uint32_t ts = static_cast<uint32_t>(std::time(nullptr));
+    line.text = "[" + fmt_time(ts) + "] <" + nick + "> " + text;
     line.color_pair = (kind == "dm") ? 3 : 2;
     line.sender_node = me;
+    line.ts = ts;
     w.append_line(line);
     if (idx == current_) w.mark_read();
 }
@@ -414,6 +420,8 @@ void WindowManager::load_history(int window_idx) {
             }
         }
         line.color_pair = mention ? 4 : (is_dm ? 3 : 2);
+        line.ts = static_cast<uint32_t>(m.ts);
+        line.sender_node = (m.direction == "out") ? (db ? db->my_node_num() : 0) : m.from_node;
         w.append_line(line);
     }
 }

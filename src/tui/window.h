@@ -28,6 +28,7 @@ struct Line {
     int color_pair = 0;       // ncurses color pair index, 0 = default
     bool is_meta = false;     // *** join/part/info line
     uint32_t sender_node = 0; // node number of sender (for retroactive nick updates)
+    uint32_t ts = 0;          // timestamp of the line (0 if unknown)
 };
 
 class Window {
@@ -65,6 +66,7 @@ private:
     int unread_ = 0;
     int activity_ = 0;   // 0 none, 1 message, 2 mention
     int scroll_offset_ = 0;
+    uint32_t last_day_ts_ = 0;
 };
 
 } // namespace meshcli
