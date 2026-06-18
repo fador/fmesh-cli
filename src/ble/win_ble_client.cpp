@@ -4,6 +4,7 @@
 
 #include "util/log.h"
 #include "mesh/mesh_codec.h"
+#include <random>
 #include <chrono>
 #include <iomanip>
 #include <sstream>
@@ -166,7 +167,10 @@ void WinBleClient::run_connect_flow() {
         emit(ev);
 
         // Send want_config_id to trigger download of config, nodes, and messages
-        uint32_t config_id = 1337;
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<uint32_t> dist(1, 0xFFFFFFFF);
+        uint32_t config_id = dist(gen);
         send_to_radio(MeshCodec::encode_want_config(config_id));
 
         // Block thread to keep async handlers alive

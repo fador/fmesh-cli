@@ -23,6 +23,7 @@ typedef SSIZE_T ssize_t;
 #include <sys/socket.h>
 #include <termios.h>
 #include <unistd.h>
+#include <random>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -208,7 +209,10 @@ std::string StreamClient::start() {
     thread_ = std::thread(&StreamClient::read_loop, this);
 
     // Send want_config to trigger the protocol handshake.
-    uint32_t config_id = static_cast<uint32_t>(std::random_device{}());
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dist(1, 0xFFFFFFFF);
+    uint32_t config_id = dist(gen);
     LOG_INFO() << "stream sending want_config_id=" << config_id;
     auto payload = MeshCodec::encode_want_config(config_id);
     send_to_radio(payload);
