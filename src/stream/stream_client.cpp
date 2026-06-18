@@ -161,8 +161,27 @@ std::string StreamClient::start() {
             emit_error("Failed to create SSL context");
             return "";
         }
+        
+        // Harden TLS
+        SSL_CTX_set_min_proto_version(ssl_ctx_, TLS1_2_VERSION);
+        SSL_CTX_set_cipher_list(ssl_ctx_, "HIGH:!aNULL:!kRSA:!PSK:!SRP:!MD5:!RC4");
+
         // Do not verify certificates for this simple mesh demo
         SSL_CTX_set_verify(ssl_ctx_, SSL_VERIFY_NONE, nullptr);
+        
+        // Set socket timeouts for connection phase
+#ifdef _WIN32
+        DWORD timeout = 5000;
+        ::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+        ::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+        struct timeval tv;
+        tv.tv_sec = 5;
+        tv.tv_usec = 0;
+        ::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        ::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
+
         ssl_ = SSL_new(ssl_ctx_);
         SSL_set_fd(ssl_, static_cast<int>(fd_));
         if (SSL_connect(ssl_) <= 0) {

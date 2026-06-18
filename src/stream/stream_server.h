@@ -52,8 +52,6 @@ private:
     struct ClientConn;
     std::vector<std::shared_ptr<ClientConn>> clients_;
     std::mutex clients_mu_;
-
-    void remove_client(std::shared_ptr<ClientConn> client);
 };
 
 #else

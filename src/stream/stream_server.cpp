@@ -9,6 +9,7 @@
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
 #include <openssl/x509_vfy.h>
+#include <openssl/crypto.h>
 
 #ifdef _WIN32
 #define NOCRYPT
@@ -215,22 +216,16 @@ void StreamServer::emit_error(std::string msg) {
     emit(ev);
 }
 
-void StreamServer::remove_client(std::shared_ptr<ClientConn> client) {
-    std::lock_guard<std::mutex> lock(clients_mu_);
-    for (auto it = clients_.begin(); it != clients_.end(); ++it) {
-        if (it->get() == client.get()) {
-            clients_.erase(it);
-            break;
-        }
-    }
-}
-
 void StreamServer::accept_loop() {
     SSL_CTX* ctx = SSL_CTX_new(TLS_server_method());
     if (!ctx) {
         emit_error("Failed to create SSL_CTX");
         return;
     }
+
+    // Harden TLS
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+    SSL_CTX_set_cipher_list(ctx, "HIGH:!aNULL:!kRSA:!PSK:!SRP:!MD5:!RC4");
 
     if (!generate_temp_cert(ctx)) {
         emit_error("Failed to generate temporary SSL certificate");
@@ -249,6 +244,48 @@ void StreamServer::accept_loop() {
             }
             continue;
         }
+
+        {
+            std::lock_guard<std::mutex> lock(clients_mu_);
+            // Cleanup dead clients
+            for (auto it = clients_.begin(); it != clients_.end(); ) {
+                if (!(*it)->active) {
+                    if ((*it)->thread.joinable()) {
+                        (*it)->thread.join();
+                    }
+                    it = clients_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            
+            if (clients_.size() >= 50) {
+                // Too many connections
+                EvLogLine ev_log;
+                ev_log.source = "system";
+                ev_log.message = "MeshServer: Rejecting connection, limit reached";
+                emit(ev_log);
+#ifdef _WIN32
+                ::closesocket(client_fd);
+#else
+                ::close(client_fd);
+#endif
+                continue;
+            }
+        }
+
+        // Set socket timeouts to mitigate Slowloris
+#ifdef _WIN32
+        DWORD timeout = 5000;
+        ::setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+        ::setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+        struct timeval tv;
+        tv.tv_sec = 5;
+        tv.tv_usec = 0;
+        ::setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        ::setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
 
         auto conn = std::make_shared<ClientConn>();
         conn->fd = client_fd;
@@ -279,13 +316,16 @@ void StreamServer::accept_loop() {
                     if (!auth_str.empty() && auth_str.back() == '\r') auth_str.pop_back();
                     
                     std::string expected = "AUTH " + user_ + " " + password_;
-                    if (auth_str == expected) {
+                    if (auth_str.size() == expected.size() &&
+                        CRYPTO_memcmp(auth_str.data(), expected.data(), expected.size()) == 0) {
                         auth_ok = true;
                         SSL_write(conn->ssl, "OK\n", 3);
                     }
                 }
                 
                 if (!auth_ok) {
+                    // Artificial delay for failed authentication to prevent brute force
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                     SSL_write(conn->ssl, "ERR\n", 4);
                     conn->active = false;
                 } else {
@@ -375,7 +415,6 @@ void StreamServer::accept_loop() {
             ::close(conn->fd);
 #endif
             conn->fd = -1;
-            remove_client(conn);
         });
     }
 
