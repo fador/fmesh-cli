@@ -84,6 +84,7 @@ struct StreamServer::ClientConn {
     std::thread thread;
     std::atomic<bool> active{true};
     std::string ip;
+    unsigned char frame_type{0xC3};
 };
 
 StreamServer::StreamServer(int port, std::string user, std::string password, EventSink sink)
@@ -186,10 +187,17 @@ void StreamServer::stop() {
     clients_.clear();
 }
 
-void StreamServer::broadcast(const std::string& bytes) {
+void StreamServer::broadcast(const std::string& bytes, unsigned char marker) {
     if (!running_) return;
-
-    std::string framed = frame_bytes(bytes);
+    
+    std::string framed;
+    framed.reserve(4 + bytes.size());
+    framed += static_cast<char>(0x94);
+    framed += static_cast<char>(marker);
+    uint16_t len = static_cast<uint16_t>(bytes.size());
+    framed += static_cast<char>((len >> 8) & 0xFF);
+    framed += static_cast<char>(len & 0xFF);
+    framed += bytes;
 
     std::vector<std::shared_ptr<ClientConn>> current_clients;
     {
@@ -368,11 +376,13 @@ void StreamServer::accept_loop() {
                                 state = WaitStart2;
                             }
                             if (state == WaitStart2 && buf.size() >= 2) {
-                                if (static_cast<unsigned char>(buf[1]) != 0xC3) {
+                                unsigned char s2 = static_cast<unsigned char>(buf[1]);
+                                if (s2 != 0xC3 && s2 != 0xD0) {
                                     buf = buf.substr(1);
                                     state = WaitStart1;
                                     continue;
                                 }
+                                conn->frame_type = s2;
                                 buf = buf.substr(2);
                                 state = ReadLenHi;
                             }
@@ -391,9 +401,19 @@ void StreamServer::accept_loop() {
                                 buf = buf.substr(payload_len);
                                 state = WaitStart1;
 
-                                EvSendRawToRadio ev;
-                                ev.bytes = payload; // unframed payload!
-                                emit(ev);
+                                if (conn->frame_type == 0xC3) {
+                                    EvSendRawToRadio ev;
+                                    ev.bytes = payload; // unframed payload!
+                                    emit(ev);
+                                } else if (conn->frame_type == 0xD0) {
+                                    EvDbSyncPayload ev;
+                                    ev.device = "meshserver"; // or something to identify it? We don't have device IDs per client yet.
+                                    // Actually, StreamServer's emit goes to MeshService. 
+                                    // It needs to be broadcasted to other clients or handled locally.
+                                    ev.device = "meshserver:" + conn->ip; // unique enough
+                                    ev.payload = payload;
+                                    emit(ev);
+                                }
                             } else if (state == ReadPayload) {
                                 break;
                             }

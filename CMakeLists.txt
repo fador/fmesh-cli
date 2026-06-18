@@ -157,6 +157,14 @@ else()
     message(STATUS "OpenSSL NOT found, Mesh network features disabled")
 endif()
 
+# --- nlohmann_json ----------------------------------------------------------
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 # --- main library -----------------------------------------------------------
 set(CORE_SRCS
     src/util/log.cpp
@@ -164,6 +172,7 @@ set(CORE_SRCS
     src/mesh/mesh_codec.cpp
     src/mesh/node_db.cpp
     src/mesh/mesh_service.cpp
+    src/mesh/db_sync.cpp
     src/stream/stream_client.cpp
     src/stream/stream_server.cpp
     src/store/database.cpp
@@ -187,6 +196,7 @@ target_link_libraries(meshcli_core PUBLIC
     ${NCURSES_LIB}
     ${SQLITE3_LIB}
     Threads::Threads
+    nlohmann_json::nlohmann_json
 )
 if(NOT WIN32)
     target_link_libraries(meshcli_core PUBLIC sdbus-c++)

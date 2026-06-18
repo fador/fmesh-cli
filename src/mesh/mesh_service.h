@@ -20,6 +20,8 @@
 
 namespace meshcli {
 
+class DbSyncManager;
+
 struct DeviceRuntime {
     BleDeviceSpec spec;             // stored for reconnection
     std::unique_ptr<BleClient> client;       // BLE transport
@@ -101,7 +103,9 @@ public:
 
 private:
     void handle_event(const std::shared_ptr<DeviceRuntime>& rt, const MeshEvent& ev);
+public:
     void dispatch_to_ui(MeshEvent ev);
+private:
     uint32_t next_packet_id();
 
     // packet id generator (mirrors the meshtastic python algorithm)
@@ -126,6 +130,8 @@ private:
     static constexpr size_t kDedupMax = 500;
     std::deque<uint64_t> seen_messages_;  // (from_node << 32) | packet_id
     bool is_duplicate(uint32_t from_node, uint32_t packet_id);
+
+    std::unique_ptr<DbSyncManager> sync_manager_;
 };
 
 } // namespace meshcli

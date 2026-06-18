@@ -61,6 +61,17 @@ public:
 
     // --- location history ------------------------------------------------
     void insert_location(const std::string& device, uint32_t node_num, double lat, double lon, int altitude, uint64_t ts);
+    uint64_t max_location_ts();
+
+    struct LocationRow {
+        std::string device;
+        uint32_t node_num;
+        double latitude;
+        double longitude;
+        int altitude;
+        uint64_t ts;
+    };
+    std::vector<LocationRow> get_locations_after(uint64_t ts, int limit = 100);
 
     // --- offline history loading -----------------------------------------
     std::vector<std::string> get_all_devices();
@@ -70,6 +81,8 @@ public:
     int64_t insert_message(const StoredMessage& m);
     void update_ack_state(int64_t rowid, const std::string& ack_state);
     std::vector<StoredMessage> recent_messages(const WindowKey& w, int limit = 200);
+    int64_t max_message_rowid();
+    std::vector<StoredMessage> get_messages_after(int64_t rowid, int limit = 100);
 
     // Find a stored message by its ToRadio packet_id (for ACK routing).
     [[nodiscard]] std::optional<StoredMessage> find_by_packet_id(uint32_t packet_id);

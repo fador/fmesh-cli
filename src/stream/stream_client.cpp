@@ -238,9 +238,9 @@ void StreamClient::stop() {
     if (thread_.joinable()) thread_.join();
 }
 
-bool StreamClient::send_to_radio(const std::string& bytes) {
+bool StreamClient::send_to_radio(const std::string& bytes, unsigned char marker) {
     if (!connected_ || fd_ < 0) return false;
-    auto framed = frame(bytes);
+    auto framed = frame(bytes, marker);
     size_t written = 0;
     int retries = 0;
     static constexpr int kMaxRetries = 10;
@@ -295,6 +295,7 @@ void StreamClient::read_loop() {
     enum State { WaitStart1, WaitStart2, ReadLenHi, ReadLenLo, ReadPayload };
     State state = WaitStart1;
     uint16_t payload_len = 0;
+    unsigned char frame_type = 0xC3;
 
     LOG_INFO() << "stream read loop started (" << display_name_ << ")";
 
@@ -371,12 +372,14 @@ void StreamClient::read_loop() {
                 state = WaitStart2;
             }
             if (state == WaitStart2 && buf.size() >= 2) {
-                if (static_cast<unsigned char>(buf[1]) != 0xC3) {
+                unsigned char s2 = static_cast<unsigned char>(buf[1]);
+                if (s2 != 0xC3 && s2 != 0xD0) {
                     // Invalid START2 — skip this byte and retry.
                     buf = buf.substr(1);
                     state = WaitStart1;
                     continue;
                 }
+                frame_type = s2;
                 buf = buf.substr(2);
                 state = ReadLenHi;
             }
@@ -395,12 +398,20 @@ void StreamClient::read_loop() {
                 buf = buf.substr(payload_len);
                 state = WaitStart1;
 
-                // Decode and emit.
-                uint32_t config_id = 0;
-                auto ev = MeshCodec::decode_from_radio(payload, device_id_, config_id);
-                if (ev) {
-                    LOG_DEBUG() << "stream FromRadio: emitting (variant=" << ev->index() << ")";
-                    emit(*ev);
+                if (frame_type == 0xC3) {
+                    // Decode and emit Meshtastic proto
+                    uint32_t config_id = 0;
+                    auto ev = MeshCodec::decode_from_radio(payload, device_id_, config_id);
+                    if (ev) {
+                        LOG_DEBUG() << "stream FromRadio: emitting (variant=" << ev->index() << ")";
+                        emit(*ev);
+                    }
+                } else if (frame_type == 0xD0) {
+                    // DB Sync payload
+                    EvDbSyncPayload ev;
+                    ev.device = device_id_;
+                    ev.payload = payload;
+                    emit(ev);
                 }
             } else if (state == ReadPayload) {
                 // Not enough data yet — wait for more.
@@ -422,11 +433,11 @@ void StreamClient::emit_error(std::string msg) {
     emit(e);
 }
 
-std::string StreamClient::frame(const std::string& payload) {
+std::string StreamClient::frame(const std::string& payload, unsigned char marker) {
     std::string out;
     out.reserve(4 + payload.size());
     out += static_cast<char>(0x94);
-    out += static_cast<char>(0xC3);
+    out += static_cast<char>(marker);
     uint16_t len = static_cast<uint16_t>(payload.size());
     out += static_cast<char>((len >> 8) & 0xFF);
     out += static_cast<char>(len & 0xFF);

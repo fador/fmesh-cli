@@ -127,6 +127,17 @@ struct EvBleDeviceFound {
     bool scan_complete = false;  // true on the final sentinel event
 };
 
+// A DB sync protocol payload received over TCP (0xD0 framing)
+struct EvDbSyncPayload {
+    DeviceId device;
+    std::string payload; // JSON payload
+};
+
+// Request to send a DB sync protocol payload over all active TCP connections
+struct EvSendDbSyncToTcp {
+    std::string payload; // JSON payload
+};
+
 using MeshEvent = std::variant<
     EvConnected,
     EvDisconnected,
@@ -144,7 +155,9 @@ using MeshEvent = std::variant<
     EvRawPacket,
     EvRawRxBytes,
     EvSendRawToRadio,
-    EvBleDeviceFound
+    EvBleDeviceFound,
+    EvDbSyncPayload,
+    EvSendDbSyncToTcp
 >;
 
 } // namespace meshcli

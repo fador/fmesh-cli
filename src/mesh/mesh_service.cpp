@@ -7,6 +7,7 @@
 #endif
 
 #include "mesh/mesh_codec.h"
+#include "mesh/db_sync.h"
 #include "util/log.h"
 
 #include <chrono>
@@ -39,6 +40,7 @@ MeshService::MeshService() {
     // Seed the packet id generator like the python lib does.
     std::uniform_int_distribution<uint32_t> dist(0, 0xFFFFFFFF);
     packet_id_ = dist(rng_);
+    sync_manager_ = std::make_unique<DbSyncManager>(db_, *this);
 }
 
 MeshService::~MeshService() { disconnect_all(); }
@@ -443,6 +445,9 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
                 rt->my_long_name = me->long_name;
                 rt->my_short_name = me->short_name;
             }
+            if (e.device.find("tcp:") == 0 && sync_manager_) {
+                sync_manager_->initiate_sync();
+            }
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
             rt->db->upsert_node(e.node);
             db_.upsert_node(e.device, e.node);
@@ -453,6 +458,14 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
                                     e.node.latitude.value_or(0.0), 
                                     e.node.longitude.value_or(0.0), 
                                     e.node.altitude.value_or(0), ts);
+                Database::LocationRow loc;
+                loc.device = e.device;
+                loc.node_num = e.node.node_num;
+                loc.latitude = e.node.latitude.value_or(0.0);
+                loc.longitude = e.node.longitude.value_or(0.0);
+                loc.altitude = e.node.altitude.value_or(0);
+                loc.ts = ts;
+                if (sync_manager_) sync_manager_->push_location(loc);
             }
         } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
             rt->db->upsert_channel(e.channel);
@@ -511,7 +524,8 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
                    std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch()).count();
             m.packet_id = e.packet_id;
-            db_.insert_message(m);
+            m.rowid = db_.insert_message(m);
+            if (sync_manager_) sync_manager_->push_message(m);
         } else if constexpr (std::is_same_v<T, EvAckReceived>) {
             // Match pending outbound message and update its ack state.
             std::lock_guard<std::mutex> lock(devices_mu_);
@@ -539,6 +553,20 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, const M
                 stream_server_->broadcast(e.bytes);
             }
 #endif
+        } else if constexpr (std::is_same_v<T, EvSendDbSyncToTcp>) {
+#ifdef ENABLE_MESH_NET
+            if (stream_server_) {
+                stream_server_->broadcast(e.payload, 0xD0);
+            }
+            std::lock_guard<std::mutex> lock(devices_mu_);
+            for (auto& [id, dev] : devices_) {
+                if (dev->stream) {
+                    dev->stream->send_to_radio(e.payload, 0xD0);
+                }
+            }
+#endif
+        } else if constexpr (std::is_same_v<T, EvDbSyncPayload>) {
+            if (sync_manager_) sync_manager_->handle_sync_payload(e.device, e.payload);
         } else {
             // EvConnected / EvDisconnected / EvLogLine / EvError / EvSendRawToRadio: no DB work.
         }

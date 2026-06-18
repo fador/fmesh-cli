@@ -33,7 +33,7 @@ public:
 
     // Broadcast a ToRadio or FromRadio message to all connected and authenticated clients.
     // Thread-safe.
-    void broadcast(const std::string& bytes);
+    void broadcast(const std::string& bytes, unsigned char marker = 0xC3);
 
 private:
     void accept_loop();
@@ -64,7 +64,7 @@ public:
     ~StreamServer() {}
     bool start() { return false; }
     void stop() {}
-    void broadcast(const std::string&) {}
+    void broadcast(const std::string&, unsigned char = 0xC3) {}
 };
 
 #endif

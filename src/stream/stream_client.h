@@ -50,13 +50,13 @@ public:
     void stop();
 
     // Write a ToRadio message (with framing). Thread-safe.
-    bool send_to_radio(const std::string& bytes);
+    bool send_to_radio(const std::string& bytes, unsigned char marker = 0xC3);
 
     [[nodiscard]] std::string device_id() const { return device_id_; }
     [[nodiscard]] bool is_connected() const { return connected_; }
 
-    // Frame a protobuf message with the 0x94 0xC3 <len16> header.
-    static std::string frame(const std::string& payload);
+    // Frame a protobuf message with the 0x94 <marker> <len16> header.
+    static std::string frame(const std::string& payload, unsigned char marker = 0xC3);
 
 #ifdef ENABLE_MESH_NET
     // Enable TLS client mode with authentication
