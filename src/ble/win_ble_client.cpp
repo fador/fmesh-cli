@@ -165,14 +165,17 @@ void WinBleClient::run_connect_flow() {
         ev.display_name = spec_.name.empty() ? spec_.address : spec_.name;
         emit(ev);
 
+        // Send want_config_id to trigger download of config, nodes, and messages
+        uint32_t config_id = 1337;
+        send_to_radio(MeshCodec::encode_want_config(config_id));
+
         // Block thread to keep async handlers alive
         while (running_ && connected_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
     } catch (const winrt::hresult_error& e) {
-        std::wstring ws(e.message());
-        emit_error("WinRT exception: " + std::string(ws.begin(), ws.end()));
+        emit_error("WinRT exception: " + winrt::to_string(e.message()));
     } catch (const std::exception& e) {
         emit_error(std::string("Exception: ") + e.what());
     }

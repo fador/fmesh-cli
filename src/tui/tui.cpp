@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <ctime>
 #include <cctype>
+#include <locale.h>
 #ifndef _WIN32
 #include <poll.h>
 #endif
@@ -68,6 +69,7 @@ void TuiApp::handle_resize() {
 }
 
 void TuiApp::init_ncurses() {
+    setlocale(LC_ALL, "");
     if (!::initscr()) {
         ncurses_ok_ = false;
         return;
@@ -757,7 +759,8 @@ bool TuiApp::handle_popup_key(int ch) {
             // Send DM
             std::string nick = popup_node_.short_name.empty()
                 ? popup_node_.long_name : popup_node_.short_name;
-            wm_.ensure_dm(popup_device_, popup_node_.node_num, nick);
+            int win_idx = wm_.ensure_dm(popup_device_, popup_node_.node_num, nick);
+            wm_.select(win_idx);
             wm_.append_status("Opened DM with " + popup_node_.long_name +
                 " (" + popup_node_.node_id + ")", tui_color::INFO);
         }
@@ -1272,7 +1275,7 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                             static_cast<uint32_t>(std::time(nullptr)), db);
             std::string nick = e.node.short_name.empty()
                                    ? e.node.long_name : e.node.short_name;
-            wm_.ensure_dm(e.device, e.node.node_num, nick);
+            wm_.update_dm_nick(e.device, e.node.node_num, nick);
             // Clamp nodelist cursor if viewing this device.
             if (nodelist_device_ == e.device && db) {
                 int total = static_cast<int>(db->all().size());
@@ -1281,8 +1284,11 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             }
         } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
             std::string name = e.channel.name;
-            int idx = wm_.ensure_channel(e.device, e.channel.index, name);
-            (void)idx;
+            if (e.channel.index == 0) {
+                wm_.ensure_channel(e.device, e.channel.index, name);
+            } else {
+                wm_.update_channel_name(e.device, e.channel.index, name);
+            }
             wm_.append_status("*** Channel " + std::to_string(e.channel.index) +
                               ": " + (name.empty() ? "(unnamed)" : name) +
                               " [" + e.channel.role + "]", tui_color::INFO);

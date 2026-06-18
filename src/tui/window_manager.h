@@ -29,6 +29,13 @@ public:
     int ensure_dm(const std::string& device, uint32_t peer_node,
                    const std::string& nick);
 
+    // Update the name/nick of a window if it exists. Does not create the window.
+    void update_channel_name(const std::string& device, uint32_t channel_idx,
+                             const std::string& name);
+    void update_dm_nick(const std::string& device, uint32_t peer_node,
+                        const std::string& nick);
+
+
     // Ensure a raw-packet capture window exists (used for live hex dump).
     int ensure_raw(const std::string& device);
 

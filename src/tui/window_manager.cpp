@@ -131,6 +131,26 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
     return win_idx;
 }
 
+void WindowManager::update_channel_name(const std::string& device, uint32_t idx,
+                                        const std::string& name) {
+    if (name.empty()) return;
+    std::string key = device + "|channel|" + std::to_string(idx);
+    auto it = by_key_.find(key);
+    if (it != by_key_.end()) {
+        windows_[it->second - 1]->set_title(channel_title(device, idx, name));
+    }
+}
+
+void WindowManager::update_dm_nick(const std::string& device, uint32_t peer_node,
+                                   const std::string& nick) {
+    if (nick.empty()) return;
+    std::string key = device + "|dm|" + std::to_string(peer_node);
+    auto it = by_key_.find(key);
+    if (it != by_key_.end()) {
+        windows_[it->second - 1]->set_title(dm_title(device, peer_node, nick));
+    }
+}
+
 int WindowManager::ensure_raw(const std::string& device) {
     std::string key = device + "|raw|0";
     auto it = by_key_.find(key);

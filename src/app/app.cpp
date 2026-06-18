@@ -70,35 +70,44 @@ int run_app(int argc, char** argv, MeshService& service) {
                << " pair=" << cfg.pair;
 
     int connected = 0;
-    for (const auto& spec : specs) {
-        LOG_INFO() << "connecting to " << spec.name
-                   << (spec.address.empty() ? "" : " (" + spec.address + ")")
-                   << (spec.tcp_host.empty() ? "" : " tcp=" + spec.tcp_host)
-                   << (spec.serial_port.empty() ? "" : " serial=" + spec.serial_port);
-        std::string device_id = service.connect_device(spec, cfg.pair);
-        if (device_id.empty()) {
-            LOG_ERROR() << "failed to connect to " << spec.name;
-            // Drain error events to stderr so the user sees why.
-            for (auto& ev : queue.drain_all()) {
-                std::visit([](const auto& e) {
-                    using T = std::decay_t<decltype(e)>;
-                    if constexpr (std::is_same_v<T, EvError>)
-                        std::fprintf(stderr, "error: %s\n", e.message.c_str());
-                    else if constexpr (std::is_same_v<T, EvDisconnected>)
-                        std::fprintf(stderr, "disconnected: %s\n", e.reason.c_str());
-                }, ev);
+    if (cfg.headless || cfg.list_only) {
+        for (const auto& spec : specs) {
+            LOG_INFO() << "connecting to " << spec.name
+                       << (spec.address.empty() ? "" : " (" + spec.address + ")")
+                       << (spec.tcp_host.empty() ? "" : " tcp=" + spec.tcp_host)
+                       << (spec.serial_port.empty() ? "" : " serial=" + spec.serial_port);
+            std::string device_id = service.connect_device(spec, cfg.pair);
+            if (device_id.empty()) {
+                LOG_ERROR() << "failed to connect to " << spec.name;
+                for (auto& ev : queue.drain_all()) {
+                    std::visit([](const auto& e) {
+                        using T = std::decay_t<decltype(e)>;
+                        if constexpr (std::is_same_v<T, EvError>)
+                            std::fprintf(stderr, "error: %s\n", e.message.c_str());
+                        else if constexpr (std::is_same_v<T, EvDisconnected>)
+                            std::fprintf(stderr, "disconnected: %s\n", e.reason.c_str());
+                    }, ev);
+                }
+                continue;
             }
-            continue;
+            std::printf("connected to %s (%s)\n",
+                        (spec.name.empty() ? spec.tcp_host.c_str() : spec.name.c_str()),
+                        device_id.c_str());
+            ++connected;
         }
-        std::printf("connected to %s (%s)\n",
-                    (spec.name.empty() ? spec.tcp_host.c_str() : spec.name.c_str()),
-                    device_id.c_str());
-        ++connected;
-    }
 
-    if (connected == 0) {
-        if (cfg.list_only) return 0;
-        return 1;
+        if (connected == 0) {
+            if (cfg.list_only) return 0;
+            return 1;
+        }
+    } else {
+        // TUI mode: connect in the background so the UI spawns immediately
+        std::thread connector([&service, specs, pair = cfg.pair]() {
+            for (const auto& spec : specs) {
+                service.connect_device(spec, pair);
+            }
+        });
+        connector.detach();
     }
 
     if (cfg.list_only) {
