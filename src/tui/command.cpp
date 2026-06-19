@@ -486,6 +486,33 @@ void CommandDispatcher::cmd_config(const std::vector<std::string>& args) {
         status_("(no devices connected)", tui_color::ERROR);
         return;
     }
+    if (!args.empty() && args[0] == "set") {
+        if (args.size() < 3) {
+            status_("Usage: /config set <module.key> <value>", tui_color::ERROR);
+            return;
+        }
+        std::string key = args[1];
+        std::string value = args[2];
+        for (size_t i = 3; i < args.size(); ++i) value += " " + args[i];
+        
+        std::string device_id = active_device_;
+        if (device_id.empty() && !devices.empty()) {
+            device_id = devices[0];
+        }
+        if (device_id.empty()) {
+            status_("No active device to configure.", tui_color::ERROR);
+            return;
+        }
+        
+        status_("Setting " + key + " = " + value + " on " + service_.display_name_for(device_id) + "...", tui_color::INFO);
+        if (service_.set_config(device_id, key, value)) {
+            status_("Config change sent.", tui_color::INFO);
+        } else {
+            status_("Failed to set config. Check key name or connection.", tui_color::ERROR);
+        }
+        return;
+    }
+
     std::string filter;
     if (!args.empty()) filter = args[0];
 

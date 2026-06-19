@@ -48,6 +48,19 @@ public:
         uint32_t hop_limit,
         const std::vector<uint8_t>& pki_pubkey);
 
+    // Modify a config value via protobuf reflection
+    static bool set_config_value(
+        const std::string& config_bytes,
+        const std::string& module_config_bytes,
+        const std::string& key,
+        const std::string& value,
+        bool& out_is_module,
+        std::string& out_modified_bytes);
+
+    // Encode an admin packet (Config or ModuleConfig)
+    static std::string encode_admin_packet(
+        uint32_t from_node, uint32_t to_node, const std::string& modified_bytes, bool is_module);
+
     // --- decoders (radio -> client) --------------------------------------
 
     // Parse a FromRadio message. Returns nullopt for records we don't surface

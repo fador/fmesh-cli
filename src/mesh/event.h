@@ -91,6 +91,13 @@ struct EvError {
     std::string message;
 };
 
+// A raw protobuf Config or ModuleConfig message
+struct EvConfigBytes {
+    DeviceId device;
+    bool is_module = false;
+    std::string bytes;
+};
+
 // A single config line: "section.key = value"
 struct EvConfigLine {
     DeviceId device;
@@ -148,7 +155,8 @@ using MeshEvent = std::variant<
     EvRawRxBytes,
     EvSendRawToRadio,
     EvBleDeviceFound,
-    EvDbSyncPayload
+    EvDbSyncPayload,
+    EvConfigBytes
 >;
 
 } // namespace meshcli

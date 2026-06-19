@@ -42,6 +42,8 @@ struct DeviceRuntime {
     std::string hw_model;
     bool config_complete = false;
     std::vector<std::string> config_lines;   // from /config decoding
+    std::string raw_config;
+    std::string raw_module_config;
     std::vector<EvRawPacket> raw_packets;    // last N raw FromRadio packets
     static constexpr size_t kMaxRawPackets = 200;
     // pending outbound messages awaiting ack, keyed by packet_id -> db rowid
@@ -91,6 +93,10 @@ public:
                        uint32_t channel_idx,
                        const std::string& text,
                        bool want_ack);
+
+    // Modify a device configuration. Uses protobuf reflection to update the specified key.
+    // e.g. set_config(device_id, "lora.tx_power", "27")
+    bool set_config(const std::string& device_id, const std::string& key, const std::string& value);
 
     // --- queries for the UI ---
     void load_offline_history();

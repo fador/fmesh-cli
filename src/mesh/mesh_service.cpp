@@ -394,6 +394,51 @@ uint32_t MeshService::send_text(const std::string& device_id,
     return pid;
 }
 
+bool MeshService::set_config(const std::string& device_id, const std::string& key, const std::string& value) {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    
+    // First, check virtual nodes
+    auto vit = virtual_devices_.find(device_id);
+    if (vit != virtual_devices_.end()) {
+        auto rt = devices_.find(vit->second.stream_id);
+        if (rt == devices_.end()) return false;
+        
+        bool is_module = false;
+        std::string modified_bytes;
+        if (!MeshCodec::set_config_value(rt->second->raw_config, rt->second->raw_module_config, key, value, is_module, modified_bytes)) {
+            return false;
+        }
+        
+        auto admin_pkt = MeshCodec::encode_admin_packet(rt->second->my_node_num, vit->second.node_num, modified_bytes, is_module);
+        if (sync_manager_) {
+            sync_manager_->send_raw_to_device(device_id, admin_pkt);
+        }
+        return true;
+    }
+    
+    // Check local nodes
+    auto it = devices_.find(device_id);
+    if (it == devices_.end()) return false;
+    
+    auto rt = it->second.get();
+    
+    bool is_module = false;
+    std::string modified_bytes;
+    if (!MeshCodec::set_config_value(rt->raw_config, rt->raw_module_config, key, value, is_module, modified_bytes)) {
+        return false;
+    }
+    
+    auto admin_pkt = MeshCodec::encode_admin_packet(rt->my_node_num, rt->my_node_num, modified_bytes, is_module);
+    
+    if (rt->client) {
+        rt->client->send_to_radio(admin_pkt);
+    } else if (rt->stream) {
+        rt->stream->send_to_radio(admin_pkt);
+    }
+    
+    return true;
+}
+
 void MeshService::load_offline_history() {
     auto devs = db_.get_all_devices();
     std::lock_guard<std::mutex> lock(devices_mu_);
@@ -660,6 +705,18 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
             std::string ln;
             while (std::getline(iss, ln)) {
                 if (!ln.empty()) dst.push_back(ln);
+            }
+        } else if constexpr (std::is_same_v<T, EvConfigBytes>) {
+            if (e.is_module) {
+                rt->raw_module_config = e.bytes;
+            } else {
+                rt->raw_config = e.bytes;
+            }
+            auto lines = MeshCodec::decode_config_lines(e.bytes, e.is_module);
+            auto& dst = rt->config_lines;
+            if (!e.is_module) dst.clear(); // Clear on base Config, append ModuleConfig
+            for (const auto& line : lines) {
+                dst.push_back(line);
             }
         } else if constexpr (std::is_same_v<T, EvRawPacket>) {
             rt->raw_packets.push_back(e);

@@ -9,7 +9,12 @@
 #include <meshtastic/portnums.pb.h>
 #include <meshtastic/telemetry.pb.h>
 
+#include <meshtastic/admin.pb.h>
+
 #include <google/protobuf/util/json_util.h>
+#include <google/protobuf/message.h>
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/reflection.h>
 
 namespace meshcli {
 
@@ -32,6 +37,122 @@ std::string MeshCodec::encode_want_config(uint32_t config_id) {
 std::string MeshCodec::encode_disconnect() {
     ToRadio tr;
     tr.set_disconnect(true);
+    return tr.SerializeAsString();
+}
+
+bool MeshCodec::set_config_value(
+    const std::string& config_bytes,
+    const std::string& module_config_bytes,
+    const std::string& key,
+    const std::string& value,
+    bool& out_is_module,
+    std::string& out_modified_bytes)
+{
+    // key is like "lora.tx_power" or "display.screen_on_secs"
+    auto dot = key.find('.');
+    if (dot == std::string::npos) return false;
+    
+    std::string module_name = key.substr(0, dot);
+    std::string field_name = key.substr(dot + 1);
+    
+    meshtastic::Config config;
+    meshtastic::ModuleConfig module_config;
+    
+    google::protobuf::Message* msg = nullptr;
+    
+    config.ParseFromString(config_bytes);
+    module_config.ParseFromString(module_config_bytes);
+    
+    // Check if it's in Config
+    const google::protobuf::Descriptor* config_desc = config.GetDescriptor();
+    const google::protobuf::Reflection* config_refl = config.GetReflection();
+    const google::protobuf::FieldDescriptor* config_field = config_desc->FindFieldByName(module_name);
+    
+    if (config_field && config_field->type() == google::protobuf::FieldDescriptor::TYPE_MESSAGE) {
+        msg = config_refl->MutableMessage(&config, config_field);
+        out_is_module = false;
+    } else {
+        // Check if it's in ModuleConfig
+        const google::protobuf::Descriptor* mod_desc = module_config.GetDescriptor();
+        const google::protobuf::Reflection* mod_refl = module_config.GetReflection();
+        const google::protobuf::FieldDescriptor* mod_field = mod_desc->FindFieldByName(module_name);
+        if (mod_field && mod_field->type() == google::protobuf::FieldDescriptor::TYPE_MESSAGE) {
+            msg = mod_refl->MutableMessage(&module_config, mod_field);
+            out_is_module = true;
+        } else {
+            return false; // Unknown module
+        }
+    }
+    
+    const google::protobuf::Descriptor* desc = msg->GetDescriptor();
+    const google::protobuf::Reflection* refl = msg->GetReflection();
+    const google::protobuf::FieldDescriptor* field = desc->FindFieldByName(field_name);
+    if (!field) return false;
+    
+    try {
+        switch (field->cpp_type()) {
+            case google::protobuf::FieldDescriptor::CPPTYPE_INT32:
+                refl->SetInt32(msg, field, std::stoi(value));
+                break;
+            case google::protobuf::FieldDescriptor::CPPTYPE_UINT32:
+                refl->SetUInt32(msg, field, std::stoul(value));
+                break;
+            case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT:
+                refl->SetFloat(msg, field, std::stof(value));
+                break;
+            case google::protobuf::FieldDescriptor::CPPTYPE_BOOL:
+                refl->SetBool(msg, field, (value == "true" || value == "1"));
+                break;
+            case google::protobuf::FieldDescriptor::CPPTYPE_STRING:
+                refl->SetString(msg, field, value);
+                break;
+            case google::protobuf::FieldDescriptor::CPPTYPE_ENUM: {
+                const google::protobuf::EnumDescriptor* enum_desc = field->enum_type();
+                const google::protobuf::EnumValueDescriptor* enum_val = enum_desc->FindValueByName(value);
+                if (!enum_val) {
+                    // Try parsing as int
+                    int int_val = std::stoi(value);
+                    enum_val = enum_desc->FindValueByNumber(int_val);
+                }
+                if (!enum_val) return false;
+                refl->SetEnum(msg, field, enum_val);
+                break;
+            }
+            default:
+                return false;
+        }
+    } catch (...) {
+        return false;
+    }
+    
+    if (out_is_module) {
+        out_modified_bytes = module_config.SerializeAsString();
+    } else {
+        out_modified_bytes = config.SerializeAsString();
+    }
+    
+    return true;
+}
+
+std::string MeshCodec::encode_admin_packet(
+    uint32_t from_node, uint32_t to_node, const std::string& modified_bytes, bool is_module)
+{
+    meshtastic::AdminMessage admin;
+    if (is_module) {
+        admin.mutable_set_module_config()->ParseFromString(modified_bytes);
+    } else {
+        admin.mutable_set_config()->ParseFromString(modified_bytes);
+    }
+    
+    meshtastic::MeshPacket pkt;
+    pkt.set_from(from_node);
+    pkt.set_to(to_node);
+    pkt.set_want_ack(true);
+    pkt.mutable_decoded()->set_payload(admin.SerializeAsString());
+    pkt.mutable_decoded()->set_portnum(meshtastic::PortNum::ADMIN_APP);
+    
+    meshtastic::ToRadio tr;
+    *tr.mutable_packet() = pkt;
     return tr.SerializeAsString();
 }
 
@@ -204,23 +325,17 @@ std::optional<MeshEvent> MeshCodec::decode_from_radio(
             return ev;
         }
         case FromRadio::kConfig: {
-            auto lines = decode_config_lines(fr.config().SerializeAsString(), false);
-            EvConfigLine ev;
+            EvConfigBytes ev;
             ev.device = device;
-            for (size_t i = 0; i < lines.size(); ++i) {
-                if (i) ev.line += "\n";
-                ev.line += lines[i];
-            }
+            ev.is_module = false;
+            ev.bytes = fr.config().SerializeAsString();
             return ev;
         }
         case FromRadio::kModuleConfig: {
-            auto lines = decode_config_lines(fr.moduleconfig().SerializeAsString(), true);
-            EvConfigLine ev;
+            EvConfigBytes ev;
             ev.device = device;
-            for (size_t i = 0; i < lines.size(); ++i) {
-                if (i) ev.line += "\n";
-                ev.line += lines[i];
-            }
+            ev.is_module = true;
+            ev.bytes = fr.moduleconfig().SerializeAsString();
             return ev;
         }
         case FromRadio::kPacket:
