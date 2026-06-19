@@ -459,6 +459,10 @@ void StreamClient::emit_error(std::string msg) {
 }
 
 std::string StreamClient::frame(const std::string& payload, unsigned char marker) {
+    if (payload.size() > 65000) {
+        LOG_ERROR() << "StreamClient: frame payload too large (" << payload.size() << " bytes), dropping to avoid truncation";
+        return "";
+    }
     std::string out;
     out.reserve(4 + payload.size());
     out += static_cast<char>(0x94);

@@ -781,8 +781,15 @@ void TuiApp::render_popup() {
     if (n.last_heard) {
         std::time_t t = static_cast<std::time_t>(*n.last_heard);
         char buf[32];
-        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&t));
-        draw_line("Last heard:", std::string(buf));
+        struct tm tm_info;
+#ifdef _WIN32
+        if (::localtime_s(&tm_info, &t) == 0) {
+#else
+        if (::localtime_r(&t, &tm_info) != nullptr) {
+#endif
+            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm_info);
+            draw_line("Last heard:", std::string(buf));
+        }
     }
     if (n.hops_away)
         draw_line("Hops:", std::to_string(*n.hops_away));

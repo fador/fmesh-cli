@@ -180,6 +180,10 @@ void StreamServer::stop() {
 void StreamServer::broadcast(const std::string& bytes, unsigned char marker) {
     if (!running_) return;
     
+    if (bytes.size() > 65000) {
+        LOG_ERROR() << "StreamServer: broadcast payload too large (" << bytes.size() << " bytes), dropping to avoid framing truncation";
+        return;
+    }
     std::string framed;
     framed.reserve(4 + bytes.size());
     framed += static_cast<char>(0x94);

@@ -111,19 +111,19 @@ void DbSyncManager::handle_request(const std::string& device, const std::string&
     uint64_t after_msg = j.value("after_message_ts", (uint64_t)0);
     uint64_t after_loc = j.value("after_location_ts", (uint64_t)0);
 
-    auto msgs = db_.get_messages_after_ts(after_msg, 1001); // fetch 1001 to check if has_more
-    auto locs = db_.get_locations_after(after_loc, 1001);
+    auto msgs = db_.get_messages_after_ts(after_msg, 21); // fetch 21 to check if has_more
+    auto locs = db_.get_locations_after(after_loc, 21);
 
     if (msgs.empty() && locs.empty()) return;
 
     bool has_more = false;
-    if (msgs.size() > 1000) {
+    if (msgs.size() > 20) {
         has_more = true;
-        msgs.pop_back(); // remove the 1001st
+        msgs.pop_back(); // remove the 21st
     }
-    if (locs.size() > 1000) {
+    if (locs.size() > 20) {
         has_more = true;
-        locs.pop_back(); // remove the 1001st
+        locs.pop_back(); // remove the 21st
     }
 
     json resp;

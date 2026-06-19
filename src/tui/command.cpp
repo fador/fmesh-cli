@@ -560,8 +560,15 @@ void CommandDispatcher::cmd_whois(const std::vector<std::string>& args) {
         if (n.last_heard) {
             std::time_t t = static_cast<std::time_t>(*n.last_heard);
             char buf[32];
-            std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", std::localtime(&t));
-            status_("  Heard:    " + std::string(buf), tui_color::INFO);
+            struct tm tm_info;
+#ifdef _WIN32
+            if (::localtime_s(&tm_info, &t) == 0) {
+#else
+            if (::localtime_r(&t, &tm_info) != nullptr) {
+#endif
+                std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tm_info);
+                status_("  Heard:    " + std::string(buf), tui_color::INFO);
+            }
         }
         if (n.latitude && n.longitude) {
             char buf[80];
