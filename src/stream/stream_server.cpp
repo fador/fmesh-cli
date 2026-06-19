@@ -139,8 +139,10 @@ void StreamServer::stop() {
 
     if (server_fd_ != -1) {
 #ifdef _WIN32
+        ::shutdown(server_fd_, SD_BOTH);
         ::closesocket(server_fd_);
 #else
+        ::shutdown(server_fd_, SHUT_RDWR);
         ::close(server_fd_);
 #endif
         server_fd_ = -1;
@@ -157,20 +159,18 @@ void StreamServer::stop() {
     }
     for (auto& c : to_close) {
         c->active = false;
-        if (c->ssl) {
-            SSL_shutdown(c->ssl);
-        }
+        if (c->fd != -1) {
 #ifdef _WIN32
-        ::closesocket(c->fd);
+            ::shutdown(c->fd, SD_BOTH);
 #else
-        ::close(c->fd);
+            ::shutdown(c->fd, SHUT_RDWR);
 #endif
+        }
     }
     for (auto& c : to_close) {
         if (c->thread.joinable()) {
             c->thread.join();
         }
-        if (c->ssl) SSL_free(c->ssl);
     }
     
     std::lock_guard<std::mutex> lock(clients_mu_);
