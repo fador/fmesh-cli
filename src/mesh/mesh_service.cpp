@@ -418,6 +418,13 @@ std::string MeshService::display_name_for(const std::string& device_id) const {
     return it->second->display_name;
 }
 
+BleDeviceSpec MeshService::spec_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = devices_.find(device_id);
+    if (it == devices_.end()) return {};
+    return it->second->spec;
+}
+
 std::vector<std::string> MeshService::config_lines_for(const std::string& device_id) const {
     std::lock_guard<std::mutex> lock(devices_mu_);
     auto it = devices_.find(device_id);

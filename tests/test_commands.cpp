@@ -1,5 +1,6 @@
 #include "tui/command.h"
 #include "tui/window_manager.h"
+#include "app/config.h"
 #include "mesh/mesh_service.h"
 #include "mesh/node_db.h"
 #include "store/database.h"
@@ -53,9 +54,10 @@ public:
     };
     Capture exec(const std::string& line) {
         Capture c;
+        AppConfig dummy_config;
         CommandDispatcher disp(svc_, wm_,
             [&](const std::string& s, int) { c.lines.push_back(s); },
-            active_dev_);
+            active_dev_, dummy_config);
         auto res = disp.execute(line);
         c.quit = res.quit;
         return c;

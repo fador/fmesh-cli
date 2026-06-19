@@ -336,10 +336,14 @@ bool TuiApp::handle_wizard_key(int ch) {
             if (scan_selection_ >= 0 && static_cast<size_t>(scan_selection_) < scan_entries_.size()) {
                 const auto& e = scan_entries_[scan_selection_];
                 BleDeviceSpec spec;
-                spec.name = e.name;
-                spec.address = e.address;
+                if (scan_entries_[scan_selection_].address.empty()) {
+                    spec.name = scan_entries_[scan_selection_].name;
+                } else {
+                    spec.address = scan_entries_[scan_selection_].address;
+                }
                 spec.pin = wizard_pin_;
-                service_.connect_device(spec, false);
+                service_.connect_device(spec, config_.pair);
+                save_device_spec(spec);
             }
             exit_wizard();
         } else if (ch == KEY_UP || ch == 'k') {
@@ -389,6 +393,7 @@ bool TuiApp::handle_wizard_key(int ch) {
                 BleDeviceSpec spec;
                 spec.tcp_host = wizard_tcp_host_ + ":" + wizard_tcp_port_;
                 service_.connect_device(spec, false);
+                save_device_spec(spec);
             }
             exit_wizard();
         } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b' || ch == KEY_DC) {
@@ -423,6 +428,7 @@ bool TuiApp::handle_wizard_key(int ch) {
                 spec.serial_baud = std::atoi(wizard_serial_baud_.c_str());
                 if (spec.serial_baud <= 0) spec.serial_baud = 115200;
                 service_.connect_device(spec, false);
+                save_device_spec(spec);
             }
             exit_wizard();
         } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b' || ch == KEY_DC) {
@@ -458,6 +464,7 @@ bool TuiApp::handle_wizard_key(int ch) {
                 spec.mesh_user = wizard_mesh_user_;
                 spec.mesh_password = wizard_mesh_password_;
                 service_.connect_device(spec, false);
+                save_device_spec(spec);
             }
             exit_wizard();
         } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b' || ch == KEY_DC) {
@@ -1071,7 +1078,7 @@ void TuiApp::render_wizard_ble() {
                 attron(A_REVERSE);
                 mvprintw(y, cx, "> %-24s %s", e.name.c_str(), e.address.c_str());
                 if (e.rssi != 0) printw("  %d dBm", e.rssi);
-    attroff(A_REVERSE);
+                attroff(A_REVERSE);
             } else {
                 mvprintw(y, cx, "  %-24s %s", e.name.c_str(), e.address.c_str());
                 if (e.rssi != 0) printw("  %d dBm", e.rssi);
@@ -1326,7 +1333,6 @@ int TuiApp::run() {
                 if (ch == ALT_I) { wm_.select(18); need_redraw_ = true; ch = getch(); continue; }
                 if (ch == ALT_O) { wm_.select(19); need_redraw_ = true; ch = getch(); continue; }
                 if (ch == ALT_P) { wm_.select(20); need_redraw_ = true; ch = getch(); continue; }
-#endif
                 if (ch == 27) {
                     timeout(50);
                     int ch2 = getch();
@@ -1434,7 +1440,7 @@ int TuiApp::run() {
                         need_redraw_ = true;
                         CommandDispatcher disp(service_, wm_,
                             [this](const std::string& s, int c) { wm_.append_status(s, c); },
-                            active_device_,
+                            active_device_, config_,
                             [this]() { enter_wizard(); },
                             [this](const std::string& name) { return set_theme(name); },
                             [this](bool turn_on) {
@@ -1607,6 +1613,17 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             }
         }
     }, ev);
+}
+
+void TuiApp::save_device_spec(const BleDeviceSpec& spec) {
+    bool found = false;
+    for (const auto& d : config_.devices) {
+        if (d == spec) { found = true; break; }
+    }
+    if (!found) {
+        config_.devices.push_back(spec);
+        save_config(config_);
+    }
 }
 
 } // namespace meshcli

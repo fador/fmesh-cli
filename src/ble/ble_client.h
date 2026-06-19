@@ -19,6 +19,13 @@ struct BleDeviceSpec {
     std::string mesh_host;
     std::string mesh_user;
     std::string mesh_password;
+
+    friend bool operator==(const BleDeviceSpec& a, const BleDeviceSpec& b) {
+        return a.name == b.name && a.address == b.address && a.pin == b.pin &&
+               a.tcp_host == b.tcp_host && a.serial_port == b.serial_port &&
+               a.serial_baud == b.serial_baud && a.mesh_host == b.mesh_host &&
+               a.mesh_user == b.mesh_user && a.mesh_password == b.mesh_password;
+    }
 };
 
 // Abstract BLE client interface. Platform-specific implementations (e.g. BlueZ, WinRT)

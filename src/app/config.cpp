@@ -84,6 +84,25 @@ bool parse_device_spec(const std::string& spec, BleDeviceSpec& out) {
     return false;
 }
 
+std::string format_device_spec(const BleDeviceSpec& spec) {
+    if (!spec.mesh_host.empty()) {
+        return "mesh:" + spec.mesh_host;
+    } else if (!spec.tcp_host.empty()) {
+        return "tcp:" + spec.tcp_host;
+    } else if (!spec.serial_port.empty()) {
+        return "serial:" + spec.serial_port + ":" + std::to_string(spec.serial_baud);
+    } else if (!spec.address.empty()) {
+        if (!spec.pin.empty() && spec.pin != "123456")
+            return "addr:" + spec.address + ":" + spec.pin;
+        return "addr:" + spec.address;
+    } else if (!spec.name.empty()) {
+        if (!spec.pin.empty() && spec.pin != "123456")
+            return "ble:" + spec.name + ":" + spec.pin;
+        return "ble:" + spec.name;
+    }
+    return "";
+}
+
 bool parse_args(int argc, char** argv, AppConfig& out) {
     bool used_legacy = false;
     for (int i = 1; i < argc; ++i) {
@@ -169,15 +188,19 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
     }
 
     // If legacy flags were used and no --device flags, build a single spec.
+    // If device_name is empty, this means no flags were used and we just rely on saved devices.
     if (out.devices.empty() && used_legacy) {
-        BleDeviceSpec spec;
-        spec.name = out.device_name;
-        spec.address = out.device_addr;
-        spec.pin = out.pin;
-        spec.tcp_host = out.tcp_host;
-        spec.serial_port = out.serial_port;
-        spec.serial_baud = out.serial_baud;
-        out.devices.push_back(std::move(spec));
+        if (!out.device_name.empty() || !out.device_addr.empty() || 
+            !out.tcp_host.empty() || !out.serial_port.empty()) {
+            BleDeviceSpec spec;
+            spec.name = out.device_name;
+            spec.address = out.device_addr;
+            spec.pin = out.pin;
+            spec.tcp_host = out.tcp_host;
+            spec.serial_port = out.serial_port;
+            spec.serial_baud = out.serial_baud;
+            out.devices.push_back(std::move(spec));
+        }
     }
 
     return true;
@@ -225,6 +248,17 @@ void load_config(AppConfig& c) {
             else if (k == "server_port") c.server_port = std::atoi(v.c_str());
             else if (k == "server_user") c.server_user = v;
             else if (k == "server_password") c.server_password = v;
+            else if (k == "device") {
+                BleDeviceSpec spec;
+                if (parse_device_spec(v, spec)) {
+                    // avoid duplicates
+                    bool found = false;
+                    for (const auto& d : c.devices) {
+                        if (d == spec) { found = true; break; }
+                    }
+                    if (!found) c.devices.push_back(std::move(spec));
+                }
+            }
         }
     }
     fclose(f);
@@ -248,6 +282,12 @@ void save_config(const AppConfig& c) {
     fprintf(f, "server_port=%d\n", c.server_port);
     fprintf(f, "server_user=%s\n", c.server_user.c_str());
     fprintf(f, "server_password=%s\n", c.server_password.c_str());
+    for (const auto& spec : c.devices) {
+        std::string s = format_device_spec(spec);
+        if (!s.empty()) {
+            fprintf(f, "device=%s\n", s.c_str());
+        }
+    }
     fclose(f);
 }
 

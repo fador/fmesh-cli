@@ -8,6 +8,7 @@ namespace meshcli {
 
 class MeshService;
 class WindowManager;
+struct AppConfig;
 
 struct CommandResult {
     bool handled = true;
@@ -25,6 +26,7 @@ public:
 
     CommandDispatcher(MeshService& service, WindowManager& wm, StatusSink status,
                       std::string& active_device,
+                      AppConfig& config,
                       std::function<void()> on_scan = {},
                       std::function<bool(const std::string&)> on_set_theme = {},
                       std::function<void(bool)> on_server_config = {});
@@ -38,6 +40,7 @@ private:
     WindowManager& wm_;
     StatusSink status_;
     std::string& active_device_;
+    AppConfig& config_;
     std::function<void()> on_scan_;
     std::function<bool(const std::string&)> on_set_theme_;
     std::function<void(bool)> on_server_config_;

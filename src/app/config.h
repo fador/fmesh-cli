@@ -8,7 +8,7 @@
 namespace meshcli {
 
 struct AppConfig {
-    std::string device_name = "Fad3_0330";  // single-device backward compat
+    std::string device_name;  // single-device backward compat
     std::string device_addr;                // single-device backward compat
     std::string pin = "123456";
     std::string tcp_host;              // single-device backward compat
@@ -38,6 +38,9 @@ bool parse_args(int argc, char** argv, AppConfig& out);
 // Parse a --device spec string: "ble:name[:pin]" / "addr:mac[:pin]" /
 // "tcp:host[:port]" / "serial:path[:baud]". Returns true on success.
 bool parse_device_spec(const std::string& spec, BleDeviceSpec& out);
+
+// Format a BleDeviceSpec into a string suitable for saving/parsing.
+std::string format_device_spec(const BleDeviceSpec& spec);
 
 // Expand ~ in paths and fill defaults for empty fields.
 void finalize_paths(AppConfig& c);

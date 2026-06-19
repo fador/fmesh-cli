@@ -1,6 +1,7 @@
 #include "command.h"
 
 #include "app/config.h"
+#include "ble/ble_client.h"
 #include "colors.h"
 #include "mesh/mesh_service.h"
 #include "window_manager.h"
@@ -28,11 +29,12 @@ std::vector<std::string> split(const std::string& s) {
 CommandDispatcher::CommandDispatcher(MeshService& service, WindowManager& wm,
                                      StatusSink status,
                                      std::string& active_device,
+                                     AppConfig& config,
                                      std::function<void()> on_scan,
                                      std::function<bool(const std::string&)> on_set_theme,
                                      std::function<void(bool)> on_server_config)
     : service_(service), wm_(wm), status_(std::move(status)),
-      active_device_(active_device), on_scan_(std::move(on_scan)),
+      active_device_(active_device), config_(config), on_scan_(std::move(on_scan)),
       on_set_theme_(std::move(on_set_theme)), on_server_config_(std::move(on_server_config)) {}
 
 CommandResult CommandDispatcher::execute(const std::string& line) {
@@ -663,6 +665,14 @@ void CommandDispatcher::cmd_connect(const std::vector<std::string>& args) {
     if (id.empty()) {
         status_("Failed to connect to " + args[0], tui_color::ERROR);
     } else {
+        bool found = false;
+        for (const auto& d : config_.devices) {
+            if (d == spec) { found = true; break; }
+        }
+        if (!found) {
+            config_.devices.push_back(spec);
+            save_config(config_);
+        }
         status_("Connected to " + args[0] + " (" + id + ")", tui_color::INFO);
     }
 }
@@ -684,7 +694,14 @@ void CommandDispatcher::cmd_disconnect(const std::vector<std::string>& args) {
     // Allow partial match on device ID.
     for (const auto& did : devices) {
         if (did.find(id) != std::string::npos || id == did) {
+            BleDeviceSpec spec = service_.spec_for(did);
             if (service_.disconnect_device(did)) {
+                auto it = std::find_if(config_.devices.begin(), config_.devices.end(), 
+                                       [&](const BleDeviceSpec& d) { return d == spec; });
+                if (it != config_.devices.end()) {
+                    config_.devices.erase(it);
+                    save_config(config_);
+                }
                 status_("Disconnected " + did, tui_color::INFO);
             } else {
                 status_("Failed to disconnect " + did, tui_color::ERROR);

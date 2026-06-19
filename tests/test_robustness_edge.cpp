@@ -2,6 +2,7 @@
 #include "tui/input_line.h"
 #include "tui/window_manager.h"
 #include "tui/window.h"
+#include "app/config.h"
 #include "mesh/mesh_service.h"
 #include "mesh/node_db.h"
 #include "store/database.h"
@@ -199,10 +200,11 @@ struct CmdFixture {
     void TearDown() {}
 
     CommandResult exec(const std::string& cmd) {
+        AppConfig dummy_config;
         CommandDispatcher disp(svc, wm, [this](const std::string& s, int c) {
             status_lines.push_back(s);
             status_color = c;
-        }, active_dev_);
+        }, active_dev_, dummy_config);
         return disp.execute(cmd);
     }
 };

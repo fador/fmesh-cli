@@ -52,6 +52,7 @@ private:
     void handle_event(const MeshEvent& ev);
     std::string connection_info() const;
     void maybe_reconnect();
+    void save_device_spec(const BleDeviceSpec& spec);
 
     // --- resize support ---
 #ifndef _WIN32
