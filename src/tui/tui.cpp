@@ -357,7 +357,7 @@ bool TuiApp::handle_wizard_key(int ch) {
             }
         } else if (wizard_field_ == 1) {
             // Edit PIN field
-            if (ch == KEY_BACKSPACE || ch == 127) {
+            if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
                 if (!wizard_pin_.empty()) wizard_pin_.pop_back();
                 need_redraw_ = true;
             } else if (ch >= 32 && ch < 127 && wizard_pin_.size() < 6) {
@@ -379,7 +379,7 @@ bool TuiApp::handle_wizard_key(int ch) {
                 service_.connect_device(spec, false);
             }
             exit_wizard();
-        } else if (ch == KEY_BACKSPACE || ch == 127) {
+        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
             if (!field->empty()) field->pop_back();
             need_redraw_ = true;
         } else if (ch >= 32 && ch < 127 && field->size() < 60) {
@@ -403,7 +403,7 @@ bool TuiApp::handle_wizard_key(int ch) {
                 service_.connect_device(spec, false);
             }
             exit_wizard();
-        } else if (ch == KEY_BACKSPACE || ch == 127) {
+        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
             if (!field->empty()) field->pop_back();
             need_redraw_ = true;
         } else if (ch >= 32 && ch < 127 && field->size() < 60) {
@@ -428,7 +428,7 @@ bool TuiApp::handle_wizard_key(int ch) {
                 service_.connect_device(spec, false);
             }
             exit_wizard();
-        } else if (ch == KEY_BACKSPACE || ch == 127) {
+        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
             if (!field->empty()) field->pop_back();
             need_redraw_ = true;
         } else if (ch >= 32 && ch < 127 && field->size() < 60) {
@@ -475,7 +475,7 @@ bool TuiApp::handle_server_config_key(int ch) {
         erase();
         clearok(stdscr, TRUE);
         need_redraw_ = true;
-    } else if (ch == KEY_BACKSPACE || ch == 127) {
+    } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
         if (!field->empty()) field->pop_back();
         need_redraw_ = true;
     } else if (ch >= 32 && ch < 127 && field->size() < 60) {
