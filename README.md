@@ -10,22 +10,24 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 - **Channels + DMs**: broadcast channel windows + direct-message query windows
 - **Interactive nodelist**: `/nodes` opens a scrollable, sortable node list window with selection
 - **Connection wizard**: `/scan` opens an interactive wizard for BLE scanning, TCP, or serial connection
+- **Virtual Nodes**: seamlessly access and route messages through remote nodes connected to other networked `fmesh-cli` instances as if they were local hardware.
+- **Map Tracing**: transparently decodes and logs `POSITION_APP` coordinate telemetry into the database to build historical map path trails.
+- **Remote Config Management**: dynamically view and alter device configurations (LoRa, power, telemetry) across both local and virtual nodes over the network.
+- **Mesh Synchronization**: multiplexed TLS-authenticated mesh stream network allowing robust real-time database replication, message routing, and coordinate sync across virtual node clients.
 - **Multi-device support**: connect to multiple radios simultaneously via `--device` flag or `/connect`
 - **Active device cycling**: `Ctrl+X` or `/device` switches the active device for context-sensitive commands
 - **Auto-reconnect**: per-device automatic reconnection on disconnect (up to 6 attempts, 5s intervals)
-- **Mesh Connectivity (Server/Client)**: multi-device secure mesh sharing with TLS authentication and multiplexed database syncing
 - **Message history**: past sessions' messages reload from SQLite on startup
-- **Device config viewer**: `/config` shows LoRa, power, position, network, Bluetooth settings
 - **Raw packet view**: `/raw` displays hex dumps of received FromRadio packets, live raw window
 - **Node inspection**: `/whois` shows detailed node info (ID, HW, battery, position, SNR, distance, flags)
 - **Auto-pairing**: built-in `org.bluez.Agent1` that supplies the PIN automatically
-- **SQLite persistence**: messages, nodes, channels, and ACK state survive restarts
+- **SQLite persistence**: messages, nodes, channels, coordinates, and ACK state survive restarts
 - **PKI DM support**: public-key encryption for direct messages on recent firmware
 - **Terminal resize**: responsive layout with minimum-size guards and SIGWINCH handling
 - **Outgoing echo**: sent messages appear immediately in the window (no delay for mesh echo)
 - **Log rotation**: log file automatically rotates when it exceeds 5 MB
 - **WAL checkpoint**: periodic SQLite WAL checkpoint prevents unbounded file growth
-- **Fault tolerance**: write retries, buffer protection, thread safety, input bounds, scroll clamping
+- **Fault tolerance**: comprehensive recovery from bad file descriptors, unexpected drops, and anomalous buffer bounds
 - **Color themes**: configurable color schemes with several built-in presets
 
 ## Build
