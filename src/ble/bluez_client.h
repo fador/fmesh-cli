@@ -64,8 +64,12 @@ private:
     std::unique_ptr<sdbus::IConnection> conn_;
     std::thread loop_thread_;
     std::thread init_thread_;
+    std::thread drain_thread_;
     std::atomic<bool> running_{false};
     std::atomic<bool> connected_{false};
+    std::atomic<bool> needs_drain_{false};
+    std::mutex drain_mu_;
+    std::condition_variable drain_cv_;
 
     std::string adapter_path_;     // /org/bluez/hci0
     std::string device_path_;      // /org/bluez/hci0/dev_XX...

@@ -81,6 +81,20 @@ std::string BluezClient::start(bool pair) {
         }
     });
 
+    drain_thread_ = std::thread([this]() {
+        while (running_) {
+            std::unique_lock<std::mutex> lock(drain_mu_);
+            drain_cv_.wait_for(lock, 5s, [this]() { return needs_drain_.load() || !running_.load(); });
+            if (!running_) break;
+            needs_drain_ = false;
+            lock.unlock();
+
+            if (connected_) {
+                drain_from_radio();
+            }
+        }
+    });
+
     return device_id_;
 }
 
@@ -202,6 +216,8 @@ void BluezClient::stop() {
     }
     if (init_thread_.joinable()) init_thread_.join();
     if (loop_thread_.joinable()) loop_thread_.join();
+    drain_cv_.notify_all();
+    if (drain_thread_.joinable()) drain_thread_.join();
     agent_.reset();
     {
         std::lock_guard<std::mutex> lock(proxy_mu_);
@@ -518,7 +534,11 @@ void BluezClient::subscribe_notifications() {
             .call([this](const std::string& iface, const std::map<std::string, sdbus::Variant>&,
                          const std::vector<std::string>&) {
                 if (iface != "org.bluez.GattCharacteristic1") return;
-                drain_from_radio();
+                {
+                    std::lock_guard<std::mutex> lock(drain_mu_);
+                    needs_drain_ = true;
+                }
+                drain_cv_.notify_one();
             });
     }
 
