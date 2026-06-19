@@ -90,3 +90,48 @@ TEST(MeshSync, BasicDataTransfer) {
     server_svc.stop_stream_server();
     client_svc.disconnect_all();
 }
+
+TEST(MeshSync, ServerDropsConnection) {
+    MeshService server_svc;
+    EXPECT_TRUE(server_svc.open_database(":memory:"));
+    server_svc.start_stream_server(28492, "testuser", "testpass");
+
+    std::this_thread::sleep_for(100ms);
+
+    MeshService client_svc;
+    EXPECT_TRUE(client_svc.open_database(":memory:"));
+    
+    ConcurrentQueue<MeshEvent> queue;
+    EventFd wake;
+    client_svc.set_event_sink(&queue, &wake);
+
+    BleDeviceSpec spec;
+    spec.mesh_host = "127.0.0.1:28492";
+    spec.mesh_user = "testuser";
+    spec.mesh_password = "testpass";
+
+    std::string client_device = client_svc.connect_device(spec, false);
+    EXPECT_FALSE(client_device.empty());
+    
+    // Wait for connection
+    std::this_thread::sleep_for(200ms);
+    
+    // Server crashes or stops unexpectedly
+    server_svc.stop_stream_server();
+    
+    // Wait a bit for the client to notice
+    std::this_thread::sleep_for(200ms);
+    
+    // The client should emit a disconnected event
+    auto evs = queue.drain_all();
+    bool saw_disconnect = false;
+    for (const auto& ev : evs) {
+        if (std::holds_alternative<EvDisconnected>(ev)) {
+            saw_disconnect = true;
+            break;
+        }
+    }
+    
+    EXPECT_TRUE(saw_disconnect);
+    client_svc.disconnect_all();
+}

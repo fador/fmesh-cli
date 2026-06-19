@@ -202,3 +202,42 @@ TEST(TransportErrors, SerialOpenInvalidDevice) {
     int fd = serial_open("/dev/NO_SUCH_DEVICE_XYZ", 115200);
     EXPECT_EQ(fd, -1);
 }
+
+// -- StreamClient connectivity & robustness --
+
+TEST(StreamClientNetwork, InvalidFdFailsToStart) {
+    bool event_called = false;
+    StreamClient sc(-1, "test", [&](MeshEvent) { event_called = true; });
+    
+    // We expect the read loop to gracefully exit or fail 
+    // due to bad fd. We run it for a bit and stop.
+    sc.start();
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    sc.stop();
+    
+    // Sending to a bad fd should return false if it's detected,
+    // though StreamClient might just enqueue if not checking fd up-front.
+    // At the very least it shouldn't crash.
+    bool ok = sc.send_to_radio("test_data");
+    EXPECT_FALSE(ok);
+}
+
+TEST(StreamClientNetwork, StopClosesConnection) {
+    // Start a client with a fake (but valid-ish) fd just to test state machine.
+    // It's safer to use a socket pair or an actual closed fd if we want.
+    // For now, let's just make sure stop() handles multiple calls gracefully.
+    StreamClient sc(-1, "test", [](MeshEvent) {});
+    sc.start();
+    sc.stop();
+    
+    // Calling stop again should be safe.
+    sc.stop();
+}
+
+TEST(StreamClientNetwork, FrameSizeLimits) {
+    StreamClient sc(0, "test", nullptr);
+    // Payload of 65535 is invalid due to size limits
+    std::string to_send(65535, 'Z');
+    auto framed = sc.frame(to_send);
+    EXPECT_TRUE(framed.empty());
+}
