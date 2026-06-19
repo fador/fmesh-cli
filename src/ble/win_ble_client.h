@@ -41,6 +41,7 @@ private:
     std::string device_id_;
     std::atomic<bool> connected_{false};
     std::atomic<bool> running_{false};
+    std::atomic<bool> needs_drain_{false};
     std::thread loop_thread_;
 
     winrt::Windows::Devices::Bluetooth::BluetoothLEDevice ble_device_{nullptr};

@@ -158,7 +158,7 @@ void WinBleClient::run_connect_flow() {
             auto numStatus = fromnum_char_.WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify).get();
             if (numStatus == GattCommunicationStatus::Success) {
                 fromnum_token_ = fromnum_char_.ValueChanged([this](GattCharacteristic const&, GattValueChangedEventArgs const&) {
-                    drain_from_radio();
+                    needs_drain_ = true;
                 });
             }
         }
@@ -182,7 +182,7 @@ void WinBleClient::run_connect_flow() {
         while (running_ && connected_ && !got_config &&
                std::chrono::steady_clock::now() < deadline) {
             try {
-                auto readResult = fromradio_char_.ReadValueAsync().get();
+                auto readResult = fromradio_char_.ReadValueAsync(winrt::Windows::Devices::Bluetooth::BluetoothCacheMode::Uncached).get();
                 if (readResult.Status() == GattCommunicationStatus::Success) {
                     auto reader = DataReader::FromBuffer(readResult.Value());
                     uint32_t len = reader.UnconsumedBufferLength();
@@ -209,7 +209,7 @@ void WinBleClient::run_connect_flow() {
         if (got_config) {
             for (int i = 0; i < 5 && running_; ++i) {
                 try {
-                    auto readResult = fromradio_char_.ReadValueAsync().get();
+                    auto readResult = fromradio_char_.ReadValueAsync(winrt::Windows::Devices::Bluetooth::BluetoothCacheMode::Uncached).get();
                     if (readResult.Status() == GattCommunicationStatus::Success) {
                         auto reader = DataReader::FromBuffer(readResult.Value());
                         uint32_t len = reader.UnconsumedBufferLength();
@@ -228,8 +228,19 @@ void WinBleClient::run_connect_flow() {
             }
         }
 
-        // Block thread to keep async handlers alive
+        // Block thread to keep async handlers alive and poll for drain
+        auto last_poll = std::chrono::steady_clock::now();
         while (running_ && connected_) {
+            if (needs_drain_.exchange(false)) {
+                drain_from_radio();
+                last_poll = std::chrono::steady_clock::now();
+            } else {
+                auto now = std::chrono::steady_clock::now();
+                if (std::chrono::duration_cast<std::chrono::seconds>(now - last_poll).count() >= 5) {
+                    drain_from_radio();
+                    last_poll = now;
+                }
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
@@ -282,7 +293,7 @@ void WinBleClient::drain_from_radio() {
     if (!fromradio_char_ || !connected_ || !running_) return;
     while (running_) {
         try {
-            auto readResult = fromradio_char_.ReadValueAsync().get();
+            auto readResult = fromradio_char_.ReadValueAsync(winrt::Windows::Devices::Bluetooth::BluetoothCacheMode::Uncached).get();
             if (readResult.Status() != GattCommunicationStatus::Success) break;
             auto reader = DataReader::FromBuffer(readResult.Value());
             uint32_t len = reader.UnconsumedBufferLength();
