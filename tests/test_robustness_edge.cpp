@@ -9,6 +9,7 @@
 #include "minitest.h"
 
 #include <algorithm>
+#include <iostream>
 
 using namespace meshcli;
 
@@ -562,14 +563,14 @@ TEST(WindowManagerEdge, RebuildNickUpdatesDisplayNames) {
     wm.append_text("dev", node, 0xBEEFu, 0, false, "Hello", 1000, db, 0, 0, 0);
     EXPECT_EQ(wm.windows().size(), 2u);
     const auto& lines = wm.windows()[1]->lines();
-    ASSERT_FALSE(lines.empty());
-    std::string first_line = lines[0].text;
+    ASSERT_TRUE(lines.size() >= 2u);
+    std::string first_line = lines[1].text; // [0] is date separator
     std::string old_pattern = "<" + old_nick + "> ";
     EXPECT_NE(first_line.find(old_pattern), std::string::npos);
     EXPECT_EQ(first_line.find("<Bob>"), std::string::npos);
     // Simulate NodeInfo arriving with real name — rebuild nick.
     wm.rebuild_all_nicks("dev", node, old_nick, "Bob");
-    std::string updated = wm.windows()[1]->lines()[0].text;
+    std::string updated = wm.windows()[1]->lines()[1].text;
     EXPECT_NE(updated.find("<Bob>"), std::string::npos);
     EXPECT_EQ(updated.find(old_pattern), std::string::npos);
 }
@@ -603,5 +604,5 @@ TEST(WindowManagerEdge, ReceiveDmMultipleCreatesOneWindow) {
     wm.append_text("dev1", 0xDEADu, 0xBEEFu, 0, false, "First DM", 1000, db, 0, 0, 0);
     wm.append_text("dev1", 0xDEADu, 0xBEEFu, 0, false, "Second DM", 2000, db, 0, 0, 0);
     EXPECT_EQ(wm.windows().size(), 2u);  // only status + one DM
-    EXPECT_EQ(wm.windows()[1]->lines().size(), 2u);
+    EXPECT_EQ(wm.windows()[1]->lines().size(), 3u); // date separator + 2 messages
 }

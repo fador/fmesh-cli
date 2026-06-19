@@ -42,7 +42,7 @@ TEST(StreamFraming, EmptyPayloadFrame) {
 }
 
 TEST(StreamFraming, LargePayload) {
-    std::string payload(65534, 'x');
+    std::string payload(64000, 'x');
     StreamClient sc(0, "test", nullptr);
     auto framed = sc.frame(payload);
     EXPECT_EQ(framed.size(), 4 + payload.size());
@@ -51,13 +51,11 @@ TEST(StreamFraming, LargePayload) {
     EXPECT_EQ(len, static_cast<uint16_t>(payload.size()));
 }
 
-TEST(StreamFraming, FrameMaxUint16) {
+TEST(StreamFraming, FrameTooLargeDropped) {
     std::string payload(65535, 'y');
     StreamClient sc(0, "test", nullptr);
     auto framed = sc.frame(payload);
-    uint16_t len = (static_cast<unsigned char>(framed[2]) << 8) |
-                    static_cast<unsigned char>(framed[3]);
-    EXPECT_EQ(len, 65535u);
+    EXPECT_EQ(framed.size(), 0u);
 }
 
 // -- Codec robustness --

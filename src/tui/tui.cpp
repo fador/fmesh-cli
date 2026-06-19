@@ -280,6 +280,8 @@ bool TuiApp::handle_wizard_key(int ch) {
     if (ch == 27) { // ESC — go back or exit
         if (mode_ == M::ConnectWizard_Tab) { exit_wizard(); }
         else { mode_ = M::ConnectWizard_Tab; need_redraw_ = true; }
+        erase();
+        clearok(stdscr, TRUE);
         return true;
     }
 
@@ -357,8 +359,15 @@ bool TuiApp::handle_wizard_key(int ch) {
             }
         } else if (wizard_field_ == 1) {
             // Edit PIN field
-            if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
+            if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b' || ch == KEY_DC) {
                 if (!wizard_pin_.empty()) wizard_pin_.pop_back();
+                need_redraw_ = true;
+            } else if (ch == 21) { // Ctrl-U
+                wizard_pin_.clear();
+                need_redraw_ = true;
+            } else if (ch == 23) { // Ctrl-W
+                while (!wizard_pin_.empty() && std::isspace(wizard_pin_.back())) wizard_pin_.pop_back();
+                while (!wizard_pin_.empty() && !std::isspace(wizard_pin_.back())) wizard_pin_.pop_back();
                 need_redraw_ = true;
             } else if (ch >= 32 && ch < 127 && wizard_pin_.size() < 6) {
                 wizard_pin_ += static_cast<char>(ch);
@@ -369,8 +378,11 @@ bool TuiApp::handle_wizard_key(int ch) {
 
     case M::ConnectWizard_TCP: {
         auto* field = (wizard_field_ == 0) ? &wizard_tcp_host_ : &wizard_tcp_port_;
-        if (ch == '\t') {
+        if (ch == '\t' || ch == KEY_DOWN || ch == 'j') {
             wizard_field_ = (wizard_field_ + 1) % 2;
+            need_redraw_ = true;
+        } else if (ch == KEY_UP || ch == 'k') {
+            wizard_field_ = (wizard_field_ - 1 + 2) % 2;
             need_redraw_ = true;
         } else if (ch == '\n' || ch == KEY_ENTER) {
             if (!wizard_tcp_host_.empty()) {
@@ -379,8 +391,15 @@ bool TuiApp::handle_wizard_key(int ch) {
                 service_.connect_device(spec, false);
             }
             exit_wizard();
-        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
+        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b' || ch == KEY_DC) {
             if (!field->empty()) field->pop_back();
+            need_redraw_ = true;
+        } else if (ch == 21) { // Ctrl-U
+            field->clear();
+            need_redraw_ = true;
+        } else if (ch == 23) { // Ctrl-W
+            while (!field->empty() && std::isspace(field->back())) field->pop_back();
+            while (!field->empty() && !std::isspace(field->back())) field->pop_back();
             need_redraw_ = true;
         } else if (ch >= 32 && ch < 127 && field->size() < 60) {
             *field += static_cast<char>(ch);
@@ -391,8 +410,11 @@ bool TuiApp::handle_wizard_key(int ch) {
 
     case M::ConnectWizard_Serial: {
         auto* field = (wizard_field_ == 0) ? &wizard_serial_path_ : &wizard_serial_baud_;
-        if (ch == '\t') {
+        if (ch == '\t' || ch == KEY_DOWN || ch == 'j') {
             wizard_field_ = (wizard_field_ + 1) % 2;
+            need_redraw_ = true;
+        } else if (ch == KEY_UP || ch == 'k') {
+            wizard_field_ = (wizard_field_ - 1 + 2) % 2;
             need_redraw_ = true;
         } else if (ch == '\n' || ch == KEY_ENTER) {
             if (!wizard_serial_path_.empty()) {
@@ -403,8 +425,15 @@ bool TuiApp::handle_wizard_key(int ch) {
                 service_.connect_device(spec, false);
             }
             exit_wizard();
-        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
+        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b' || ch == KEY_DC) {
             if (!field->empty()) field->pop_back();
+            need_redraw_ = true;
+        } else if (ch == 21) { // Ctrl-U
+            field->clear();
+            need_redraw_ = true;
+        } else if (ch == 23) { // Ctrl-W
+            while (!field->empty() && std::isspace(field->back())) field->pop_back();
+            while (!field->empty() && !std::isspace(field->back())) field->pop_back();
             need_redraw_ = true;
         } else if (ch >= 32 && ch < 127 && field->size() < 60) {
             *field += static_cast<char>(ch);
@@ -416,8 +445,11 @@ bool TuiApp::handle_wizard_key(int ch) {
     case M::ConnectWizard_Mesh: {
         std::string* fields[] = {&wizard_mesh_host_, &wizard_mesh_port_, &wizard_mesh_user_, &wizard_mesh_password_};
         auto* field = fields[wizard_field_];
-        if (ch == '\t') {
+        if (ch == '\t' || ch == KEY_DOWN || ch == 'j') {
             wizard_field_ = (wizard_field_ + 1) % 4;
+            need_redraw_ = true;
+        } else if (ch == KEY_UP || ch == 'k') {
+            wizard_field_ = (wizard_field_ - 1 + 4) % 4;
             need_redraw_ = true;
         } else if (ch == '\n' || ch == KEY_ENTER) {
             if (!wizard_mesh_host_.empty()) {
@@ -428,8 +460,15 @@ bool TuiApp::handle_wizard_key(int ch) {
                 service_.connect_device(spec, false);
             }
             exit_wizard();
-        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
+        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b' || ch == KEY_DC) {
             if (!field->empty()) field->pop_back();
+            need_redraw_ = true;
+        } else if (ch == 21) { // Ctrl-U
+            field->clear();
+            need_redraw_ = true;
+        } else if (ch == 23) { // Ctrl-W
+            while (!field->empty() && std::isspace(field->back())) field->pop_back();
+            while (!field->empty() && !std::isspace(field->back())) field->pop_back();
             need_redraw_ = true;
         } else if (ch >= 32 && ch < 127 && field->size() < 60) {
             *field += static_cast<char>(ch);
@@ -457,8 +496,11 @@ bool TuiApp::handle_server_config_key(int ch) {
     std::string* fields[] = {&wizard_server_port_, &wizard_server_user_, &wizard_server_password_};
     auto* field = fields[wizard_field_];
 
-    if (ch == '\t') {
+    if (ch == '\t' || ch == KEY_DOWN || ch == 'j') {
         wizard_field_ = (wizard_field_ + 1) % 3;
+        need_redraw_ = true;
+    } else if (ch == KEY_UP || ch == 'k') {
+        wizard_field_ = (wizard_field_ - 1 + 3) % 3;
         need_redraw_ = true;
     } else if (ch == '\n' || ch == KEY_ENTER) {
         config_.server_mode = true;
@@ -475,12 +517,21 @@ bool TuiApp::handle_server_config_key(int ch) {
         erase();
         clearok(stdscr, TRUE);
         need_redraw_ = true;
-    } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b') {
+    } else if (ch == KEY_BACKSPACE || ch == 127 || ch == 8 || ch == '\b' || ch == KEY_DC) {
         if (!field->empty()) field->pop_back();
+        need_redraw_ = true;
+    } else if (ch == 21) { // Ctrl-U
+        field->clear();
+        need_redraw_ = true;
+    } else if (ch == 23) { // Ctrl-W
+        while (!field->empty() && std::isspace(field->back())) field->pop_back();
+        while (!field->empty() && !std::isspace(field->back())) field->pop_back();
         need_redraw_ = true;
     } else if (ch >= 32 && ch < 127 && field->size() < 60) {
         *field += static_cast<char>(ch);
         need_redraw_ = true;
+    } else {
+        return false;
     }
     return true;
 }
@@ -1249,8 +1300,15 @@ int TuiApp::run() {
                 // Alt+key handling
 #ifdef _WIN32
                 if (ch >= ALT_0 && ch <= ALT_9) {
-                    int idx = (ch == ALT_0) ? 10 : (ch - ALT_0);
+                    int idx = (ch == ALT_0) ? 9 : (ch - ALT_0 - 1);
                     wm_.select(idx);
+                    need_redraw_ = true;
+                    ch = getch();
+                    continue;
+                }
+#endif
+                if (ch >= KEY_F(1) && ch <= KEY_F(12)) {
+                    wm_.select(ch - KEY_F(1));
                     need_redraw_ = true;
                     ch = getch();
                     continue;
@@ -1275,9 +1333,11 @@ int TuiApp::run() {
                     nodelay(stdscr, TRUE);
                     if (ch2 != ERR) {
                         if (ch2 >= '0' && ch2 <= '9') {
-                            int idx = (ch2 == '0') ? 10 : (ch2 - '0');
+                            int idx = (ch2 == '0') ? 9 : (ch2 - '0' - 1);
                             wm_.select(idx);
                             need_redraw_ = true;
+                            ch = getch();
+                            continue;
                         } else if (ch2 == 'a') {
                             wm_.select_next_active();
                             need_redraw_ = true;

@@ -98,6 +98,7 @@ public:
     [[nodiscard]] bool has_devices() const { return !devices_.empty(); }
 
     // --- test support (tests can inject fake DeviceRuntimes) -----------
+    void trigger_sync();
     [[nodiscard]] std::map<std::string, std::shared_ptr<DeviceRuntime>>& devices_for_test() { return devices_; }
     [[nodiscard]] std::mutex& devices_mu_for_test() { return devices_mu_; }
 

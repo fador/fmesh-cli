@@ -276,6 +276,12 @@ void MeshService::start_stream_server(int port, const std::string& user, const s
 #endif
 }
 
+void MeshService::trigger_sync() {
+    if (sync_manager_) {
+        sync_manager_->initiate_sync();
+    }
+}
+
 void MeshService::stop_stream_server() {
 #ifdef ENABLE_MESH_NET
     if (stream_server_) {
