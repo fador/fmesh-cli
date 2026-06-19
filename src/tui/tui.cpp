@@ -1447,17 +1447,21 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                               tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
             const NodeDb* db = service_.db_for(e.device);
-            wm_.append_status("*** Node updated: " + e.node.long_name +
-                              " (" + e.node.node_id + ")", tui_color::INFO);
             std::string nick = e.node.short_name.empty()
                                    ? e.node.long_name : e.node.short_name;
-            wm_.update_dm_nick(e.device, e.node.node_num, nick);
-            // Rebuild nicks in existing messages if the node name changed.
             std::string old_nick = e.old_short_name.empty()
                                        ? e.old_long_name : e.old_short_name;
-            if (!old_nick.empty() && old_nick != nick) {
+
+            if (e.is_new) {
+                wm_.append_status("*** Node joined: " + e.node.long_name +
+                                  " (" + e.node.node_id + ")", tui_color::INFO);
+            } else if (!old_nick.empty() && old_nick != nick) {
+                wm_.append_status("*** Node renamed: " + old_nick + " -> " + nick +
+                                  " (" + e.node.node_id + ")", tui_color::INFO);
                 wm_.rebuild_all_nicks(e.device, e.node.node_num, old_nick, nick);
             }
+
+            wm_.update_dm_nick(e.device, e.node.node_num, nick);
             // Clamp nodelist cursor if viewing this device.
             if (nodelist_device_ == e.device && db) {
                 int total = static_cast<int>(db->all().size());
@@ -1494,9 +1498,6 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                 wm_.append_status("[" + e.source + "] " + e.message, tui_color::META);
         } else if constexpr (std::is_same_v<T, EvError>) {
             wm_.append_status("*** Error: " + e.message, tui_color::ERROR);
-        } else if constexpr (std::is_same_v<T, EvNodeJoined>) {
-            wm_.append_status("*** Node joined: " + e.node.long_name +
-                              " (" + e.node.node_id + ")", tui_color::INFO);
         } else if constexpr (std::is_same_v<T, EvRawPacket>) {
             int idx = wm_.ensure_raw(e.device);
             Window& w = *wm_.windows()[idx - 1];

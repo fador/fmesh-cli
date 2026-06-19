@@ -47,6 +47,7 @@ struct EvNodeUpdated {
     Node node;
     std::string old_short_name;
     std::string old_long_name;
+    bool is_new = false;
 };
 
 struct EvChannelUpdated {
@@ -88,11 +89,6 @@ struct EvLogLine {
 struct EvError {
     DeviceId device;
     std::string message;
-};
-
-struct EvNodeJoined {
-    DeviceId device;
-    Node node;   // a brand-new node we hadn't seen before
 };
 
 // A single config line: "section.key = value"
@@ -147,7 +143,6 @@ using MeshEvent = std::variant<
     EvAckReceived,
     EvLogLine,
     EvError,
-    EvNodeJoined,
     EvConfigLine,
     EvRawPacket,
     EvRawRxBytes,
