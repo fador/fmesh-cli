@@ -263,6 +263,12 @@ void MeshService::start_stream_server(int port, const std::string& user, const s
 #endif
                 if (rt->stream && rt->stream->is_connected()) rt->stream->send_to_radio(bytes);
             }
+        } else if (std::holds_alternative<EvDbSyncPayload>(ev)) {
+            if (sync_manager_) {
+                sync_manager_->handle_sync_payload(
+                    std::get<EvDbSyncPayload>(ev).device,
+                    std::get<EvDbSyncPayload>(ev).payload);
+            }
         }
     };
     stream_server_ = std::make_unique<StreamServer>(port, user, password, sink);
@@ -561,18 +567,6 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
                 stream_server_->broadcast(e.bytes);
             }
 #endif
-        } else if constexpr (std::is_same_v<T, EvSendDbSyncToTcp>) {
-#ifdef ENABLE_MESH_NET
-            if (stream_server_) {
-                stream_server_->broadcast(e.payload, 0xD0);
-            }
-            std::lock_guard<std::mutex> lock(devices_mu_);
-            for (auto& [id, dev] : devices_) {
-                if (dev->stream) {
-                    dev->stream->send_to_radio(e.payload, 0xD0);
-                }
-            }
-#endif
         } else if constexpr (std::is_same_v<T, EvDbSyncPayload>) {
             if (sync_manager_) sync_manager_->handle_sync_payload(e.device, e.payload);
         } else {
@@ -586,6 +580,20 @@ void MeshService::dispatch_to_ui(MeshEvent ev) {
         ui_queue_->push(std::move(ev));
         if (ui_wake_) ui_wake_->notify();
     }
+}
+
+void MeshService::send_db_sync(const std::string& payload) {
+#ifdef ENABLE_MESH_NET
+    if (stream_server_) {
+        stream_server_->broadcast(payload, 0xD0);
+    }
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    for (auto& [id, dev] : devices_) {
+        if (dev->stream) {
+            dev->stream->send_to_radio(payload, 0xD0);
+        }
+    }
+#endif
 }
 
 } // namespace meshcli

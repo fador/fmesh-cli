@@ -37,11 +37,7 @@ void DbSyncManager::initiate_sync() {
     j["max_message_ts"] = db_.max_message_ts();
     j["max_location_ts"] = db_.max_location_ts();
 
-    EvSendDbSyncToTcp ev;
-    ev.payload = j.dump();
-    // In MeshService we handle EvSendDbSyncToTcp by broadcasting it.
-    mesh_.dispatch_to_ui(ev); // wait, UI shouldn't broadcast it, mesh_service does.
-    // Let's actually provide a method on mesh_service, or we can just push EvSendDbSyncToTcp directly.
+    mesh_.send_db_sync(j.dump());
 }
 
 void DbSyncManager::push_message(const StoredMessage& m) {
@@ -63,9 +59,7 @@ void DbSyncManager::push_message(const StoredMessage& m) {
     j["type"] = "data";
     j["messages"] = json::array({msg});
 
-    EvSendDbSyncToTcp ev;
-    ev.payload = j.dump();
-    mesh_.dispatch_to_ui(ev); // The UI will loop it back to MeshService, or we need to add a method.
+    mesh_.send_db_sync(j.dump());
 }
 
 void DbSyncManager::push_location(const Database::LocationRow& loc) {
@@ -81,9 +75,7 @@ void DbSyncManager::push_location(const Database::LocationRow& loc) {
     j["type"] = "data";
     j["locations"] = json::array({row});
 
-    EvSendDbSyncToTcp ev;
-    ev.payload = j.dump();
-    mesh_.dispatch_to_ui(ev);
+    mesh_.send_db_sync(j.dump());
 }
 
 void DbSyncManager::handle_inventory(const std::string& device, const std::string& json_str) {
@@ -101,9 +93,7 @@ void DbSyncManager::handle_inventory(const std::string& device, const std::strin
         req["after_message_ts"] = local_msg;
         req["after_location_ts"] = local_loc;
         
-        EvSendDbSyncToTcp ev;
-        ev.payload = req.dump();
-        mesh_.dispatch_to_ui(ev);
+        mesh_.send_db_sync(req.dump());
     }
     
     // If we have more than them, proactively send our data to them
@@ -172,9 +162,7 @@ void DbSyncManager::handle_request(const std::string& device, const std::string&
     }
     resp["locations"] = l_arr;
 
-    EvSendDbSyncToTcp ev;
-    ev.payload = resp.dump();
-    mesh_.dispatch_to_ui(ev);
+    mesh_.send_db_sync(resp.dump());
 }
 
 void DbSyncManager::handle_data(const std::string& device, const std::string& json_str) {

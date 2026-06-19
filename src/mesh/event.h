@@ -135,11 +135,6 @@ struct EvDbSyncPayload {
     std::string payload; // JSON payload
 };
 
-// Request to send a DB sync protocol payload over all active TCP connections
-struct EvSendDbSyncToTcp {
-    std::string payload; // JSON payload
-};
-
 using MeshEvent = std::variant<
     EvConnected,
     EvDisconnected,
@@ -158,8 +153,7 @@ using MeshEvent = std::variant<
     EvRawRxBytes,
     EvSendRawToRadio,
     EvBleDeviceFound,
-    EvDbSyncPayload,
-    EvSendDbSyncToTcp
+    EvDbSyncPayload
 >;
 
 } // namespace meshcli

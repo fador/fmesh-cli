@@ -105,6 +105,7 @@ private:
     void handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEvent& ev);
 public:
     void dispatch_to_ui(MeshEvent ev);
+    void send_db_sync(const std::string& payload);
 private:
     uint32_t next_packet_id();
 
