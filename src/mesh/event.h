@@ -132,6 +132,16 @@ struct EvBleDeviceFound {
     bool scan_complete = false;  // true on the final sentinel event
 };
 
+// Position packet received from the mesh
+struct EvPositionReceived {
+    DeviceId device;
+    uint32_t from_node = 0;
+    double latitude = 0.0;
+    double longitude = 0.0;
+    int32_t altitude = 0;
+    uint32_t rx_time = 0;
+};
+
 // A DB sync protocol payload received over TCP (0xD0 framing)
 struct EvDbSyncPayload {
     DeviceId device;
@@ -156,7 +166,8 @@ using MeshEvent = std::variant<
     EvSendRawToRadio,
     EvBleDeviceFound,
     EvDbSyncPayload,
-    EvConfigBytes
+    EvConfigBytes,
+    EvPositionReceived
 >;
 
 } // namespace meshcli

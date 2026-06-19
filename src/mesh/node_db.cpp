@@ -18,6 +18,24 @@ void NodeDb::upsert_node(Node n) {
     nodes_[n.node_num] = std::move(n);
 }
 
+void NodeDb::update_position(uint32_t node_num, double lat, double lon, int32_t alt) {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = nodes_.find(node_num);
+    if (it != nodes_.end()) {
+        it->second.latitude = lat;
+        it->second.longitude = lon;
+        it->second.altitude = alt;
+    } else {
+        Node n;
+        n.node_num = node_num;
+        n.node_id = node_num_to_id(node_num);
+        n.latitude = lat;
+        n.longitude = lon;
+        n.altitude = alt;
+        nodes_[node_num] = std::move(n);
+    }
+}
+
 void NodeDb::upsert_channel(Channel c) {
     std::lock_guard<std::mutex> lock(mu_);
     channels_[c.index] = std::move(c);

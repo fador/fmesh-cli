@@ -70,6 +70,34 @@ TEST(MeshCodec, DecodeTextReceived) {
     EXPECT_EQ(t->rx_time, 1700000000u);
 }
 
+TEST(MeshCodec, DecodePositionPacket) {
+    meshtastic::FromRadio fr;
+    auto* pkt = fr.mutable_packet();
+    pkt->set_from(0x1234);
+    pkt->set_to(kBroadcastNodeNum);
+    
+    meshtastic::Position p;
+    p.set_latitude_i(488583700);   // 48.85837
+    p.set_longitude_i(22944810);   // 2.294481
+    p.set_altitude(300);
+    
+    auto* dec = pkt->mutable_decoded();
+    dec->set_portnum(meshtastic::PortNum::POSITION_APP);
+    dec->set_payload(p.SerializeAsString());
+    
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    
+    auto* position = std::get_if<EvPositionReceived>(&ev.value());
+    ASSERT_TRUE(position != nullptr);
+    EXPECT_EQ(position->device, "dev1");
+    EXPECT_EQ(position->from_node, 0x1234);
+    EXPECT_TRUE(std::abs(position->latitude - 48.85837) < 0.00001);
+    EXPECT_TRUE(std::abs(position->longitude - 2.294481) < 0.00001);
+    EXPECT_EQ(position->altitude, 300);
+}
+
 TEST(MeshCodec, DecodeConfigComplete) {
     meshtastic::FromRadio fr;
     fr.set_config_complete_id(42);

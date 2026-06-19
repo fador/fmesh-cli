@@ -281,7 +281,20 @@ std::optional<MeshEvent> decode_packet(
         ev.error_reason = meshtastic::Routing_Error_Name(r.error_reason());
         return ev;
     }
-    // Other portnums (telemetry, position, nodeinfo) arriving as packets
+    if (d.portnum() == PortNum::POSITION_APP) {
+        meshtastic::Position p;
+        if (!p.ParseFromString(d.payload())) return std::nullopt;
+        EvPositionReceived ev;
+        ev.device = device;
+        ev.from_node = pkt.from();
+        // The firmware reports lat/lon as scaled integers (* 1e7)
+        if (p.latitude_i() != 0) ev.latitude = p.latitude_i() / 1e7;
+        if (p.longitude_i() != 0) ev.longitude = p.longitude_i() / 1e7;
+        ev.altitude = p.altitude();
+        ev.rx_time = pkt.rx_time();
+        return ev;
+    }
+    // Other portnums (telemetry, nodeinfo) arriving as packets
     // would normally be processed into the node DB; the firmware typically
     // sends them as FromRadio.node_info rather than FromRadio.packet, so we
     // ignore stray packets here for v1.

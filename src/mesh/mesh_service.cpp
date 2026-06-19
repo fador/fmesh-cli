@@ -611,6 +611,23 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
             if ((e.device.find("tcp:") == 0 || e.device.find("stream:") == 0 || e.device.find("mesh:") == 0) && sync_manager_) {
                 sync_manager_->initiate_sync();
             }
+        } else if constexpr (std::is_same_v<T, EvPositionReceived>) {
+            rt->db->update_position(e.from_node, e.latitude, e.longitude, e.altitude);
+            
+            uint64_t ts = e.rx_time;
+            if (ts == 0) ts = static_cast<uint64_t>(std::time(nullptr));
+            db_.insert_location(e.device, e.from_node, e.latitude, e.longitude, e.altitude, ts);
+            
+            Database::LocationRow loc;
+            loc.device = e.device;
+            loc.node_num = e.from_node;
+            loc.latitude = e.latitude;
+            loc.longitude = e.longitude;
+            loc.altitude = e.altitude;
+            loc.ts = ts;
+            if (sync_manager_) {
+                sync_manager_->push_location(loc);
+            }
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
             rt->db->upsert_node(e.node);
             db_.upsert_node(e.device, e.node);

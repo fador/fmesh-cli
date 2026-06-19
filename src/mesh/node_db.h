@@ -84,6 +84,7 @@ class NodeDb {
 public:
     void clear();
     void upsert_node(Node n);
+    void update_position(uint32_t node_num, double lat, double lon, int32_t alt);
     void upsert_channel(Channel c);
     [[nodiscard]] std::optional<Node> get(uint32_t node_num) const;
     [[nodiscard]] std::optional<Node> get_by_id(const std::string& id) const;
