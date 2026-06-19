@@ -76,6 +76,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> connected_{false};
 
+    std::mutex write_mu_;
 #ifdef ENABLE_MESH_NET
     bool use_tls_{false};
     std::string tls_user_;

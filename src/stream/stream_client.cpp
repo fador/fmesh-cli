@@ -266,22 +266,25 @@ bool StreamClient::send_to_radio(const std::string& bytes, unsigned char marker)
     static constexpr int kMaxRetries = 10;
     while (written < framed.size() && retries < kMaxRetries) {
         ssize_t n = -1;
+        {
+            std::lock_guard<std::mutex> lock(write_mu_);
 #ifdef ENABLE_MESH_NET
-        if (use_tls_ && ssl_) {
-            n = SSL_write(ssl_, framed.data() + written, framed.size() - written);
-            if (n <= 0) {
-                int err = SSL_get_error(ssl_, n);
-                if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
-                    n = -1; // handle as EAGAIN
-                    errno = EAGAIN;
+            if (use_tls_ && ssl_) {
+                n = SSL_write(ssl_, framed.data() + written, framed.size() - written);
+                if (n <= 0) {
+                    int err = SSL_get_error(ssl_, n);
+                    if (err == SSL_ERROR_WANT_READ || err == SSL_ERROR_WANT_WRITE) {
+                        n = -1; // handle as EAGAIN
+                        errno = EAGAIN;
+                    }
                 }
+            } else {
+                n = ::write(fd_, framed.data() + written, framed.size() - written);
             }
-        } else {
-            n = ::write(fd_, framed.data() + written, framed.size() - written);
-        }
 #else
-        n = ::write(fd_, framed.data() + written, framed.size() - written);
+            n = ::write(fd_, framed.data() + written, framed.size() - written);
 #endif
+        }
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
                 ++retries;

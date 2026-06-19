@@ -75,6 +75,7 @@ struct StreamServer::ClientConn {
     std::atomic<bool> active{true};
     std::string ip;
     unsigned char frame_type{0xC3};
+    std::mutex write_mu;
 };
 
 StreamServer::StreamServer(int port, std::string user, std::string password, EventSink sink)
@@ -201,7 +202,8 @@ void StreamServer::broadcast(const std::string& bytes, unsigned char marker) {
 
     for (auto& c : current_clients) {
         if (!c->active || !c->ssl) continue;
-        int written = SSL_write(c->ssl, framed.data(), framed.size());
+        std::lock_guard<std::mutex> lock(c->write_mu);
+        int written = SSL_write(c->ssl, framed.data(), static_cast<int>(framed.size()));
         if (written <= 0) {
             c->active = false;
         }
@@ -321,6 +323,7 @@ void StreamServer::accept_loop() {
                     if (auth_str.size() == expected.size() &&
                         CRYPTO_memcmp(auth_str.data(), expected.data(), expected.size()) == 0) {
                         auth_ok = true;
+                        std::lock_guard<std::mutex> lock(conn->write_mu);
                         SSL_write(conn->ssl, "OK\n", 3);
                     }
                 }
@@ -328,7 +331,10 @@ void StreamServer::accept_loop() {
                 if (!auth_ok) {
                     // Artificial delay for failed authentication to prevent brute force
                     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-                    SSL_write(conn->ssl, "ERR\n", 4);
+                    {
+                        std::lock_guard<std::mutex> lock(conn->write_mu);
+                        SSL_write(conn->ssl, "ERR\n", 4);
+                    }
                     conn->active = false;
                 } else {
                     EvLogLine ev_log;
