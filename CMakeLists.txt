@@ -248,6 +248,7 @@ add_executable(fmesh-cli-tests
     tests/test_robustness_db.cpp
     tests/test_robustness_edge.cpp
     tests/test_sync_data.cpp
+    tests/test_virtual_nodes.cpp
     src/app/config.cpp
 )
 target_link_libraries(fmesh-cli-tests PRIVATE meshcli_tui)

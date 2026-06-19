@@ -22,6 +22,13 @@ namespace meshcli {
 
 class DbSyncManager;
 
+struct VirtualDevice {
+    std::string id;              // "virtual:serial:COM3"
+    std::string original_id;     // "serial:COM3"
+    std::string stream_id;       // "mesh:127.0.0.1:4404"
+    uint32_t node_num;           // The meshtastic node_num of this radio
+};
+
 struct DeviceRuntime {
     BleDeviceSpec spec;             // stored for reconnection
     std::unique_ptr<BleClient> client;       // BLE transport
@@ -93,6 +100,8 @@ public:
     [[nodiscard]] std::string hw_model_for(const std::string& device_id) const;
     [[nodiscard]] std::string display_name_for(const std::string& device_id) const;
     [[nodiscard]] BleDeviceSpec spec_for(const std::string& device_id) const;
+    [[nodiscard]] std::string virtual_stream_for(const std::string& device_id) const;
+    [[nodiscard]] std::string virtual_original_for(const std::string& device_id) const;
     [[nodiscard]] std::vector<std::string> config_lines_for(const std::string& device_id) const;
     [[nodiscard]] std::vector<EvRawPacket> raw_packets_for(const std::string& device_id) const;
     [[nodiscard]] Database& database() { return db_; }
@@ -108,6 +117,8 @@ private:
 public:
     void dispatch_to_ui(MeshEvent ev);
     void send_db_sync(const std::string& payload);
+    void update_virtual_devices(const std::string& stream_id, const std::vector<VirtualDevice>& vdevs);
+    void send_raw_to_physical(const std::string& target_original_id, const std::string& bytes);
 private:
     uint32_t next_packet_id();
 
@@ -123,6 +134,7 @@ private:
     mutable std::mutex devices_mu_;
     std::map<std::string, std::shared_ptr<DeviceRuntime>> devices_;
     std::map<std::string, std::unique_ptr<NodeDb>> offline_dbs_;
+    std::map<std::string, VirtualDevice> virtual_devices_;
 
 #ifdef ENABLE_MESH_NET
     std::unique_ptr<StreamServer> stream_server_;
@@ -134,6 +146,9 @@ private:
     std::deque<uint64_t> seen_messages_;  // (from_node << 32) | packet_id
     bool is_duplicate(uint32_t from_node, uint32_t packet_id);
 
+public:
+    DbSyncManager* sync_manager() const { return sync_manager_.get(); }
+private:
     std::unique_ptr<DbSyncManager> sync_manager_;
 };
 

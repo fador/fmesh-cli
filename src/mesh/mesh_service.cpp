@@ -307,18 +307,22 @@ uint32_t MeshService::send_text(const std::string& device_id,
                                 uint32_t channel_idx,
                                 const std::string& text,
                                 bool want_ack) {
+    bool is_virtual = (device_id.find("virtual:") == 0);
+    std::string virtual_stream = virtual_stream_for(device_id);
+    std::string virtual_target = virtual_original_for(device_id);
+
     std::shared_ptr<DeviceRuntime> rt;
     {
         std::lock_guard<std::mutex> lock(devices_mu_);
-        auto it = devices_.find(device_id);
+        auto it = devices_.find(is_virtual ? virtual_stream : device_id);
         if (it == devices_.end()) return 0;
         rt = it->second;
     }
 #ifndef _WIN32
-    if (!rt->client && !rt->stream) return 0;
-    if (rt->client && !rt->client->is_connected()) return 0;
+    if (!is_virtual && !rt->client && !rt->stream) return 0;
+    if (!is_virtual && rt->client && !rt->client->is_connected()) return 0;
 #else
-    if (!rt->stream) return 0;
+    if (!is_virtual && !rt->stream) return 0;
 #endif
     if (rt->stream && !rt->stream->is_connected()) return 0;
 
@@ -331,10 +335,17 @@ uint32_t MeshService::send_text(const std::string& device_id,
     }
     auto bytes = MeshCodec::encode_text_packet(pid, to_node, channel_idx,
                                                text, want_ack, 0, pubkey);
+                                               
+    if (is_virtual) {
+        if (sync_manager_) {
+            sync_manager_->send_raw_to_device(virtual_target, bytes);
+        }
+    } else {
 #ifndef _WIN32
-    if (rt->client && !rt->client->send_to_radio(bytes)) return 0;
+        if (rt->client && !rt->client->send_to_radio(bytes)) return 0;
 #endif
-    if (rt->stream && !rt->stream->send_to_radio(bytes)) return 0;
+        if (rt->stream && !rt->stream->send_to_radio(bytes)) return 0;
+    }
 
     // Persist the outgoing message.
     StoredMessage m;
@@ -347,7 +358,19 @@ uint32_t MeshService::send_text(const std::string& device_id,
         m.window_target = to_node;
     }
     m.direction = "out";
-    m.from_node = rt->my_node_num;
+    
+    if (is_virtual) {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        auto vit = virtual_devices_.find(device_id);
+        if (vit != virtual_devices_.end()) {
+            m.from_node = vit->second.node_num;
+        } else {
+            m.from_node = rt->my_node_num;
+        }
+    } else {
+        m.from_node = rt->my_node_num;
+    }
+    
     m.to_node = to_node;
     m.channel_idx = channel_idx;
     m.text = text;
@@ -356,10 +379,18 @@ uint32_t MeshService::send_text(const std::string& device_id,
     m.packet_id = pid;
     m.ack_state = want_ack ? "pending" : "";
     int64_t rowid = db_.insert_message(m);
+    
     if (want_ack) {
+        // We only track acks if we're connected to the physical device OR the stream 
+        // connection tracks them. Actually, ack responses come back on the stream.
         std::lock_guard<std::mutex> lock(devices_mu_);
         rt->pending_acks[pid] = rowid;
     }
+    
+    if (is_virtual && sync_manager_) {
+        sync_manager_->push_message(m);
+    }
+    
     return pid;
 }
 
@@ -385,10 +416,17 @@ std::vector<std::string> MeshService::device_ids() const {
     for (const auto& [id, _] : offline_dbs_) {
         if (devices_.find(id) == devices_.end()) out.push_back(id);
     }
+    for (const auto& [id, _] : virtual_devices_) {
+        out.push_back(id);
+    }
     return out;
 }
 
 const NodeDb* MeshService::db_for(const std::string& device_id) const {
+    if (device_id.find("virtual:") == 0) {
+        std::string sid = virtual_stream_for(device_id);
+        if (!sid.empty()) return db_for(sid);
+    }
     std::lock_guard<std::mutex> lock(devices_mu_);
     auto it = devices_.find(device_id);
     if (it != devices_.end()) return it->second->db.get();
@@ -412,6 +450,9 @@ std::string MeshService::hw_model_for(const std::string& device_id) const {
 }
 
 std::string MeshService::display_name_for(const std::string& device_id) const {
+    if (device_id.find("virtual:") == 0) {
+        return "Virtual " + virtual_original_for(device_id);
+    }
     std::lock_guard<std::mutex> lock(devices_mu_);
     auto it = devices_.find(device_id);
     if (it == devices_.end()) return {};
@@ -423,6 +464,54 @@ BleDeviceSpec MeshService::spec_for(const std::string& device_id) const {
     auto it = devices_.find(device_id);
     if (it == devices_.end()) return {};
     return it->second->spec;
+}
+
+std::string MeshService::virtual_stream_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = virtual_devices_.find(device_id);
+    if (it != virtual_devices_.end()) return it->second.stream_id;
+    return {};
+}
+
+std::string MeshService::virtual_original_for(const std::string& device_id) const {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    auto it = virtual_devices_.find(device_id);
+    if (it != virtual_devices_.end()) return it->second.original_id;
+    return {};
+}
+
+void MeshService::update_virtual_devices(const std::string& stream_id, const std::vector<VirtualDevice>& vdevs) {
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    
+    // First remove any existing virtual devices that came from this stream
+    for (auto it = virtual_devices_.begin(); it != virtual_devices_.end(); ) {
+        if (it->second.stream_id == stream_id) {
+            it = virtual_devices_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    
+    // Now add the new ones
+    for (const auto& vd : vdevs) {
+        virtual_devices_[vd.id] = vd;
+    }
+}
+
+void MeshService::send_raw_to_physical(const std::string& target_original_id, const std::string& bytes) {
+    std::shared_ptr<DeviceRuntime> rt;
+    {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        auto it = devices_.find(target_original_id);
+        if (it != devices_.end()) rt = it->second;
+    }
+    if (rt) {
+#ifndef _WIN32
+        if (rt->client && rt->client->is_connected()) rt->client->send_to_radio(bytes);
+#endif
+        // If it's a physical device connected via a local stream? Well, local stream acts like a client.
+        if (rt->stream && rt->stream->is_connected()) rt->stream->send_to_radio(bytes);
+    }
 }
 
 std::vector<std::string> MeshService::config_lines_for(const std::string& device_id) const {

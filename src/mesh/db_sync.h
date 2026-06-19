@@ -20,6 +20,12 @@ public:
     // Call this whenever a new message is received or a local update occurs.
     void push_message(const StoredMessage& msg);
     void push_location(const Database::LocationRow& loc);
+    
+    // Broadcast local physical devices to remote streams
+    void push_devices(const std::vector<std::pair<std::string, uint32_t>>& local_devices);
+    
+    // Send a raw packet to a specific physical radio
+    void send_raw_to_device(const std::string& target_original_id, const std::string& bytes);
 
 private:
     Database& db_;
@@ -28,6 +34,8 @@ private:
     void handle_inventory(const std::string& device, const std::string& json_str);
     void handle_request(const std::string& device, const std::string& json_str);
     void handle_data(const std::string& device, const std::string& json_str);
+    void handle_devices(const std::string& device, const std::string& json_str);
+    void handle_send_raw(const std::string& json_str);
 };
 
 } // namespace meshcli

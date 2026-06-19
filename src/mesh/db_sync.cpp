@@ -23,6 +23,10 @@ void DbSyncManager::handle_sync_payload(const std::string& device, const std::st
             handle_request(device, payload);
         } else if (type == "data") {
             handle_data(device, payload);
+        } else if (type == "devices") {
+            handle_devices(device, payload);
+        } else if (type == "send_raw") {
+            handle_send_raw(payload);
         } else {
             LOG_DEBUG() << "DbSyncManager: unknown type " << type;
         }
@@ -38,6 +42,18 @@ void DbSyncManager::initiate_sync() {
     j["max_location_ts"] = db_.max_location_ts();
 
     mesh_.send_db_sync(j.dump());
+
+    // Broadcast our local devices too
+    std::vector<std::pair<std::string, uint32_t>> local_devs;
+    for (const auto& id : mesh_.device_ids()) {
+        // Skip virtual devices and offline dbs
+        if (id.find("virtual:") == 0) continue;
+        const auto* ndb = mesh_.db_for(id);
+        if (ndb && ndb->my_node_num() != 0) {
+            local_devs.push_back({id, ndb->my_node_num()});
+        }
+    }
+    push_devices(local_devs);
 }
 
 void DbSyncManager::push_message(const StoredMessage& m) {
@@ -222,6 +238,84 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
     if (j.value("has_more", false)) {
         initiate_sync();
     }
+}
+
+// Hex encoding/decoding helpers
+static std::string bytes_to_hex(const std::string& bytes) {
+    static const char hex_chars[] = "0123456789ABCDEF";
+    std::string ret;
+    ret.reserve(bytes.size() * 2);
+    for (uint8_t b : bytes) {
+        ret.push_back(hex_chars[b >> 4]);
+        ret.push_back(hex_chars[b & 0x0F]);
+    }
+    return ret;
+}
+
+static std::string hex_to_bytes(const std::string& hex) {
+    std::string bytes;
+    if (hex.length() % 2 != 0) return bytes;
+    bytes.reserve(hex.length() / 2);
+    for (size_t i = 0; i < hex.length(); i += 2) {
+        uint8_t hi = hex[i] <= '9' ? hex[i] - '0' : (hex[i] & ~0x20) - 'A' + 10;
+        uint8_t lo = hex[i+1] <= '9' ? hex[i+1] - '0' : (hex[i+1] & ~0x20) - 'A' + 10;
+        bytes.push_back((char)((hi << 4) | lo));
+    }
+    return bytes;
+}
+
+void DbSyncManager::push_devices(const std::vector<std::pair<std::string, uint32_t>>& local_devices) {
+    if (local_devices.empty()) return;
+    json j;
+    j["type"] = "devices";
+    json arr = json::array();
+    for (const auto& dev : local_devices) {
+        json item;
+        item["id"] = dev.first;
+        item["node_num"] = dev.second;
+        arr.push_back(item);
+    }
+    j["devices"] = arr;
+    mesh_.send_db_sync(j.dump());
+}
+
+void DbSyncManager::send_raw_to_device(const std::string& target_original_id, const std::string& bytes) {
+    json j;
+    j["type"] = "send_raw";
+    j["target"] = target_original_id;
+    j["payload"] = bytes_to_hex(bytes);
+    mesh_.send_db_sync(j.dump());
+}
+
+void DbSyncManager::handle_devices(const std::string& device, const std::string& json_str) {
+    auto j = json::parse(json_str);
+    if (!j.contains("devices")) return;
+    
+    std::vector<VirtualDevice> vdevs;
+    for (const auto& item : j["devices"]) {
+        std::string orig_id = item.value("id", "");
+        uint32_t node_num = item.value("node_num", (uint32_t)0);
+        if (orig_id.empty()) continue;
+        
+        VirtualDevice vd;
+        vd.original_id = orig_id;
+        vd.stream_id = device;
+        vd.id = "virtual:" + device + ":" + orig_id;
+        vd.node_num = node_num;
+        vdevs.push_back(vd);
+    }
+    mesh_.update_virtual_devices(device, vdevs);
+}
+
+void DbSyncManager::handle_send_raw(const std::string& json_str) {
+    auto j = json::parse(json_str);
+    std::string target = j.value("target", "");
+    std::string hex_payload = j.value("payload", "");
+    
+    if (target.empty() || hex_payload.empty()) return;
+    
+    auto bytes = hex_to_bytes(hex_payload);
+    mesh_.send_raw_to_physical(target, bytes);
 }
 
 } // namespace meshcli
