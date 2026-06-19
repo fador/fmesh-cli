@@ -34,7 +34,7 @@ void DbSyncManager::handle_sync_payload(const std::string& device, const std::st
 void DbSyncManager::initiate_sync() {
     json j;
     j["type"] = "inventory";
-    j["max_message_rowid"] = db_.max_message_rowid();
+    j["max_message_ts"] = db_.max_message_ts();
     j["max_location_ts"] = db_.max_location_ts();
 
     EvSendDbSyncToTcp ev;
@@ -88,17 +88,17 @@ void DbSyncManager::push_location(const Database::LocationRow& loc) {
 
 void DbSyncManager::handle_inventory(const std::string& device, const std::string& json_str) {
     auto j = json::parse(json_str);
-    int64_t remote_msg = j.value("max_message_rowid", (int64_t)0);
+    uint64_t remote_msg = j.value("max_message_ts", (uint64_t)0);
     uint64_t remote_loc = j.value("max_location_ts", (uint64_t)0);
 
-    int64_t local_msg = db_.max_message_rowid();
+    uint64_t local_msg = db_.max_message_ts();
     uint64_t local_loc = db_.max_location_ts();
 
     // If they have more than us, request the difference.
     if (remote_msg > local_msg || remote_loc > local_loc) {
         json req;
         req["type"] = "request";
-        req["after_message_rowid"] = local_msg;
+        req["after_message_ts"] = local_msg;
         req["after_location_ts"] = local_loc;
         
         EvSendDbSyncToTcp ev;
@@ -110,7 +110,7 @@ void DbSyncManager::handle_inventory(const std::string& device, const std::strin
     // by pretending they requested it from their max points.
     if (local_msg > remote_msg || local_loc > remote_loc) {
         json req;
-        req["after_message_rowid"] = remote_msg;
+        req["after_message_ts"] = remote_msg;
         req["after_location_ts"] = remote_loc;
         handle_request(device, req.dump());
     }
@@ -118,22 +118,22 @@ void DbSyncManager::handle_inventory(const std::string& device, const std::strin
 
 void DbSyncManager::handle_request(const std::string& device, const std::string& json_str) {
     auto j = json::parse(json_str);
-    int64_t after_msg = j.value("after_message_rowid", (int64_t)0);
+    uint64_t after_msg = j.value("after_message_ts", (uint64_t)0);
     uint64_t after_loc = j.value("after_location_ts", (uint64_t)0);
 
-    auto msgs = db_.get_messages_after(after_msg, 51); // fetch 51 to check if has_more
-    auto locs = db_.get_locations_after(after_loc, 51);
+    auto msgs = db_.get_messages_after_ts(after_msg, 1001); // fetch 1001 to check if has_more
+    auto locs = db_.get_locations_after(after_loc, 1001);
 
     if (msgs.empty() && locs.empty()) return;
 
     bool has_more = false;
-    if (msgs.size() > 50) {
+    if (msgs.size() > 1000) {
         has_more = true;
-        msgs.pop_back(); // remove the 51st
+        msgs.pop_back(); // remove the 1001st
     }
-    if (locs.size() > 50) {
+    if (locs.size() > 1000) {
         has_more = true;
-        locs.pop_back(); // remove the 51st
+        locs.pop_back(); // remove the 1001st
     }
 
     json resp;

@@ -82,7 +82,9 @@ public:
     void update_ack_state(int64_t rowid, const std::string& ack_state);
     std::vector<StoredMessage> recent_messages(const WindowKey& w, int limit = 200);
     int64_t max_message_rowid();
+    uint64_t max_message_ts();
     std::vector<StoredMessage> get_messages_after(int64_t rowid, int limit = 100);
+    std::vector<StoredMessage> get_messages_after_ts(uint64_t ts, int limit = 100);
 
     // Find a stored message by its ToRadio packet_id (for ACK routing).
     [[nodiscard]] std::optional<StoredMessage> find_by_packet_id(uint32_t packet_id);

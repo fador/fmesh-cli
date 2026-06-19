@@ -401,6 +401,51 @@ std::vector<StoredMessage> Database::get_messages_after(int64_t rowid, int limit
     return out;
 }
 
+uint64_t Database::max_message_ts() {
+    if (!db_) return 0;
+    const char* sql = "SELECT MAX(ts) FROM messages";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+    uint64_t ret = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        ret = static_cast<uint64_t>(sqlite3_column_int64(st, 0));
+    }
+    sqlite3_finalize(st);
+    return ret;
+}
+
+std::vector<StoredMessage> Database::get_messages_after_ts(uint64_t ts, int limit) {
+    std::vector<StoredMessage> out;
+    if (!db_) return out;
+    const char* sql =
+        "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
+        "channel_idx,text,ts,packet_id,ack_state FROM messages "
+        "WHERE ts > ? ORDER BY ts ASC LIMIT ?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_int64(st, 1, ts);
+    sqlite3_bind_int(st, 2, limit);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        StoredMessage m;
+        m.rowid = sqlite3_column_int64(st, 0);
+        if (auto* p = sqlite3_column_text(st, 1)) m.device = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 2)) m.window_kind = reinterpret_cast<const char*>(p);
+        m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
+        if (auto* p = sqlite3_column_text(st, 4)) m.direction = reinterpret_cast<const char*>(p);
+        m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
+        m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
+        m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
+        if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
+        m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
+        m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
+        if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
+        out.push_back(std::move(m));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+
 uint64_t Database::max_location_ts() {
     if (!db_) return 0;
     const char* sql = "SELECT MAX(ts) FROM location_history";
