@@ -1240,6 +1240,28 @@ int TuiApp::run() {
                     continue;
                 }
                 // Alt+key handling
+#ifdef _WIN32
+                if (ch >= ALT_0 && ch <= ALT_9) {
+                    int idx = (ch == ALT_0) ? 10 : (ch - ALT_0);
+                    wm_.select(idx);
+                    need_redraw_ = true;
+                    ch = getch();
+                    continue;
+                }
+                if (ch == KEY_ALT_L || ch == KEY_ALT_R) { ch = getch(); continue; } // Ignore bare alt keys
+                if (ch == ALT_A) { wm_.select_next_active(); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_N) { wm_.select_relative(1); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_Q) { wm_.select(11); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_W) { wm_.select(12); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_E) { wm_.select(13); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_R) { wm_.select(14); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_T) { wm_.select(15); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_Y) { wm_.select(16); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_U) { wm_.select(17); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_I) { wm_.select(18); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_O) { wm_.select(19); need_redraw_ = true; ch = getch(); continue; }
+                if (ch == ALT_P) { wm_.select(20); need_redraw_ = true; ch = getch(); continue; }
+#endif
                 if (ch == 27) {
                     timeout(50);
                     int ch2 = getch();

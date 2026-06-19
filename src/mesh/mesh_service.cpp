@@ -453,7 +453,7 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
                 rt->my_long_name = me->long_name;
                 rt->my_short_name = me->short_name;
             }
-            if ((e.device.find("tcp:") == 0 || e.device.find("stream:") == 0) && sync_manager_) {
+            if ((e.device.find("tcp:") == 0 || e.device.find("stream:") == 0 || e.device.find("mesh:") == 0) && sync_manager_) {
                 sync_manager_->initiate_sync();
             }
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
