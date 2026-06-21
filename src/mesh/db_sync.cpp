@@ -207,6 +207,7 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             m.ack_state = msg.value("ack_state", "");
 
             db_.insert_message(m);
+            push_message(m); // Forward to other connected mesh peers
 
             EvTextReceived ev;
             ev.device = m.device;
@@ -231,6 +232,15 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             uint64_t ts = loc.value("ts", (uint64_t)0);
 
             db_.insert_location(d, node_num, lat, lon, alt, ts);
+            
+            Database::LocationRow lr;
+            lr.device = d;
+            lr.node_num = node_num;
+            lr.latitude = lat;
+            lr.longitude = lon;
+            lr.altitude = alt;
+            lr.ts = ts;
+            push_location(lr); // Forward to other connected mesh peers
             // We could emit EvNodeUpdated to UI, but UI probably re-queries DB on /nodes.
         }
     }
