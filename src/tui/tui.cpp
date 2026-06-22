@@ -1043,8 +1043,8 @@ void TuiApp::render_wizard_tab() {
     };
     draw(0, ConnTransport::BLE, "BLE", "Nearby Meshtastic radios");
     draw(1, ConnTransport::TCP, "TCP", "Remote device over network");
-    draw(2, ConnTransport::Mesh, "Mesh", "Fador's Mesh CLI network (TLS)");
-    draw(3, ConnTransport::Serial, "Serial", "Local serial port");
+    draw(2, ConnTransport::Serial, "Serial", "Local serial port");
+    draw(3, ConnTransport::Mesh, "Mesh", "Fador's Mesh CLI network (TLS)");
 
     mvprintw(mid + 6, std::max(0, (cols - 48) / 2),
              " arrow keys or Tab to switch, ENTER to select, ESC to cancel ");
