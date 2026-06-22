@@ -189,9 +189,7 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             // We ignore rowid, letting SQLite assign a new local rowid.
             // Check if we already have this packet_id (from same sender).
             uint32_t pkt = msg.value("packet_id", (uint32_t)0);
-            if (pkt > 0) {
-                if (db_.find_by_packet_id(pkt)) continue; // Already have it
-            }
+            if (db_.find_by_packet_id(pkt)) continue; // Already have it
 
             StoredMessage m;
             m.device = msg.value("device", "");
@@ -231,16 +229,16 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             int alt = loc.value("altitude", 0);
             uint64_t ts = loc.value("ts", (uint64_t)0);
 
-            db_.insert_location(d, node_num, lat, lon, alt, ts);
-            
-            Database::LocationRow lr;
-            lr.device = d;
-            lr.node_num = node_num;
-            lr.latitude = lat;
-            lr.longitude = lon;
-            lr.altitude = alt;
-            lr.ts = ts;
-            push_location(lr); // Forward to other connected mesh peers
+            if (db_.insert_location(d, node_num, lat, lon, alt, ts)) {
+                Database::LocationRow lr;
+                lr.device = d;
+                lr.node_num = node_num;
+                lr.latitude = lat;
+                lr.longitude = lon;
+                lr.altitude = alt;
+                lr.ts = ts;
+                push_location(lr); // Forward to other connected mesh peers
+            }
             // We could emit EvNodeUpdated to UI, but UI probably re-queries DB on /nodes.
         }
     }

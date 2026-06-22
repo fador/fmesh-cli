@@ -60,7 +60,7 @@ public:
     void load_channels(const std::string& device, NodeDb& db);
 
     // --- location history ------------------------------------------------
-    void insert_location(const std::string& device, uint32_t node_num, double lat, double lon, int altitude, uint64_t ts);
+    bool insert_location(const std::string& device, uint32_t node_num, double lat, double lon, int altitude, uint64_t ts);
     uint64_t max_location_ts();
 
     struct LocationRow {

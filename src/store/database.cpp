@@ -341,11 +341,24 @@ void Database::checkpoint() {
 
 // --- location history ------------------------------------------------------
 
-void Database::insert_location(const std::string& device, uint32_t node_num, double lat, double lon, int altitude, uint64_t ts) {
-    if (!db_) return;
+bool Database::insert_location(const std::string& device, uint32_t node_num, double lat, double lon, int altitude, uint64_t ts) {
+    if (!db_) return false;
+    
+    // Check if it already exists
+    const char* check_sql = "SELECT 1 FROM location_history WHERE device=? AND node_num=? AND ts=?";
+    sqlite3_stmt* check_st = nullptr;
+    if (sqlite3_prepare_v2(db_, check_sql, -1, &check_st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(check_st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(check_st, 2, node_num);
+        sqlite3_bind_int64(check_st, 3, ts);
+        bool exists = (sqlite3_step(check_st) == SQLITE_ROW);
+        sqlite3_finalize(check_st);
+        if (exists) return false;
+    }
+
     const char* sql = "INSERT INTO location_history(device,node_num,latitude,longitude,altitude,ts) VALUES(?,?,?,?,?,?)";
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(st, 2, node_num);
     sqlite3_bind_double(st, 3, lat);
@@ -355,6 +368,7 @@ void Database::insert_location(const std::string& device, uint32_t node_num, dou
     sqlite3_step(st);
     sqlite3_finalize(st);
     maybe_checkpoint();
+    return true;
 }
 
 int64_t Database::max_message_rowid() {
