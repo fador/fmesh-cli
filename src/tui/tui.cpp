@@ -346,14 +346,14 @@ bool TuiApp::handle_wizard_key(int ch) {
                 save_device_spec(spec);
             }
             exit_wizard();
-        } else if (ch == KEY_UP || ch == 'k') {
+        } else if (ch == KEY_UP || (wizard_field_ == 0 && ch == 'k')) {
             if (scan_selection_ > 0) {
                 --scan_selection_;
                 if (scan_selection_ < scan_entries_offset_)
                     scan_entries_offset_ = scan_selection_;
                 need_redraw_ = true;
             }
-        } else if (ch == KEY_DOWN || ch == 'j') {
+        } else if (ch == KEY_DOWN || (wizard_field_ == 0 && ch == 'j')) {
             if (static_cast<size_t>(scan_selection_ + 1) < scan_entries_.size()) {
                 ++scan_selection_;
                 int max_lines = std::max(1, LINES - 7);
@@ -382,10 +382,10 @@ bool TuiApp::handle_wizard_key(int ch) {
 
     case M::ConnectWizard_TCP: {
         auto* field = (wizard_field_ == 0) ? &wizard_tcp_host_ : &wizard_tcp_port_;
-        if (ch == '\t' || ch == KEY_DOWN || ch == 'j') {
+        if (ch == '\t' || ch == KEY_DOWN) {
             wizard_field_ = (wizard_field_ + 1) % 2;
             need_redraw_ = true;
-        } else if (ch == KEY_UP || ch == 'k') {
+        } else if (ch == KEY_UP) {
             wizard_field_ = (wizard_field_ - 1 + 2) % 2;
             need_redraw_ = true;
         } else if (ch == '\n' || ch == KEY_ENTER) {
@@ -415,10 +415,10 @@ bool TuiApp::handle_wizard_key(int ch) {
 
     case M::ConnectWizard_Serial: {
         auto* field = (wizard_field_ == 0) ? &wizard_serial_path_ : &wizard_serial_baud_;
-        if (ch == '\t' || ch == KEY_DOWN || ch == 'j') {
+        if (ch == '\t' || ch == KEY_DOWN) {
             wizard_field_ = (wizard_field_ + 1) % 2;
             need_redraw_ = true;
-        } else if (ch == KEY_UP || ch == 'k') {
+        } else if (ch == KEY_UP) {
             wizard_field_ = (wizard_field_ - 1 + 2) % 2;
             need_redraw_ = true;
         } else if (ch == '\n' || ch == KEY_ENTER) {
@@ -451,10 +451,10 @@ bool TuiApp::handle_wizard_key(int ch) {
     case M::ConnectWizard_Mesh: {
         std::string* fields[] = {&wizard_mesh_host_, &wizard_mesh_port_, &wizard_mesh_user_, &wizard_mesh_password_};
         auto* field = fields[wizard_field_];
-        if (ch == '\t' || ch == KEY_DOWN || ch == 'j') {
+        if (ch == '\t' || ch == KEY_DOWN) {
             wizard_field_ = (wizard_field_ + 1) % 4;
             need_redraw_ = true;
-        } else if (ch == KEY_UP || ch == 'k') {
+        } else if (ch == KEY_UP) {
             wizard_field_ = (wizard_field_ - 1 + 4) % 4;
             need_redraw_ = true;
         } else if (ch == '\n' || ch == KEY_ENTER) {
@@ -503,10 +503,10 @@ bool TuiApp::handle_server_config_key(int ch) {
     std::string* fields[] = {&wizard_server_port_, &wizard_server_user_, &wizard_server_password_};
     auto* field = fields[wizard_field_];
 
-    if (ch == '\t' || ch == KEY_DOWN || ch == 'j') {
+    if (ch == '\t' || ch == KEY_DOWN) {
         wizard_field_ = (wizard_field_ + 1) % 3;
         need_redraw_ = true;
-    } else if (ch == KEY_UP || ch == 'k') {
+    } else if (ch == KEY_UP) {
         wizard_field_ = (wizard_field_ - 1 + 3) % 3;
         need_redraw_ = true;
     } else if (ch == '\n' || ch == KEY_ENTER) {
