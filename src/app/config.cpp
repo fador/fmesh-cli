@@ -4,6 +4,7 @@
 #include <ctime>
 #include <cstring>
 #include <sstream>
+#include <random>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -228,10 +229,11 @@ void load_config(AppConfig& c) {
     if (!f) {
         // First run, generate a random password
         const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        std::srand(static_cast<unsigned>(std::time(nullptr)));
+        std::random_device rd;
+        std::uniform_int_distribution<int> dist(0, sizeof(charset) - 2);
         c.server_password.clear();
         for (int i = 0; i < 16; ++i) {
-            c.server_password += charset[std::rand() % (sizeof(charset) - 1)];
+            c.server_password += charset[dist(rd)];
         }
         save_config(c);
         return;
@@ -266,9 +268,10 @@ void load_config(AppConfig& c) {
     // Ensure there is a password
     if (c.server_password.empty()) {
         const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        std::srand(static_cast<unsigned>(std::time(nullptr)));
+        std::random_device rd;
+        std::uniform_int_distribution<int> dist(0, sizeof(charset) - 2);
         for (int i = 0; i < 16; ++i) {
-            c.server_password += charset[std::rand() % (sizeof(charset) - 1)];
+            c.server_password += charset[dist(rd)];
         }
         save_config(c);
     }
