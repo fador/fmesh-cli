@@ -84,7 +84,7 @@ TEST(InputLineRobust, CtrlU) {
     input.handle_key('t', out);
     input.handle_key(21, out); // Ctrl-U
     EXPECT_TRUE(input.buf().empty());
-    EXPECT_EQ(input.cursor(), 0u);
+    EXPECT_EQ(input.cursor_visual(), 0);
 }
 
 TEST(InputLineRobust, CtrlK) {
@@ -106,7 +106,7 @@ TEST(InputLineRobust, CtrlA) {
     // Move cursor to 1
     input.handle_key(KEY_LEFT, out);
     input.handle_key(1, out); // Ctrl-A = home
-    EXPECT_EQ(input.cursor(), 0u);
+    EXPECT_EQ(input.cursor_visual(), 0);
 }
 
 TEST(InputLineRobust, CtrlE) {
@@ -115,9 +115,9 @@ TEST(InputLineRobust, CtrlE) {
     input.handle_key('x', out);
     input.handle_key('y', out);
     input.handle_key(1, out); // Ctrl-A
-    EXPECT_EQ(input.cursor(), 0u);
+    EXPECT_EQ(input.cursor_visual(), 0);
     input.handle_key(5, out); // Ctrl-E = end
-    EXPECT_EQ(input.cursor(), 2u);
+    EXPECT_EQ(input.cursor_visual(), 2);
 }
 
 TEST(InputLineRobust, ArrowNavigation) {
@@ -127,18 +127,18 @@ TEST(InputLineRobust, ArrowNavigation) {
     input.handle_key('b', out);
     input.handle_key('c', out);
     input.handle_key(KEY_LEFT, out);
-    EXPECT_EQ(input.cursor(), 2u);
+    EXPECT_EQ(input.cursor_visual(), 2);
     input.handle_key(KEY_LEFT, out);
-    EXPECT_EQ(input.cursor(), 1u);
+    EXPECT_EQ(input.cursor_visual(), 1);
     input.handle_key(KEY_RIGHT, out);
-    EXPECT_EQ(input.cursor(), 2u);
+    EXPECT_EQ(input.cursor_visual(), 2);
     input.handle_key(KEY_HOME, out);
-    EXPECT_EQ(input.cursor(), 0u);
+    EXPECT_EQ(input.cursor_visual(), 0);
     input.handle_key(KEY_END, out);
-    EXPECT_EQ(input.cursor(), 3u);
+    EXPECT_EQ(input.cursor_visual(), 3);
     // Left from start should not go negative
     input.handle_key(KEY_LEFT, out);
-    EXPECT_EQ(input.cursor(), 2u);
+    EXPECT_EQ(input.cursor_visual(), 2);
 }
 
 TEST(InputLineRobust, HistoryNavigates) {

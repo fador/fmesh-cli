@@ -24,7 +24,6 @@ public:
     bool handle_key(int ch, std::string& out);
 
     [[nodiscard]] const std::string& buf() const { return buf_; }
-    [[nodiscard]] size_t cursor() const { return cursor_; }
     [[nodiscard]] int cursor_visual() const {
         int w = 0;
         for (size_t i = 0; i < cursor_ && i < buf_.size(); ++i) {
