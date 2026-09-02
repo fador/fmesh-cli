@@ -38,6 +38,28 @@ namespace meshcli {
 
 using namespace std::chrono_literals;
 
+namespace {
+std::string last_socket_error_str() {
+#ifdef _WIN32
+    int err = WSAGetLastError();
+    char buf[256];
+    DWORD len = FormatMessageA(
+        FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        buf, sizeof(buf), nullptr);
+    if (len > 0) {
+        while (len > 0 && (buf[len - 1] == '\r' || buf[len - 1] == '\n' || buf[len - 1] == ' ')) {
+            buf[--len] = '\0';
+        }
+        return std::string(buf) + " (" + std::to_string(err) + ")";
+    }
+    return "Winsock error " + std::to_string(err);
+#else
+    return std::strerror(errno);
+#endif
+}
+} // namespace
+
 // ---- transport openers -------------------------------------------------
 
 void set_blocking(intptr_t fd, bool blocking) {
@@ -243,6 +265,18 @@ std::string StreamClient::start() {
 void StreamClient::stop() {
     if (!running_.exchange(false)) return;
     connected_ = false;
+    if (fd_ >= 0) {
+#ifdef _WIN32
+        ::shutdown(fd_, SD_BOTH);
+        ::closesocket(fd_);
+#else
+        ::shutdown(fd_, SHUT_RDWR);
+        ::close(fd_);
+#endif
+        fd_ = -1;
+    }
+    if (thread_.joinable()) thread_.join();
+
 #ifdef ENABLE_MESH_NET
     if (use_tls_ && ssl_) {
         SSL_shutdown(ssl_);
@@ -254,8 +288,6 @@ void StreamClient::stop() {
         ssl_ctx_ = nullptr;
     }
 #endif
-    if (fd_ >= 0) { close(fd_); fd_ = -1; }
-    if (thread_.joinable()) thread_.join();
 }
 
 bool StreamClient::send_to_radio(const std::string& bytes, unsigned char marker) {
@@ -298,7 +330,7 @@ bool StreamClient::send_to_radio(const std::string& bytes, unsigned char marker)
                 continue;
             }
 #endif
-            LOG_WARN() << "stream write error: " << std::strerror(errno);
+            LOG_WARN() << "stream write error: " << last_socket_error_str();
             return false;
         }
         written += n;
@@ -330,7 +362,7 @@ void StreamClient::read_loop() {
         int pr = poll(&pfd, 1, 500);
         if (pr < 0) {
             if (errno == EINTR) continue;
-            emit_error("stream poll error: " + std::string(std::strerror(errno)));
+            emit_error("stream poll error: " + last_socket_error_str());
             return;
         }
         if (pr == 0) continue;  // timeout
@@ -360,7 +392,7 @@ void StreamClient::read_loop() {
 #else
             if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
 #endif
-            emit_error("stream read error: " + std::string(std::strerror(errno)));
+            emit_error("stream read error: " + last_socket_error_str());
             return;
         }
         if (n == 0) {

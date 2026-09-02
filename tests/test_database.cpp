@@ -269,3 +269,112 @@ TEST_F(DatabaseTest, DataSurvivesReopen) {
     WindowKey wk{"d", "channel", 0};
     EXPECT_EQ(db_.recent_messages(wk).size(), 1u);
 }
+
+// --- location history & deduplication -------------------------------------
+
+TEST_F(DatabaseTest, InsertLocationDeduplication) {
+    EXPECT_TRUE(db_.insert_location("dev1", 0x1234, 45.123, 9.456, 120, 1000));
+    // Exact duplicate should return false
+    EXPECT_FALSE(db_.insert_location("dev1", 0x1234, 45.123, 9.456, 120, 1000));
+    // Different timestamp should succeed
+    EXPECT_TRUE(db_.insert_location("dev1", 0x1234, 45.124, 9.457, 125, 1001));
+    // Different device should succeed
+    EXPECT_TRUE(db_.insert_location("dev2", 0x1234, 45.123, 9.456, 120, 1000));
+}
+
+TEST_F(DatabaseTest, LocationQueryAndMaxTs) {
+    db_.insert_location("dev1", 0x10, 10.0, 20.0, 50, 100);
+    db_.insert_location("dev1", 0x10, 10.1, 20.1, 55, 200);
+    db_.insert_location("dev1", 0x10, 10.2, 20.2, 60, 300);
+
+    EXPECT_EQ(db_.max_location_ts(), 300u);
+
+    auto locs = db_.get_locations_after(150, 10);
+    ASSERT_EQ(locs.size(), 2u);
+    EXPECT_EQ(locs[0].ts, 200u);
+    EXPECT_FLOAT_EQ(locs[0].latitude, 10.1);
+    EXPECT_EQ(locs[1].ts, 300u);
+    EXPECT_FLOAT_EQ(locs[1].latitude, 10.2);
+
+    // Limit capped
+    auto locs_lim = db_.get_locations_after(50, 1);
+    EXPECT_EQ(locs_lim.size(), 1u);
+    EXPECT_EQ(locs_lim[0].ts, 100u);
+}
+
+// --- devices and windows discovery ----------------------------------------
+
+TEST_F(DatabaseTest, GetAllDevicesAndWindows) {
+    Node n; n.node_num = 1; db_.upsert_node("dev_node", n);
+    Channel c{0, "main", true, "PRIMARY"}; db_.upsert_channel("dev_chan", c);
+    StoredMessage m;
+    m.device = "dev_msg"; m.window_kind = "channel"; m.window_target = 0;
+    m.direction = "in"; m.text = "hi"; m.ts = 100;
+    db_.insert_message(m);
+
+    auto devs = db_.get_all_devices();
+    EXPECT_EQ(devs.size(), 3u);
+    bool has_node = false, has_chan = false, has_msg = false;
+    for (const auto& d : devs) {
+        if (d == "dev_node") has_node = true;
+        if (d == "dev_chan") has_chan = true;
+        if (d == "dev_msg") has_msg = true;
+    }
+    EXPECT_TRUE(has_node);
+    EXPECT_TRUE(has_chan);
+    EXPECT_TRUE(has_msg);
+
+    // Add another window to dev_msg
+    StoredMessage dm;
+    dm.device = "dev_msg"; dm.window_kind = "dm"; dm.window_target = 0x999;
+    dm.direction = "out"; dm.text = "private"; dm.ts = 105;
+    db_.insert_message(dm);
+
+    auto wins = db_.get_all_windows("dev_msg");
+    EXPECT_EQ(wins.size(), 2u);
+}
+
+// --- message pagination & max rowid/ts ------------------------------------
+
+TEST_F(DatabaseTest, MessagePaginationAndMaxTs) {
+    StoredMessage m1;
+    m1.device = "dev"; m1.window_kind = "channel"; m1.window_target = 0;
+    m1.direction = "in"; m1.text = "m1"; m1.ts = 10;
+    int64_t r1 = db_.insert_message(m1);
+
+    StoredMessage m2 = m1;
+    m2.text = "m2"; m2.ts = 20;
+    int64_t r2 = db_.insert_message(m2);
+
+    StoredMessage m3 = m1;
+    m3.text = "m3"; m3.ts = 30;
+    int64_t r3 = db_.insert_message(m3);
+
+    EXPECT_EQ(db_.max_message_rowid(), r3);
+    EXPECT_EQ(db_.max_message_ts(), 30u);
+
+    auto after_ts = db_.get_messages_after_ts(15, 10);
+    ASSERT_EQ(after_ts.size(), 2u);
+    EXPECT_EQ(after_ts[0].text, "m2");
+    EXPECT_EQ(after_ts[1].text, "m3");
+
+    auto after_rowid = db_.get_messages_after(r1, 1);
+    ASSERT_EQ(after_rowid.size(), 1u);
+    EXPECT_EQ(after_rowid[0].rowid, r2);
+    EXPECT_EQ(after_rowid[0].text, "m2");
+}
+
+TEST_F(DatabaseTest, UnicodeAndSpecialCharacters) {
+    StoredMessage m;
+    m.device = "dev"; m.window_kind = "channel"; m.window_target = 0;
+    m.direction = "in";
+    m.text = "📡 Meshtastic testing: 'quotes', \"double quotes\", emoji 🌲🎉";
+    m.ts = 12345;
+    db_.insert_message(m);
+
+    WindowKey wk{"dev", "channel", 0};
+    auto recent = db_.recent_messages(wk, 1);
+    ASSERT_EQ(recent.size(), 1u);
+    EXPECT_EQ(recent[0].text, "📡 Meshtastic testing: 'quotes', \"double quotes\", emoji 🌲🎉");
+}
+

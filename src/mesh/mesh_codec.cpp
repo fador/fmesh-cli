@@ -294,7 +294,29 @@ std::optional<MeshEvent> decode_packet(
         ev.rx_time = pkt.rx_time();
         return ev;
     }
-    // Other portnums (telemetry, nodeinfo) arriving as packets
+    if (d.portnum() == PortNum::TELEMETRY_APP) {
+        meshtastic::Telemetry t;
+        if (!t.ParseFromString(d.payload())) return std::nullopt;
+        EvNodeUpdated ev;
+        ev.device = device;
+        ev.node.node_num = pkt.from();
+        ev.node.node_id = node_num_to_id(pkt.from());
+        if (pkt.rx_time() != 0) ev.node.last_heard = pkt.rx_time();
+        else if (t.time() != 0) ev.node.last_heard = t.time();
+        if (pkt.rx_snr() != 0.0f) ev.node.snr = pkt.rx_snr();
+        if (pkt.hop_start() > 0 && pkt.hop_start() >= pkt.hop_limit()) {
+            ev.node.hops_away = pkt.hop_start() - pkt.hop_limit();
+        }
+        if (t.has_device_metrics()) {
+            const auto& m = t.device_metrics();
+            if (m.battery_level() != 0) ev.node.battery_level = static_cast<uint8_t>(m.battery_level());
+            if (m.voltage() != 0.0f) ev.node.voltage = m.voltage();
+            if (m.channel_utilization() != 0.0f) ev.node.channel_util = m.channel_utilization();
+            if (m.air_util_tx() != 0.0f) ev.node.air_util_tx = m.air_util_tx();
+        }
+        return ev;
+    }
+    // Other portnums (nodeinfo) arriving as packets
     // would normally be processed into the node DB; the firmware typically
     // sends them as FromRadio.node_info rather than FromRadio.packet, so we
     // ignore stray packets here for v1.

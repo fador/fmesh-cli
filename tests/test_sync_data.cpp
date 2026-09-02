@@ -37,8 +37,11 @@ TEST(MeshSync, BasicDataTransfer) {
     msg2.packet_id = 101;
     server_svc.database().insert_message(msg2);
 
+    static std::atomic<int> next_port{28400};
+    int srv_port = next_port.fetch_add(1);
+
     // Start stream server on an arbitrary port
-    server_svc.start_stream_server(28491, "testuser", "testpass");
+    server_svc.start_stream_server(srv_port, "testuser", "testpass");
 
     // Give the server a moment to bind
     std::this_thread::sleep_for(100ms);
@@ -53,7 +56,7 @@ TEST(MeshSync, BasicDataTransfer) {
     client_svc.set_event_sink(&queue, &wake);
 
     BleDeviceSpec spec;
-    spec.mesh_host = "127.0.0.1:28491";
+    spec.mesh_host = "127.0.0.1:" + std::to_string(srv_port);
     spec.mesh_user = "testuser";
     spec.mesh_password = "testpass";
 

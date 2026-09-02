@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ble/bluez_client.h"
+#include "ble/ble_client.h"
 
 #include <string>
 #include <vector>

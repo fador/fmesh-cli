@@ -251,6 +251,7 @@ add_executable(fmesh-cli-tests
     tests/test_multi_node_sync.cpp
     tests/test_virtual_nodes.cpp
     tests/test_config_modify.cpp
+    tests/test_config.cpp
     src/app/config.cpp
 )
 target_link_libraries(fmesh-cli-tests PRIVATE meshcli_tui)

@@ -1,8 +1,12 @@
 #include "mesh/mesh_codec.h"
 #include "mesh/node_db.h"
 
+#include <meshtastic/admin.pb.h>
+#include <meshtastic/config.pb.h>
 #include <meshtastic/mesh.pb.h>
+#include <meshtastic/module_config.pb.h>
 #include <meshtastic/portnums.pb.h>
+#include <meshtastic/telemetry.pb.h>
 
 #include "minitest.h"
 
@@ -119,3 +123,272 @@ TEST(MeshCodec, DecodeRebooted) {
     // rebooted as a standalone message is currently dropped (not surfaced).
     EXPECT_FALSE(ev.has_value());
 }
+
+TEST(MeshCodec, EncodeDisconnect) {
+    auto bytes = MeshCodec::encode_disconnect();
+    ASSERT_FALSE(bytes.empty());
+    meshtastic::ToRadio tr;
+    ASSERT_TRUE(tr.ParseFromString(bytes));
+    EXPECT_TRUE(tr.has_disconnect());
+    EXPECT_TRUE(tr.disconnect());
+}
+
+TEST(MeshCodec, EncodeAdminPacket) {
+    meshtastic::Config cfg;
+    cfg.mutable_lora()->set_tx_power(18);
+    std::string cfg_bytes = cfg.SerializeAsString();
+
+    auto bytes = MeshCodec::encode_admin_packet(0x100, 0x200, cfg_bytes, false);
+    ASSERT_FALSE(bytes.empty());
+    meshtastic::ToRadio tr;
+    ASSERT_TRUE(tr.ParseFromString(bytes));
+    ASSERT_TRUE(tr.has_packet());
+    EXPECT_EQ(tr.packet().from(), 0x100u);
+    EXPECT_EQ(tr.packet().to(), 0x200u);
+    EXPECT_TRUE(tr.packet().want_ack());
+    EXPECT_EQ(tr.packet().decoded().portnum(), meshtastic::PortNum::ADMIN_APP);
+
+    meshtastic::AdminMessage admin;
+    ASSERT_TRUE(admin.ParseFromString(tr.packet().decoded().payload()));
+    ASSERT_TRUE(admin.has_set_config());
+    EXPECT_EQ(admin.set_config().lora().tx_power(), 18);
+
+    // Module config variant
+    meshtastic::ModuleConfig mod;
+    mod.mutable_mqtt()->set_enabled(true);
+    auto mod_bytes = MeshCodec::encode_admin_packet(0x100, 0x200, mod.SerializeAsString(), true);
+    meshtastic::ToRadio tr_mod;
+    ASSERT_TRUE(tr_mod.ParseFromString(mod_bytes));
+    meshtastic::AdminMessage admin_mod;
+    ASSERT_TRUE(admin_mod.ParseFromString(tr_mod.packet().decoded().payload()));
+    EXPECT_TRUE(admin_mod.has_set_module_config());
+    EXPECT_TRUE(admin_mod.set_module_config().mqtt().enabled());
+}
+
+TEST(MeshCodec, DecodeConfigLines) {
+    meshtastic::Config cfg_lora;
+    cfg_lora.mutable_lora()->set_tx_power(20);
+    cfg_lora.mutable_lora()->set_channel_num(3);
+
+    auto lines = MeshCodec::decode_config_lines(cfg_lora.SerializeAsString(), false);
+    ASSERT_FALSE(lines.empty());
+    bool found_power = false;
+    for (const auto& l : lines) {
+        if (l.find("lora.tx_power = 20") != std::string::npos) found_power = true;
+    }
+    EXPECT_TRUE(found_power);
+
+    meshtastic::Config cfg_dev;
+    cfg_dev.mutable_device()->set_serial_enabled(true);
+    auto dev_lines = MeshCodec::decode_config_lines(cfg_dev.SerializeAsString(), false);
+    ASSERT_FALSE(dev_lines.empty());
+    bool found_serial = false;
+    for (const auto& l : dev_lines) {
+        if (l.find("device.serial_enabled = ON") != std::string::npos) found_serial = true;
+    }
+    EXPECT_TRUE(found_serial);
+
+    meshtastic::ModuleConfig mod;
+    mod.mutable_mqtt()->set_enabled(true);
+    mod.mutable_mqtt()->set_address("mqtt.example.com");
+    auto mod_lines = MeshCodec::decode_config_lines(mod.SerializeAsString(), true);
+    ASSERT_FALSE(mod_lines.empty());
+    bool found_mqtt = false;
+    for (const auto& l : mod_lines) {
+        if (l.find("mqtt.enabled = ON") != std::string::npos) found_mqtt = true;
+    }
+    EXPECT_TRUE(found_mqtt);
+}
+
+TEST(MeshCodec, DecodeFromRadioMyInfo) {
+    meshtastic::FromRadio fr;
+    fr.mutable_my_info()->set_my_node_num(0x12345678);
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* info = std::get_if<EvMyInfo>(&*ev);
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->device, "dev1");
+    EXPECT_EQ(info->my_node_num, 0x12345678u);
+}
+
+TEST(MeshCodec, DecodeFromRadioMetadata) {
+    meshtastic::FromRadio fr;
+    auto* meta = fr.mutable_metadata();
+    meta->set_firmware_version("2.5.1");
+    meta->set_hw_model(meshtastic::TBEAM);
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* m = std::get_if<EvMetadata>(&*ev);
+    ASSERT_NE(m, nullptr);
+    EXPECT_EQ(m->firmware_version, "2.5.1");
+    EXPECT_EQ(m->hw_model, "TBEAM");
+}
+
+TEST(MeshCodec, DecodeFromRadioNodeInfo) {
+    meshtastic::FromRadio fr;
+    auto* ni = fr.mutable_node_info();
+    ni->set_num(0xAABBCCDD);
+    ni->mutable_user()->set_long_name("Test Long");
+    ni->mutable_user()->set_short_name("TL");
+    ni->mutable_user()->set_public_key("keybytes");
+    ni->set_is_favorite(true);
+    ni->set_is_muted(true);
+    ni->mutable_device_metrics()->set_battery_level(88);
+    ni->mutable_device_metrics()->set_voltage(4.05f);
+    ni->set_snr(8.5f);
+    ni->set_hops_away(2);
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* upd = std::get_if<EvNodeUpdated>(&*ev);
+    ASSERT_NE(upd, nullptr);
+    EXPECT_EQ(upd->node.node_num, 0xAABBCCDDu);
+    EXPECT_EQ(upd->node.long_name, "Test Long");
+    EXPECT_EQ(upd->node.short_name, "TL");
+    EXPECT_TRUE(upd->node.has_public_key);
+    EXPECT_TRUE(upd->node.is_favorite);
+    EXPECT_TRUE(upd->node.is_muted);
+    ASSERT_TRUE(upd->node.battery_level.has_value());
+    EXPECT_EQ(*upd->node.battery_level, 88u);
+    EXPECT_FLOAT_EQ(upd->node.voltage.value(), 4.05f);
+    EXPECT_FLOAT_EQ(upd->node.snr.value(), 8.5f);
+    ASSERT_TRUE(upd->node.hops_away.has_value());
+    EXPECT_EQ(*upd->node.hops_away, 2u);
+}
+
+TEST(MeshCodec, DecodeFromRadioChannel) {
+    meshtastic::FromRadio fr;
+    auto* ch = fr.mutable_channel();
+    ch->set_index(0);
+    ch->mutable_settings()->set_name("LongFast");
+    ch->mutable_settings()->set_psk("default");
+    ch->set_role(meshtastic::Channel_Role_PRIMARY);
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* c = std::get_if<EvChannelUpdated>(&*ev);
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->channel.index, 0u);
+    EXPECT_EQ(c->channel.name, "LongFast");
+    EXPECT_EQ(c->channel.role, "PRIMARY");
+    EXPECT_TRUE(c->channel.has_psk);
+}
+
+TEST(MeshCodec, DecodeFromRadioLogRecord) {
+    meshtastic::FromRadio fr;
+    fr.mutable_log_record()->set_message("Radio packet rx");
+    fr.mutable_log_record()->set_source("mesh");
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* l = std::get_if<EvLogLine>(&*ev);
+    ASSERT_NE(l, nullptr);
+    EXPECT_EQ(l->message, "Radio packet rx");
+    EXPECT_EQ(l->source, "mesh");
+}
+
+TEST(MeshCodec, DecodeRoutingAckAndNak) {
+    // 1. ACK
+    meshtastic::FromRadio fr_ack;
+    auto* pkt_ack = fr_ack.mutable_packet();
+    pkt_ack->set_from(0x1111);
+    pkt_ack->set_id(0x5555);
+    auto* dec_ack = pkt_ack->mutable_decoded();
+    dec_ack->set_portnum(meshtastic::PortNum::ROUTING_APP);
+    dec_ack->set_request_id(0x4444);
+    meshtastic::Routing r_ack;
+    r_ack.set_error_reason(meshtastic::Routing_Error_NONE);
+    dec_ack->set_payload(r_ack.SerializeAsString());
+
+    uint32_t config_id = 0;
+    auto ev_ack = MeshCodec::decode_from_radio(fr_ack.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev_ack.has_value());
+    auto* a = std::get_if<EvAckReceived>(&*ev_ack);
+    ASSERT_NE(a, nullptr);
+    EXPECT_TRUE(a->success);
+    EXPECT_EQ(a->packet_id, 0x4444u);
+    EXPECT_EQ(a->from_node, 0x1111u);
+
+    // 2. NAK with NO_ROUTE
+    meshtastic::FromRadio fr_nak;
+    auto* pkt_nak = fr_nak.mutable_packet();
+    pkt_nak->set_from(0x1111);
+    pkt_nak->set_id(0x6666);
+    auto* dec_nak = pkt_nak->mutable_decoded();
+    dec_nak->set_portnum(meshtastic::PortNum::ROUTING_APP);
+    meshtastic::Routing r_nak;
+    r_nak.set_error_reason(meshtastic::Routing_Error_NO_ROUTE);
+    dec_nak->set_payload(r_nak.SerializeAsString());
+
+    auto ev_nak = MeshCodec::decode_from_radio(fr_nak.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev_nak.has_value());
+    auto* nak = std::get_if<EvAckReceived>(&*ev_nak);
+    ASSERT_NE(nak, nullptr);
+    EXPECT_FALSE(nak->success);
+    EXPECT_EQ(nak->error_reason, "NO_ROUTE");
+}
+
+TEST(MeshCodec, DecodeTelemetryPacket) {
+    meshtastic::FromRadio fr;
+    auto* pkt = fr.mutable_packet();
+    pkt->set_from(0xCAFE);
+    pkt->set_rx_time(1705000000);
+    pkt->set_rx_snr(10.5f);
+    pkt->set_hop_start(3);
+    pkt->set_hop_limit(1);
+
+    meshtastic::Telemetry t;
+    t.mutable_device_metrics()->set_battery_level(95);
+    t.mutable_device_metrics()->set_voltage(4.18f);
+    t.mutable_device_metrics()->set_channel_utilization(12.5f);
+    pkt->mutable_decoded()->set_portnum(meshtastic::PortNum::TELEMETRY_APP);
+    pkt->mutable_decoded()->set_payload(t.SerializeAsString());
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* upd = std::get_if<EvNodeUpdated>(&*ev);
+    ASSERT_NE(upd, nullptr);
+    EXPECT_EQ(upd->node.node_num, 0xCAFEu);
+    ASSERT_TRUE(upd->node.battery_level.has_value());
+    EXPECT_EQ(*upd->node.battery_level, 95u);
+    EXPECT_FLOAT_EQ(upd->node.voltage.value(), 4.18f);
+    EXPECT_FLOAT_EQ(upd->node.channel_util.value(), 12.5f);
+    EXPECT_FLOAT_EQ(upd->node.snr.value(), 10.5f);
+    ASSERT_TRUE(upd->node.hops_away.has_value());
+    EXPECT_EQ(*upd->node.hops_away, 2u); // 3 - 1
+    EXPECT_EQ(upd->node.last_heard.value(), 1705000000u);
+}
+
+TEST(MeshCodec, FromRadioSummaryVariants) {
+    meshtastic::FromRadio fr;
+    fr.mutable_my_info()->set_my_node_num(0x1234abcd);
+    EXPECT_NE(MeshCodec::from_radio_summary(fr.SerializeAsString()).find("MyInfo"), std::string::npos);
+
+    fr.Clear();
+    fr.mutable_node_info()->set_num(0x11223344);
+    EXPECT_NE(MeshCodec::from_radio_summary(fr.SerializeAsString()).find("NodeInfo"), std::string::npos);
+
+    fr.Clear();
+    fr.mutable_channel()->set_index(2);
+    fr.mutable_channel()->mutable_settings()->set_name("Ch2");
+    EXPECT_NE(MeshCodec::from_radio_summary(fr.SerializeAsString()).find("Channel idx=2"), std::string::npos);
+
+    fr.Clear();
+    fr.mutable_metadata()->set_firmware_version("2.5.0");
+    EXPECT_NE(MeshCodec::from_radio_summary(fr.SerializeAsString()).find("Metadata fw=2.5.0"), std::string::npos);
+
+    fr.Clear();
+    fr.set_config_complete_id(999);
+    EXPECT_NE(MeshCodec::from_radio_summary(fr.SerializeAsString()).find("ConfigComplete id=999"), std::string::npos);
+
+    fr.Clear();
+    fr.mutable_log_record()->set_message("log text");
+    EXPECT_NE(MeshCodec::from_radio_summary(fr.SerializeAsString()).find("LogRecord"), std::string::npos);
+}
+

@@ -3,12 +3,11 @@
 #include <cstdlib>
 #include <ctime>
 #include <cstring>
+#include <filesystem>
+#include <random>
 #include <sstream>
 #include <random>
 #include <sys/stat.h>
-#ifdef _WIN32
-#include <direct.h>
-#endif
 
 namespace meshcli {
 
@@ -46,10 +45,9 @@ bool parse_device_spec(const std::string& spec, BleDeviceSpec& out) {
         }
         return !out.name.empty();
     } else if (type == "addr") {
-        auto colon2 = rest.find(':');
-        if (colon2 != std::string::npos) {
-            out.address = rest.substr(0, colon2);
-            out.pin = rest.substr(colon2 + 1);
+        if (rest.size() > 17 && rest[17] == ':') {
+            out.address = rest.substr(0, 17);
+            out.pin = rest.substr(18);
         } else {
             out.address = rest;
         }
@@ -209,11 +207,9 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
 
 void finalize_paths(AppConfig& c) {
     std::string dir = default_data_dir();
-    #ifdef _WIN32
-    ::_mkdir(dir.c_str());
-#else
-    ::mkdir(dir.c_str(), 0755);
-#endif
+    try {
+        std::filesystem::create_directories(dir);
+    } catch (...) {}
     if (c.db_path.empty())  c.db_path  = dir + "/mesh.db";
     if (c.log_path.empty()) c.log_path = dir + "/fmesh-cli.log";
     if (c.history_path.empty()) c.history_path = dir + "/history";
@@ -224,17 +220,24 @@ void finalize_paths(AppConfig& c) {
 }
 
 void load_config(AppConfig& c) {
+    auto generate_password = []() {
+        const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
+        std::string pwd;
+        pwd.reserve(16);
+        for (int i = 0; i < 16; ++i) {
+            pwd += charset[dist(gen)];
+        }
+        return pwd;
+    };
+
     if (c.config_path.empty()) return;
     FILE* f = fopen(c.config_path.c_str(), "r");
     if (!f) {
         // First run, generate a random password
-        const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        std::random_device rd;
-        std::uniform_int_distribution<int> dist(0, sizeof(charset) - 2);
-        c.server_password.clear();
-        for (int i = 0; i < 16; ++i) {
-            c.server_password += charset[dist(rd)];
-        }
+        c.server_password = generate_password();
         save_config(c);
         return;
     }
@@ -267,12 +270,7 @@ void load_config(AppConfig& c) {
     
     // Ensure there is a password
     if (c.server_password.empty()) {
-        const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-        std::random_device rd;
-        std::uniform_int_distribution<int> dist(0, sizeof(charset) - 2);
-        for (int i = 0; i < 16; ++i) {
-            c.server_password += charset[dist(rd)];
-        }
+        c.server_password = generate_password();
         save_config(c);
     }
 }

@@ -19,24 +19,28 @@ TEST(MeshSync, MultiNodePropagation) {
     // Node B (Hub 2): StreamServer on 28602, Client to A
     // Node C (Client 1): Client to B
 
+    static std::atomic<int> base_port{28600};
+    int port_a = base_port.fetch_add(2);
+    int port_b = port_a + 1;
+
     // 1. Setup Node A
     MeshService node_a;
     EXPECT_TRUE(node_a.open_database(":memory:"));
-    node_a.start_stream_server(28601, "admin", "admin");
+    node_a.start_stream_server(port_a, "admin", "admin");
 
     std::this_thread::sleep_for(100ms);
 
     // 2. Setup Node B
     MeshService node_b;
     EXPECT_TRUE(node_b.open_database(":memory:"));
-    node_b.start_stream_server(28602, "admin", "admin");
+    node_b.start_stream_server(port_b, "admin", "admin");
     
     ConcurrentQueue<MeshEvent> queue_b;
     EventFd wake_b;
     node_b.set_event_sink(&queue_b, &wake_b);
 
     BleDeviceSpec spec_b_to_a;
-    spec_b_to_a.mesh_host = "127.0.0.1:28601";
+    spec_b_to_a.mesh_host = "127.0.0.1:" + std::to_string(port_a);
     spec_b_to_a.mesh_user = "admin";
     spec_b_to_a.mesh_password = "admin";
     std::string device_b_to_a = node_b.connect_device(spec_b_to_a, false);
@@ -53,7 +57,7 @@ TEST(MeshSync, MultiNodePropagation) {
     node_c.set_event_sink(&queue_c, &wake_c);
 
     BleDeviceSpec spec_c_to_b;
-    spec_c_to_b.mesh_host = "127.0.0.1:28602";
+    spec_c_to_b.mesh_host = "127.0.0.1:" + std::to_string(port_b);
     spec_c_to_b.mesh_user = "admin";
     spec_c_to_b.mesh_password = "admin";
     std::string device_c_to_b = node_c.connect_device(spec_c_to_b, false);
@@ -115,4 +119,5 @@ TEST(MeshSync, MultiNodePropagation) {
     node_b.stop_stream_server();
     node_b.disconnect_all();
     node_a.stop_stream_server();
+    node_a.disconnect_all();
 }

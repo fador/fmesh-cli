@@ -73,6 +73,7 @@ int run_app(int argc, char** argv, MeshService& service) {
                << " pair=" << cfg.pair;
 
     int connected = 0;
+    std::thread connector;
     if (cfg.headless || cfg.list_only) {
         for (const auto& spec : specs) {
             LOG_INFO() << "connecting to " << spec.name
@@ -105,12 +106,11 @@ int run_app(int argc, char** argv, MeshService& service) {
         }
     } else {
         // TUI mode: connect in the background so the UI spawns immediately
-        std::thread connector([&service, specs, pair = cfg.pair]() {
+        connector = std::thread([&service, specs, pair = cfg.pair]() {
             for (const auto& spec : specs) {
                 service.connect_device(spec, pair);
             }
         });
-        connector.detach();
     }
 
     if (cfg.list_only) {
@@ -185,6 +185,9 @@ int run_app(int argc, char** argv, MeshService& service) {
         service.stop_stream_server();
     }
     service.disconnect_all();
+    if (connector.joinable()) {
+        connector.join();
+    }
     return rc;
 }
 

@@ -52,12 +52,18 @@ public:
         std::vector<std::string> lines;
         bool quit = false;
     };
+    std::string theme_set_;
+    bool server_toggled_ = false;
+
     Capture exec(const std::string& line) {
         Capture c;
         AppConfig dummy_config;
         CommandDispatcher disp(svc_, wm_,
             [&](const std::string& s, int) { c.lines.push_back(s); },
-            active_dev_, dummy_config);
+            active_dev_, dummy_config,
+            nullptr,
+            [&](const std::string& t) { theme_set_ = t; return t == "dark" || t == "classic"; },
+            [&](bool on) { server_toggled_ = on; });
         auto res = disp.execute(line);
         c.quit = res.quit;
         return c;
@@ -149,11 +155,174 @@ TEST_F(CommandTest, MeChannelOk) {
     exec("/me waves");  // should not crash
 }
 
-// -- /msg --------------------------------------------------------------
-
 TEST_F(CommandTest, MsgUsage) {
     auto c = exec("/msg");
     std::string all;
     for (auto& l : c.lines) all += l;
     EXPECT_NE(all.find("Usage"), std::string::npos);
 }
+
+// -- /topic ------------------------------------------------------------
+
+TEST_F(CommandTest, TopicOnStatusWindow) {
+    wm_.select(1);
+    auto c = exec("/topic");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("No channel selected"), std::string::npos);
+}
+
+TEST_F(CommandTest, TopicOnChannelWindow) {
+    wm_.ensure_channel("test_device", 0, "EdgeFastLow");
+    wm_.select(2);
+    auto c = exec("/topic");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("EdgeFastLow"), std::string::npos);
+}
+
+// -- /stats ------------------------------------------------------------
+
+TEST_F(CommandTest, StatsOutputsInfo) {
+    auto c = exec("/stats");
+    EXPECT_FALSE(c.lines.empty());
+}
+
+// -- /device -----------------------------------------------------------
+
+TEST_F(CommandTest, DeviceListAndSwitch) {
+    // List devices with no args
+    auto c = exec("/device");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("test_device"), std::string::npos);
+
+    // Switch to existing device
+    auto c2 = exec("/device test_device");
+    EXPECT_EQ(active_dev_, "test_device");
+
+    // Unknown device error
+    auto c3 = exec("/device nonexistent_device");
+    std::string all3;
+    for (auto& l : c3.lines) all3 += l;
+    EXPECT_NE(all3.find("No device matched"), std::string::npos);
+}
+
+// -- /disconnect -------------------------------------------------------
+
+TEST_F(CommandTest, DisconnectCommands) {
+    // With no args, lists connected devices
+    auto c = exec("/disconnect");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("test_device"), std::string::npos);
+
+    // Unknown device
+    auto c2 = exec("/disconnect bogus");
+    std::string all2;
+    for (auto& l : c2.lines) all2 += l;
+    EXPECT_NE(all2.find("No device matched"), std::string::npos);
+
+    // Valid disconnect
+    auto c3 = exec("/disconnect test_device");
+    std::string all3;
+    for (auto& l : c3.lines) all3 += l;
+    EXPECT_NE(all3.find("Disconnected"), std::string::npos);
+    EXPECT_FALSE(svc_.has_devices());
+}
+
+// -- /connect ----------------------------------------------------------
+
+TEST_F(CommandTest, ConnectCommands) {
+    // Usage on empty args
+    auto c = exec("/connect");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("Usage"), std::string::npos);
+
+    // Invalid spec
+    auto c2 = exec("/connect invalid_spec");
+    std::string all2;
+    for (auto& l : c2.lines) all2 += l;
+    EXPECT_NE(all2.find("Invalid spec"), std::string::npos);
+}
+
+// -- /theme ------------------------------------------------------------
+
+TEST_F(CommandTest, ThemeCommands) {
+    // List themes
+    auto c = exec("/theme");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("Available themes"), std::string::npos);
+
+    // Switch theme
+    exec("/theme dark");
+    EXPECT_EQ(theme_set_, "dark");
+
+    // Invalid theme
+    auto c2 = exec("/theme bogus_theme");
+    std::string all2;
+    for (auto& l : c2.lines) all2 += l;
+    EXPECT_NE(all2.find("Theme not found"), std::string::npos);
+}
+
+// -- /server -----------------------------------------------------------
+
+TEST_F(CommandTest, ServerCommands) {
+    exec("/server on");
+    EXPECT_TRUE(server_toggled_);
+
+    exec("/server off");
+    EXPECT_FALSE(server_toggled_);
+}
+
+// -- /config -----------------------------------------------------------
+
+TEST_F(CommandTest, ConfigCommands) {
+    // Without data
+    auto c = exec("/config");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("no config data received yet"), std::string::npos);
+
+    // Filter section
+    auto c2 = exec("/config lora");
+    EXPECT_FALSE(c2.lines.empty());
+}
+
+// -- /window -----------------------------------------------------------
+
+TEST_F(CommandTest, WindowSwitching) {
+    wm_.ensure_channel("test_device", 0, "EdgeFastLow");
+    EXPECT_EQ(wm_.current_index(), 1);
+
+    // Switch to window 2
+    exec("/window 2");
+    EXPECT_EQ(wm_.current_index(), 2);
+
+    // Non-integer window
+    auto c = exec("/window invalid_num");
+    std::string all;
+    for (auto& l : c.lines) all += l;
+    EXPECT_NE(all.find("Invalid window number"), std::string::npos);
+
+    // Out of bounds window index does not switch
+    exec("/window 99");
+    EXPECT_EQ(wm_.current_index(), 2);
+}
+
+// -- /clear ------------------------------------------------------------
+
+TEST_F(CommandTest, ClearCommand) {
+    wm_.ensure_channel("test_device", 0, "EdgeFastLow");
+    wm_.select(2);
+    auto* win = wm_.current_window();
+    ASSERT_NE(win, nullptr);
+    win->append_line(Line{"hello world", 0, false, 0, 0});
+    EXPECT_FALSE(win->lines().empty());
+
+    exec("/clear");
+    EXPECT_TRUE(win->lines().empty());
+}
+

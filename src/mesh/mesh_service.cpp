@@ -43,7 +43,11 @@ MeshService::MeshService() {
     sync_manager_ = std::make_unique<DbSyncManager>(db_, *this);
 }
 
-MeshService::~MeshService() { disconnect_all(); }
+MeshService::~MeshService() {
+    stop_stream_server();
+    disconnect_all();
+    set_event_sink(nullptr, nullptr);
+}
 
 void MeshService::set_event_sink(ConcurrentQueue<MeshEvent>* q, EventFd* wake) {
     ui_queue_ = q;
@@ -212,12 +216,10 @@ bool MeshService::disconnect_device(const std::string& device_id) {
         rt = it->second;
         devices_.erase(it);
     }
-#ifndef _WIN32
     if (rt->client) {
         rt->client->send_to_radio(MeshCodec::encode_disconnect());
         rt->client->stop();
     }
-#endif
     if (rt->stream) {
         rt->stream->send_to_radio(MeshCodec::encode_disconnect());
         rt->stream->stop();
@@ -233,12 +235,10 @@ void MeshService::disconnect_all() {
         tmp.swap(devices_);
     }
     for (auto& [_, rt] : tmp) {
-#ifndef _WIN32
         if (rt->client) {
             rt->client->send_to_radio(MeshCodec::encode_disconnect());
             rt->client->stop();
         }
-#endif
         if (rt->stream) {
             rt->stream->send_to_radio(MeshCodec::encode_disconnect());
             rt->stream->stop();
@@ -258,9 +258,7 @@ void MeshService::start_stream_server(int port, const std::string& user, const s
             auto bytes = std::get<EvSendRawToRadio>(ev).bytes;
             std::lock_guard<std::mutex> lock(devices_mu_);
             for (auto& [_, rt] : devices_) {
-#ifndef _WIN32
                 if (rt->client && rt->client->is_connected()) rt->client->send_to_radio(bytes);
-#endif
                 if (rt->stream && rt->stream->is_connected()) rt->stream->send_to_radio(bytes);
             }
         } else if (std::holds_alternative<EvDbSyncPayload>(ev)) {
@@ -318,12 +316,8 @@ uint32_t MeshService::send_text(const std::string& device_id,
         if (it == devices_.end()) return 0;
         rt = it->second;
     }
-#ifndef _WIN32
     if (!is_virtual && !rt->client && !rt->stream) return 0;
     if (!is_virtual && rt->client && !rt->client->is_connected()) return 0;
-#else
-    if (!is_virtual && !rt->stream) return 0;
-#endif
     if (rt->stream && !rt->stream->is_connected()) return 0;
 
     uint32_t pid = next_packet_id();
@@ -341,9 +335,7 @@ uint32_t MeshService::send_text(const std::string& device_id,
             sync_manager_->send_raw_to_device(virtual_target, bytes);
         }
     } else {
-#ifndef _WIN32
         if (rt->client && !rt->client->send_to_radio(bytes)) return 0;
-#endif
         if (rt->stream && !rt->stream->send_to_radio(bytes)) return 0;
     }
 
@@ -551,9 +543,7 @@ void MeshService::send_raw_to_physical(const std::string& target_original_id, co
         if (it != devices_.end()) rt = it->second;
     }
     if (rt) {
-#ifndef _WIN32
         if (rt->client && rt->client->is_connected()) rt->client->send_to_radio(bytes);
-#endif
         // If it's a physical device connected via a local stream? Well, local stream acts like a client.
         if (rt->stream && rt->stream->is_connected()) rt->stream->send_to_radio(bytes);
     }
@@ -629,8 +619,30 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
                 sync_manager_->push_location(loc);
             }
         } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
-            rt->db->upsert_node(e.node);
-            db_.upsert_node(e.device, e.node);
+            auto old = rt->db->get(e.node.node_num);
+            Node merged = e.node;
+            if (old) {
+                if (merged.long_name.empty()) merged.long_name = old->long_name;
+                if (merged.short_name.empty()) merged.short_name = old->short_name;
+                if (merged.hw_model.empty()) merged.hw_model = old->hw_model;
+                if (merged.role.empty()) merged.role = old->role;
+                if (!merged.battery_level.has_value()) merged.battery_level = old->battery_level;
+                if (!merged.voltage.has_value()) merged.voltage = old->voltage;
+                if (!merged.channel_util.has_value()) merged.channel_util = old->channel_util;
+                if (!merged.air_util_tx.has_value()) merged.air_util_tx = old->air_util_tx;
+                if (!merged.snr.has_value()) merged.snr = old->snr;
+                if (!merged.hops_away.has_value()) merged.hops_away = old->hops_away;
+                if (!merged.last_heard.has_value()) merged.last_heard = old->last_heard;
+                if (!merged.latitude.has_value()) merged.latitude = old->latitude;
+                if (!merged.longitude.has_value()) merged.longitude = old->longitude;
+                if (!merged.altitude.has_value()) merged.altitude = old->altitude;
+                if (!merged.has_public_key && old->has_public_key) {
+                    merged.has_public_key = true;
+                    merged.public_key = old->public_key;
+                }
+            }
+            rt->db->upsert_node(merged);
+            db_.upsert_node(e.device, merged);
             if (e.node.latitude.has_value() || e.node.longitude.has_value()) {
                 uint64_t ts = e.node.last_heard.value_or(0);
                 if (ts == 0) ts = static_cast<uint64_t>(std::time(nullptr));

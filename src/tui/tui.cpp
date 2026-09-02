@@ -1307,7 +1307,7 @@ int TuiApp::run() {
                 // Alt+key handling
 #ifdef _WIN32
                 if (ch >= ALT_0 && ch <= ALT_9) {
-                    int idx = (ch == ALT_0) ? 9 : (ch - ALT_0 - 1);
+                    int idx = (ch == ALT_0) ? 10 : (ch - ALT_0);
                     wm_.select(idx);
                     need_redraw_ = true;
                     ch = getch();
@@ -1315,7 +1315,7 @@ int TuiApp::run() {
                 }
 #endif
                 if (ch >= KEY_F(1) && ch <= KEY_F(12)) {
-                    wm_.select(ch - KEY_F(1));
+                    wm_.select(ch - KEY_F(1) + 1);
                     need_redraw_ = true;
                     ch = getch();
                     continue;
@@ -1339,7 +1339,7 @@ int TuiApp::run() {
                     nodelay(stdscr, TRUE);
                     if (ch2 != ERR) {
                         if (ch2 >= '0' && ch2 <= '9') {
-                            int idx = (ch2 == '0') ? 9 : (ch2 - '0' - 1);
+                            int idx = (ch2 == '0') ? 10 : (ch2 - '0');
                             wm_.select(idx);
                             need_redraw_ = true;
                             ch = getch();
