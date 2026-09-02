@@ -148,6 +148,17 @@ struct EvDbSyncPayload {
     std::string payload; // JSON payload
 };
 
+// Traceroute response received from the mesh
+struct EvTracerouteReceived {
+    DeviceId device;
+    uint32_t from_node = 0;
+    uint32_t to_node = 0;
+    std::vector<uint32_t> route;
+    std::vector<float> snr_towards;
+    std::vector<uint32_t> route_back;
+    std::vector<float> snr_back;
+};
+
 using MeshEvent = std::variant<
     EvConnected,
     EvDisconnected,
@@ -167,7 +178,8 @@ using MeshEvent = std::variant<
     EvBleDeviceFound,
     EvDbSyncPayload,
     EvConfigBytes,
-    EvPositionReceived
+    EvPositionReceived,
+    EvTracerouteReceived
 >;
 
 } // namespace meshcli

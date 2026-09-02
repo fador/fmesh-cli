@@ -794,8 +794,13 @@ void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
 
 void TuiApp::render_popup() {
     const Node& n = popup_node_;
-    int popup_w = 44;
-    int popup_h = 12;
+    int popup_w = 46;
+    int extra = 0;
+    if (n.voltage && !n.battery_level) ++extra;
+    if (n.temperature) ++extra;
+    if (n.relative_humidity) ++extra;
+    if (n.barometric_pressure) ++extra;
+    int popup_h = std::min(LINES - 2, 12 + extra);
     int start_y = std::max(0, (LINES - popup_h) / 2);
     int start_x = std::max(0, (COLS - popup_w) / 2);
 
@@ -834,7 +839,32 @@ void TuiApp::render_popup() {
     draw_line("ID:", sid + "  #" + std::to_string(n.node_num));
 
     if (n.battery_level) {
-        draw_line("Battery:", std::to_string(*n.battery_level) + "%");
+        std::string bat = std::to_string(*n.battery_level) + "%";
+        if (n.voltage) {
+            char vbuf[16];
+            std::snprintf(vbuf, sizeof(vbuf), " (%.2fV)", *n.voltage);
+            bat += vbuf;
+        }
+        draw_line("Battery:", bat);
+    } else if (n.voltage) {
+        char vbuf[16];
+        std::snprintf(vbuf, sizeof(vbuf), "%.2f V", *n.voltage);
+        draw_line("Voltage:", std::string(vbuf));
+    }
+    if (n.temperature) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.1f C", *n.temperature);
+        draw_line("Temp:", std::string(buf));
+    }
+    if (n.relative_humidity) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.1f %%", *n.relative_humidity);
+        draw_line("Humidity:", std::string(buf));
+    }
+    if (n.barometric_pressure) {
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%.1f hPa", *n.barometric_pressure);
+        draw_line("Pressure:", std::string(buf));
     }
     if (n.last_heard) {
         std::time_t t = static_cast<std::time_t>(*n.last_heard);
@@ -872,7 +902,7 @@ void TuiApp::render_popup() {
     // Separator
     ++row;
     for (int x = 0; x < popup_w; ++x)
-        mvaddch(start_y + 7, start_x + x, ' ');
+        mvaddch(row - 1, start_x + x, ' ');
 
     // Options
     std::string opt_dm = " Send DM ";
@@ -1610,6 +1640,49 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                     entry.rssi = e.rssi;
                     scan_entries_.push_back(std::move(entry));
                 }
+            }
+        } else if constexpr (std::is_same_v<T, EvTracerouteReceived>) {
+            std::string header = "*** Traceroute response from " + node_num_to_id(e.from_node);
+            const NodeDb* db = service_.db_for(e.device);
+            if (db) {
+                if (auto fn = db->get(e.from_node)) {
+                    if (!fn->long_name.empty()) header += " (" + fn->long_name + ")";
+                }
+            }
+            wm_.append_status(header, tui_color::INFO);
+
+            auto resolve_name = [&](uint32_t num) -> std::string {
+                if (db) {
+                    if (auto node = db->get(num)) {
+                        if (!node->short_name.empty()) return node->short_name;
+                        if (!node->long_name.empty()) return node->long_name;
+                    }
+                }
+                return node_num_to_id(num);
+            };
+
+            std::string fwd = "  Route towards: " + resolve_name(e.to_node);
+            for (size_t i = 0; i < e.route.size(); ++i) {
+                fwd += " --> " + resolve_name(e.route[i]);
+                if (i < e.snr_towards.size()) {
+                    char sbuf[16];
+                    std::snprintf(sbuf, sizeof(sbuf), " (%.1fdB)", e.snr_towards[i]);
+                    fwd += sbuf;
+                }
+            }
+            wm_.append_status(fwd, tui_color::CHANNEL);
+
+            if (!e.route_back.empty()) {
+                std::string back = "  Route back: " + resolve_name(e.from_node);
+                for (size_t i = 0; i < e.route_back.size(); ++i) {
+                    back += " --> " + resolve_name(e.route_back[i]);
+                    if (i < e.snr_back.size()) {
+                        char sbuf[16];
+                        std::snprintf(sbuf, sizeof(sbuf), " (%.1fdB)", e.snr_back[i]);
+                        back += sbuf;
+                    }
+                }
+                wm_.append_status(back, tui_color::CHANNEL);
             }
         }
     }, ev);

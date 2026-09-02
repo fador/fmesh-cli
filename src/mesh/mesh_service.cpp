@@ -386,6 +386,56 @@ uint32_t MeshService::send_text(const std::string& device_id,
     return pid;
 }
 
+uint32_t MeshService::send_traceroute(const std::string& device_id,
+                                     uint32_t to_node,
+                                     uint32_t channel_idx,
+                                     uint32_t hop_limit) {
+    DeviceRuntime* rt = nullptr;
+    bool is_virtual = false;
+    std::string virtual_target;
+    {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        auto vit = virtual_devices_.find(device_id);
+        if (vit != virtual_devices_.end()) {
+            is_virtual = true;
+            virtual_target = device_id;
+            auto it = devices_.find(vit->second.stream_id);
+            if (it == devices_.end()) return 0;
+            rt = it->second.get();
+        } else {
+            auto it = devices_.find(device_id);
+            if (it == devices_.end()) return 0;
+            rt = it->second.get();
+        }
+    }
+
+    if (!is_virtual && rt->client && !rt->client->is_connected()) return 0;
+    if (rt->stream && !rt->stream->is_connected()) return 0;
+
+    uint32_t pid = next_packet_id();
+    uint32_t from_node = rt->my_node_num;
+    if (is_virtual) {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        auto vit = virtual_devices_.find(device_id);
+        if (vit != virtual_devices_.end()) {
+            from_node = vit->second.node_num;
+        }
+    }
+
+    auto bytes = MeshCodec::encode_traceroute_packet(pid, from_node, to_node, channel_idx, hop_limit);
+
+    if (is_virtual) {
+        if (sync_manager_) {
+            sync_manager_->send_raw_to_device(virtual_target, bytes);
+        }
+    } else {
+        if (rt->client && !rt->client->send_to_radio(bytes)) return 0;
+        if (rt->stream && !rt->stream->send_to_radio(bytes)) return 0;
+    }
+
+    return pid;
+}
+
 bool MeshService::set_config(const std::string& device_id, const std::string& key, const std::string& value) {
     std::lock_guard<std::mutex> lock(devices_mu_);
     
@@ -630,6 +680,15 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
                 if (!merged.voltage.has_value()) merged.voltage = old->voltage;
                 if (!merged.channel_util.has_value()) merged.channel_util = old->channel_util;
                 if (!merged.air_util_tx.has_value()) merged.air_util_tx = old->air_util_tx;
+                if (!merged.uptime_seconds.has_value()) merged.uptime_seconds = old->uptime_seconds;
+                if (!merged.temperature.has_value()) merged.temperature = old->temperature;
+                if (!merged.relative_humidity.has_value()) merged.relative_humidity = old->relative_humidity;
+                if (!merged.barometric_pressure.has_value()) merged.barometric_pressure = old->barometric_pressure;
+                if (!merged.gas_resistance.has_value()) merged.gas_resistance = old->gas_resistance;
+                if (!merged.iaq.has_value()) merged.iaq = old->iaq;
+                if (!merged.pm25.has_value()) merged.pm25 = old->pm25;
+                if (!merged.co2.has_value()) merged.co2 = old->co2;
+                if (!merged.current.has_value()) merged.current = old->current;
                 if (!merged.snr.has_value()) merged.snr = old->snr;
                 if (!merged.hops_away.has_value()) merged.hops_away = old->hops_away;
                 if (!merged.last_heard.has_value()) merged.last_heard = old->last_heard;

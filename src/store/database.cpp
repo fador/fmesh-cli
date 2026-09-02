@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS nodes(
     snr         REAL,
     hops_away   INTEGER,
     last_heard  INTEGER,
+    temperature REAL,
+    relative_humidity REAL,
+    barometric_pressure REAL,
+    channel_util REAL,
+    air_util_tx REAL,
+    uptime_seconds INTEGER,
     PRIMARY KEY (device, node_num)
 );
 CREATE TABLE IF NOT EXISTS channels(
@@ -59,7 +65,7 @@ CREATE TABLE IF NOT EXISTS location_history(
     altitude    INTEGER,
     ts          INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_location_history_node
+CREATE INDEX IF NOT EXISTS idx_location_device_node
     ON location_history(device, node_num, ts);
 )SQL";
 
@@ -72,6 +78,7 @@ Database::Database() = default;
 Database::~Database() { close(); }
 
 bool Database::open(const std::string& path) {
+    if (db_) close();
     if (sqlite3_open(path.c_str(), &db_) != SQLITE_OK) {
         LOG_ERROR() << "cannot open db " << path << ": " << sqlite3_errmsg(db_);
         sqlite3_close(db_);
@@ -84,6 +91,14 @@ bool Database::open(const std::string& path) {
         close();
         return false;
     }
+    // Migration: add new telemetry columns to existing nodes tables if absent
+    sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN temperature REAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN relative_humidity REAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN barometric_pressure REAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN channel_util REAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN air_util_tx REAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER;", nullptr, nullptr, nullptr);
+
     LOG_INFO() << "db opened: " << path;
     return true;
 }
@@ -108,13 +123,17 @@ void Database::upsert_node(const std::string& device, const Node& n) {
     if (!db_) return;
     const char* sql =
         "INSERT INTO nodes(device,node_num,node_id,long_name,short_name,hw_model,role,"
-        "battery,voltage,snr,hops_away,last_heard) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+        "battery,voltage,snr,hops_away,last_heard,temperature,relative_humidity,barometric_pressure,"
+        "channel_util,air_util_tx,uptime_seconds) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(device,node_num) DO UPDATE SET "
         "node_id=excluded.node_id,long_name=excluded.long_name,"
         "short_name=excluded.short_name,hw_model=excluded.hw_model,role=excluded.role,"
         "battery=excluded.battery,voltage=excluded.voltage,snr=excluded.snr,"
-        "hops_away=excluded.hops_away,last_heard=excluded.last_heard";
+        "hops_away=excluded.hops_away,last_heard=excluded.last_heard,"
+        "temperature=excluded.temperature,relative_humidity=excluded.relative_humidity,"
+        "barometric_pressure=excluded.barometric_pressure,channel_util=excluded.channel_util,"
+        "air_util_tx=excluded.air_util_tx,uptime_seconds=excluded.uptime_seconds";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return;
     sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
@@ -125,10 +144,24 @@ void Database::upsert_node(const std::string& device, const Node& n) {
     sqlite3_bind_text(st, 6, n.hw_model.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 7, n.role.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int(st, 8, n.battery_level.value_or(-1));
-    sqlite3_bind_double(st, 9, n.voltage.value_or(0));
-    sqlite3_bind_double(st, 10, n.snr.value_or(0));
+    if (n.voltage) sqlite3_bind_double(st, 9, *n.voltage);
+    else sqlite3_bind_null(st, 9);
+    if (n.snr) sqlite3_bind_double(st, 10, *n.snr);
+    else sqlite3_bind_null(st, 10);
     sqlite3_bind_int(st, 11, n.hops_away.value_or(-1));
     sqlite3_bind_int64(st, 12, n.last_heard.value_or(0));
+    if (n.temperature) sqlite3_bind_double(st, 13, *n.temperature);
+    else sqlite3_bind_null(st, 13);
+    if (n.relative_humidity) sqlite3_bind_double(st, 14, *n.relative_humidity);
+    else sqlite3_bind_null(st, 14);
+    if (n.barometric_pressure) sqlite3_bind_double(st, 15, *n.barometric_pressure);
+    else sqlite3_bind_null(st, 15);
+    if (n.channel_util) sqlite3_bind_double(st, 16, *n.channel_util);
+    else sqlite3_bind_null(st, 16);
+    if (n.air_util_tx) sqlite3_bind_double(st, 17, *n.air_util_tx);
+    else sqlite3_bind_null(st, 17);
+    if (n.uptime_seconds) sqlite3_bind_int64(st, 18, *n.uptime_seconds);
+    else sqlite3_bind_null(st, 18);
     sqlite3_step(st);
     sqlite3_finalize(st);
     maybe_checkpoint();
@@ -155,7 +188,9 @@ void Database::upsert_channel(const std::string& device, const Channel& c) {
 void Database::load_nodes(const std::string& device, NodeDb& db) {
     if (!db_) return;
     const char* sql = "SELECT node_num,node_id,long_name,short_name,hw_model,role,"
-                      "battery,voltage,snr,hops_away,last_heard FROM nodes WHERE device=?";
+                      "battery,voltage,snr,hops_away,last_heard,"
+                      "temperature,relative_humidity,barometric_pressure,"
+                      "channel_util,air_util_tx,uptime_seconds FROM nodes WHERE device=?";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return;
     sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
@@ -176,6 +211,18 @@ void Database::load_nodes(const std::string& device, NodeDb& db) {
         int h = sqlite3_column_int(st, 9);
         if (h >= 0) n.hops_away = static_cast<uint32_t>(h);
         n.last_heard = static_cast<uint64_t>(sqlite3_column_int64(st, 10));
+        if (sqlite3_column_type(st, 11) != SQLITE_NULL)
+            n.temperature = static_cast<float>(sqlite3_column_double(st, 11));
+        if (sqlite3_column_type(st, 12) != SQLITE_NULL)
+            n.relative_humidity = static_cast<float>(sqlite3_column_double(st, 12));
+        if (sqlite3_column_type(st, 13) != SQLITE_NULL)
+            n.barometric_pressure = static_cast<float>(sqlite3_column_double(st, 13));
+        if (sqlite3_column_type(st, 14) != SQLITE_NULL)
+            n.channel_util = static_cast<float>(sqlite3_column_double(st, 14));
+        if (sqlite3_column_type(st, 15) != SQLITE_NULL)
+            n.air_util_tx = static_cast<float>(sqlite3_column_double(st, 15));
+        if (sqlite3_column_type(st, 16) != SQLITE_NULL)
+            n.uptime_seconds = static_cast<uint32_t>(sqlite3_column_int64(st, 16));
         db.upsert_node(std::move(n));
     }
     sqlite3_finalize(st);

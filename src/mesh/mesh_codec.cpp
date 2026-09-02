@@ -187,6 +187,32 @@ std::string MeshCodec::encode_text_packet(
     return tr.SerializeAsString();
 }
 
+std::string MeshCodec::encode_traceroute_packet(
+    uint32_t packet_id,
+    uint32_t from_node,
+    uint32_t to_node,
+    uint32_t channel_idx,
+    uint32_t hop_limit) {
+
+    meshtastic::RouteDiscovery rd;
+    ToRadio tr;
+    auto* pkt = tr.mutable_packet();
+    pkt->set_id(packet_id);
+    pkt->set_from(from_node);
+    pkt->set_to(to_node);
+    pkt->set_channel(channel_idx);
+    pkt->set_want_ack(true);
+    if (hop_limit > 0) pkt->set_hop_limit(hop_limit);
+    pkt->set_priority(meshtastic::MeshPacket_Priority_RELIABLE);
+
+    auto* data = pkt->mutable_decoded();
+    data->set_portnum(PortNum::TRACEROUTE_APP);
+    data->set_want_response(true);
+    data->set_payload(rd.SerializeAsString());
+
+    return tr.SerializeAsString();
+}
+
 // ---------------------------------------------------------------------------
 // helpers for decoding
 // ---------------------------------------------------------------------------
@@ -294,6 +320,19 @@ std::optional<MeshEvent> decode_packet(
         ev.rx_time = pkt.rx_time();
         return ev;
     }
+    if (d.portnum() == PortNum::TRACEROUTE_APP) {
+        meshtastic::RouteDiscovery rd;
+        if (!rd.ParseFromString(d.payload())) return std::nullopt;
+        EvTracerouteReceived ev;
+        ev.device = device;
+        ev.from_node = pkt.from();
+        ev.to_node = pkt.to();
+        for (auto n : rd.route()) ev.route.push_back(n);
+        for (auto s : rd.snr_towards()) ev.snr_towards.push_back(static_cast<float>(s) / 4.0f);
+        for (auto n : rd.route_back()) ev.route_back.push_back(n);
+        for (auto s : rd.snr_back()) ev.snr_back.push_back(static_cast<float>(s) / 4.0f);
+        return ev;
+    }
     if (d.portnum() == PortNum::TELEMETRY_APP) {
         meshtastic::Telemetry t;
         if (!t.ParseFromString(d.payload())) return std::nullopt;
@@ -313,6 +352,34 @@ std::optional<MeshEvent> decode_packet(
             if (m.voltage() != 0.0f) ev.node.voltage = m.voltage();
             if (m.channel_utilization() != 0.0f) ev.node.channel_util = m.channel_utilization();
             if (m.air_util_tx() != 0.0f) ev.node.air_util_tx = m.air_util_tx();
+            if (m.uptime_seconds() != 0) ev.node.uptime_seconds = m.uptime_seconds();
+        }
+        if (t.has_environment_metrics()) {
+            const auto& em = t.environment_metrics();
+            if (em.temperature() != 0.0f) ev.node.temperature = em.temperature();
+            if (em.relative_humidity() != 0.0f) ev.node.relative_humidity = em.relative_humidity();
+            if (em.barometric_pressure() != 0.0f) ev.node.barometric_pressure = em.barometric_pressure();
+            if (em.gas_resistance() != 0.0f) ev.node.gas_resistance = em.gas_resistance();
+            if (em.iaq() != 0) ev.node.iaq = em.iaq();
+            if (em.current() != 0.0f) ev.node.current = em.current();
+            if (em.voltage() != 0.0f && !ev.node.voltage.has_value()) ev.node.voltage = em.voltage();
+        }
+        if (t.has_air_quality_metrics()) {
+            const auto& aq = t.air_quality_metrics();
+            if (aq.pm25_standard() != 0) ev.node.pm25 = aq.pm25_standard();
+            else if (aq.pm25_environmental() != 0) ev.node.pm25 = aq.pm25_environmental();
+            if (aq.co2() != 0) ev.node.co2 = aq.co2();
+        }
+        if (t.has_power_metrics()) {
+            const auto& pm = t.power_metrics();
+            if (pm.ch1_current() != 0.0f) ev.node.current = pm.ch1_current();
+            if (pm.ch1_voltage() != 0.0f && !ev.node.voltage.has_value()) ev.node.voltage = pm.ch1_voltage();
+        }
+        if (t.has_local_stats()) {
+            const auto& ls = t.local_stats();
+            if (ls.uptime_seconds() != 0 && !ev.node.uptime_seconds.has_value()) ev.node.uptime_seconds = ls.uptime_seconds();
+            if (ls.channel_utilization() != 0.0f && !ev.node.channel_util.has_value()) ev.node.channel_util = ls.channel_utilization();
+            if (ls.air_util_tx() != 0.0f && !ev.node.air_util_tx.has_value()) ev.node.air_util_tx = ls.air_util_tx();
         }
         return ev;
     }

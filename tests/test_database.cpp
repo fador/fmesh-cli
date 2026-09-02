@@ -378,3 +378,48 @@ TEST_F(DatabaseTest, UnicodeAndSpecialCharacters) {
     EXPECT_EQ(recent[0].text, "📡 Meshtastic testing: 'quotes', \"double quotes\", emoji 🌲🎉");
 }
 
+TEST_F(DatabaseTest, UpsertAndLoadTelemetry) {
+    Node n;
+    n.node_num = 42;
+    n.long_name = "Weather Station";
+    n.short_name = "WX";
+    n.battery_level = 90;
+    n.voltage = 4.15f;
+    n.temperature = 23.5f;
+    n.relative_humidity = 55.0f;
+    n.barometric_pressure = 1013.25f;
+    n.channel_util = 0.08f;
+    n.air_util_tx = 0.02f;
+    n.uptime_seconds = 172800;
+
+    db_.upsert_node("dev1", n);
+
+    // Reopen DB to verify persistence on disk
+    db_.close();
+    ASSERT_TRUE(db_.open(db_path_));
+
+    NodeDb restored_db;
+    db_.load_nodes("dev1", restored_db);
+
+    auto loaded = restored_db.get(42);
+    ASSERT_TRUE(loaded.has_value());
+    EXPECT_EQ(loaded->long_name, "Weather Station");
+    EXPECT_EQ(loaded->short_name, "WX");
+    ASSERT_TRUE(loaded->battery_level.has_value());
+    EXPECT_EQ(*loaded->battery_level, 90u);
+    ASSERT_TRUE(loaded->voltage.has_value());
+    EXPECT_FLOAT_EQ(*loaded->voltage, 4.15f);
+    ASSERT_TRUE(loaded->temperature.has_value());
+    EXPECT_FLOAT_EQ(*loaded->temperature, 23.5f);
+    ASSERT_TRUE(loaded->relative_humidity.has_value());
+    EXPECT_FLOAT_EQ(*loaded->relative_humidity, 55.0f);
+    ASSERT_TRUE(loaded->barometric_pressure.has_value());
+    EXPECT_FLOAT_EQ(*loaded->barometric_pressure, 1013.25f);
+    ASSERT_TRUE(loaded->channel_util.has_value());
+    EXPECT_FLOAT_EQ(*loaded->channel_util, 0.08f);
+    ASSERT_TRUE(loaded->air_util_tx.has_value());
+    EXPECT_FLOAT_EQ(*loaded->air_util_tx, 0.02f);
+    ASSERT_TRUE(loaded->uptime_seconds.has_value());
+    EXPECT_EQ(*loaded->uptime_seconds, 172800u);
+}
+

@@ -392,3 +392,146 @@ TEST(MeshCodec, FromRadioSummaryVariants) {
     EXPECT_NE(MeshCodec::from_radio_summary(fr.SerializeAsString()).find("LogRecord"), std::string::npos);
 }
 
+TEST(MeshCodec, EncodeTraceroutePacket) {
+    auto bytes = MeshCodec::encode_traceroute_packet(101, 0x11112222, 0x33334444, 0, 5);
+    meshtastic::ToRadio tr;
+    ASSERT_TRUE(tr.ParseFromString(bytes));
+    ASSERT_TRUE(tr.has_packet());
+    const auto& pkt = tr.packet();
+    EXPECT_EQ(pkt.id(), 101u);
+    EXPECT_EQ(pkt.from(), 0x11112222u);
+    EXPECT_EQ(pkt.to(), 0x33334444u);
+    EXPECT_EQ(pkt.channel(), 0u);
+    EXPECT_TRUE(pkt.want_ack());
+    EXPECT_EQ(pkt.hop_limit(), 5u);
+    ASSERT_TRUE(pkt.has_decoded());
+    EXPECT_EQ(pkt.decoded().portnum(), meshtastic::PortNum::TRACEROUTE_APP);
+    EXPECT_TRUE(pkt.decoded().want_response());
+}
+
+TEST(MeshCodec, DecodeTraceroutePacket) {
+    meshtastic::RouteDiscovery rd;
+    rd.add_route(0x22223333);
+    rd.add_route(0x44445555);
+    rd.add_snr_towards(40); // 10.0 dB (scaled by 4)
+    rd.add_snr_towards(32); // 8.0 dB
+    rd.add_route_back(0x66667777);
+    rd.add_snr_back(48);    // 12.0 dB
+
+    meshtastic::FromRadio fr;
+    auto* pkt = fr.mutable_packet();
+    pkt->set_from(0x88889999);
+    pkt->set_to(0x11112222);
+    auto* d = pkt->mutable_decoded();
+    d->set_portnum(meshtastic::PortNum::TRACEROUTE_APP);
+    d->set_payload(rd.SerializeAsString());
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* tr = std::get_if<EvTracerouteReceived>(&*ev);
+    ASSERT_NE(tr, nullptr);
+    EXPECT_EQ(tr->device, "dev1");
+    EXPECT_EQ(tr->from_node, 0x88889999u);
+    EXPECT_EQ(tr->to_node, 0x11112222u);
+    ASSERT_EQ(tr->route.size(), 2u);
+    EXPECT_EQ(tr->route[0], 0x22223333u);
+    EXPECT_EQ(tr->route[1], 0x44445555u);
+    ASSERT_EQ(tr->snr_towards.size(), 2u);
+    EXPECT_FLOAT_EQ(tr->snr_towards[0], 10.0f);
+    EXPECT_FLOAT_EQ(tr->snr_towards[1], 8.0f);
+    ASSERT_EQ(tr->route_back.size(), 1u);
+    EXPECT_EQ(tr->route_back[0], 0x66667777u);
+    ASSERT_EQ(tr->snr_back.size(), 1u);
+    EXPECT_FLOAT_EQ(tr->snr_back[0], 12.0f);
+}
+
+TEST(MeshCodec, DecodeTelemetryEnvironment) {
+    meshtastic::Telemetry t;
+    t.set_time(1710000000);
+    auto* env = t.mutable_environment_metrics();
+    env->set_temperature(22.4f);
+    env->set_relative_humidity(48.5f);
+    env->set_barometric_pressure(1012.3f);
+    env->set_gas_resistance(45.2f);
+    env->set_iaq(35);
+    env->set_current(150.0f);
+
+    meshtastic::FromRadio fr;
+    auto* pkt = fr.mutable_packet();
+    pkt->set_from(0x12345678);
+    auto* d = pkt->mutable_decoded();
+    d->set_portnum(meshtastic::PortNum::TELEMETRY_APP);
+    d->set_payload(t.SerializeAsString());
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* upd = std::get_if<EvNodeUpdated>(&*ev);
+    ASSERT_NE(upd, nullptr);
+    EXPECT_EQ(upd->node.node_num, 0x12345678u);
+    ASSERT_TRUE(upd->node.temperature.has_value());
+    EXPECT_FLOAT_EQ(*upd->node.temperature, 22.4f);
+    ASSERT_TRUE(upd->node.relative_humidity.has_value());
+    EXPECT_FLOAT_EQ(*upd->node.relative_humidity, 48.5f);
+    ASSERT_TRUE(upd->node.barometric_pressure.has_value());
+    EXPECT_FLOAT_EQ(*upd->node.barometric_pressure, 1012.3f);
+    ASSERT_TRUE(upd->node.gas_resistance.has_value());
+    EXPECT_FLOAT_EQ(*upd->node.gas_resistance, 45.2f);
+    ASSERT_TRUE(upd->node.iaq.has_value());
+    EXPECT_EQ(*upd->node.iaq, 35u);
+    ASSERT_TRUE(upd->node.current.has_value());
+    EXPECT_FLOAT_EQ(*upd->node.current, 150.0f);
+}
+
+TEST(MeshCodec, DecodeTelemetryAirQualityAndPower) {
+    meshtastic::Telemetry t;
+    auto* aq = t.mutable_air_quality_metrics();
+    aq->set_pm25_standard(18);
+    aq->set_co2(550);
+
+    meshtastic::FromRadio fr;
+    auto* pkt = fr.mutable_packet();
+    pkt->set_from(0x87654321);
+    auto* d = pkt->mutable_decoded();
+    d->set_portnum(meshtastic::PortNum::TELEMETRY_APP);
+    d->set_payload(t.SerializeAsString());
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* upd = std::get_if<EvNodeUpdated>(&*ev);
+    ASSERT_NE(upd, nullptr);
+    ASSERT_TRUE(upd->node.pm25.has_value());
+    EXPECT_EQ(*upd->node.pm25, 18u);
+    ASSERT_TRUE(upd->node.co2.has_value());
+    EXPECT_EQ(*upd->node.co2, 550u);
+}
+
+TEST(MeshCodec, DecodeTelemetryDeviceUptime) {
+    meshtastic::Telemetry t;
+    auto* dev = t.mutable_device_metrics();
+    dev->set_battery_level(95);
+    dev->set_voltage(4.12f);
+    dev->set_uptime_seconds(86400);
+
+    meshtastic::FromRadio fr;
+    auto* pkt = fr.mutable_packet();
+    pkt->set_from(0xaabbccdd);
+    auto* d = pkt->mutable_decoded();
+    d->set_portnum(meshtastic::PortNum::TELEMETRY_APP);
+    d->set_payload(t.SerializeAsString());
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* upd = std::get_if<EvNodeUpdated>(&*ev);
+    ASSERT_NE(upd, nullptr);
+    ASSERT_TRUE(upd->node.battery_level.has_value());
+    EXPECT_EQ(*upd->node.battery_level, 95u);
+    ASSERT_TRUE(upd->node.voltage.has_value());
+    EXPECT_FLOAT_EQ(*upd->node.voltage, 4.12f);
+    ASSERT_TRUE(upd->node.uptime_seconds.has_value());
+    EXPECT_EQ(*upd->node.uptime_seconds, 86400u);
+}
+

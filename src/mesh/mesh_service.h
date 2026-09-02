@@ -94,6 +94,12 @@ public:
                        const std::string& text,
                        bool want_ack);
 
+    // Send a traceroute request packet. Returns the packet_id used (0 on failure).
+    uint32_t send_traceroute(const std::string& device_id,
+                             uint32_t to_node,
+                             uint32_t channel_idx = 0,
+                             uint32_t hop_limit = 0);
+
     // Modify a device configuration. Uses protobuf reflection to update the specified key.
     // e.g. set_config(device_id, "lora.tx_power", "27")
     bool set_config(const std::string& device_id, const std::string& key, const std::string& value);

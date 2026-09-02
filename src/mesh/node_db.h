@@ -38,6 +38,15 @@ struct Node {
     std::optional<float> voltage;
     std::optional<float> channel_util;
     std::optional<float> air_util_tx;
+    std::optional<uint32_t> uptime_seconds;
+    std::optional<float> temperature;           // deg C
+    std::optional<float> relative_humidity;     // %
+    std::optional<float> barometric_pressure;   // hPa
+    std::optional<float> gas_resistance;        // MOhm
+    std::optional<uint32_t> iaq;                // Indoor Air Quality (0-500)
+    std::optional<uint32_t> pm25;               // ug/m3
+    std::optional<uint32_t> co2;                // ppm
+    std::optional<float> current;               // mA
     std::optional<float> snr;
     std::optional<uint32_t> hops_away;
     std::optional<uint64_t> last_heard;      // unix seconds

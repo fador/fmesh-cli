@@ -48,6 +48,14 @@ public:
         uint32_t hop_limit,
         const std::vector<uint8_t>& pki_pubkey);
 
+    // Build a ToRadio{packet=MeshPacket{...}} carrying a RouteDiscovery traceroute request.
+    static std::string encode_traceroute_packet(
+        uint32_t packet_id,
+        uint32_t from_node,
+        uint32_t to_node,
+        uint32_t channel_idx,
+        uint32_t hop_limit = 0);
+
     // Modify a config value via protobuf reflection
     static bool set_config_value(
         const std::string& config_bytes,

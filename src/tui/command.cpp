@@ -89,6 +89,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "scan" || cmd == "s")      cmd_scan();
     else if (cmd == "theme")                  cmd_theme(tokens);
     else if (cmd == "server")                 cmd_server(tokens);
+    else if (cmd == "traceroute" || cmd == "trace" || cmd == "tr") cmd_traceroute(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -123,8 +124,9 @@ void CommandDispatcher::cmd_help() {
     status_("                              serial:<path>[:<baud>]", tui_color::INFO);
     status_("  /disconnect [id]      disconnect a device (no arg: list IDs)", tui_color::INFO);
     status_("  /scan                 open the interactive connection wizard", tui_color::INFO);
+    status_("  /traceroute <node>    run traceroute to a node (alias: /trace, /tr)", tui_color::INFO);
+    status_("  /theme [name]         switch or list color themes", tui_color::INFO);
     status_("  /server [on|off]      open the mesh sync stream server configuration or turn it off", tui_color::INFO);
-    status_("  /theme [name]         list themes or switch to a theme", tui_color::INFO);
     status_("  /device [id]          show or switch active device", tui_color::INFO);
     status_("  /quit                 exit fmesh-cli", tui_color::INFO);
     status_("Keys: Alt+1..0 switch window, Alt+a next active, PgUp/PgDn scroll, Ctrl-L redraw, Ctrl-X cycle device", tui_color::INFO);
@@ -599,6 +601,51 @@ void CommandDispatcher::cmd_whois(const std::vector<std::string>& args) {
                 status_("  Heard:    " + std::string(buf), tui_color::INFO);
             }
         }
+        if (n.temperature) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f", *n.temperature);
+            status_("  Temp:     " + std::string(buf) + " C", tui_color::INFO);
+        }
+        if (n.relative_humidity) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f", *n.relative_humidity);
+            status_("  Humidity: " + std::string(buf) + "%", tui_color::INFO);
+        }
+        if (n.barometric_pressure) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f", *n.barometric_pressure);
+            status_("  Pressure: " + std::string(buf) + " hPa", tui_color::INFO);
+        }
+        if (n.gas_resistance) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.2f", *n.gas_resistance);
+            status_("  Gas res:  " + std::string(buf) + " MOhm", tui_color::INFO);
+        }
+        if (n.iaq) {
+            status_("  IAQ:      " + std::to_string(*n.iaq), tui_color::INFO);
+        }
+        if (n.co2) {
+            status_("  CO2:      " + std::to_string(*n.co2) + " ppm", tui_color::INFO);
+        }
+        if (n.pm25) {
+            status_("  PM2.5:    " + std::to_string(*n.pm25) + " ug/m3", tui_color::INFO);
+        }
+        if (n.current) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%.1f", *n.current);
+            status_("  Current:  " + std::string(buf) + " mA", tui_color::INFO);
+        }
+        if (n.uptime_seconds) {
+            uint32_t s = *n.uptime_seconds;
+            uint32_t d = s / 86400;
+            uint32_t h = (s % 86400) / 3600;
+            uint32_t m = (s % 3600) / 60;
+            std::string upt;
+            if (d > 0) upt += std::to_string(d) + "d ";
+            if (h > 0 || d > 0) upt += std::to_string(h) + "h ";
+            upt += std::to_string(m) + "m";
+            status_("  Uptime:   " + upt, tui_color::INFO);
+        }
         if (n.latitude && n.longitude) {
             char buf[80];
             std::snprintf(buf, sizeof(buf), "  Pos:      %.6f, %.6f  alt=%d m",
@@ -805,6 +852,90 @@ void CommandDispatcher::cmd_server(const std::vector<std::string>& args) {
         if (on_server_config_) on_server_config_(true);
     } else if (args[0] == "off") {
         if (on_server_config_) on_server_config_(false);
+    }
+}
+
+void CommandDispatcher::cmd_traceroute(const std::vector<std::string>& args) {
+    auto devices = service_.device_ids();
+    if (devices.empty()) {
+        status_("(no devices connected)", tui_color::ERROR);
+        return;
+    }
+
+    std::string dev = active_device_;
+    if (dev.empty()) dev = devices[0];
+
+    uint32_t target_node = 0;
+    std::string target_name;
+
+    if (args.empty()) {
+        const auto* tgt = wm_.current_target();
+        if (tgt && tgt->kind == "dm") {
+            target_node = tgt->target;
+            if (!tgt->device.empty()) dev = tgt->device;
+            target_name = node_num_to_id(target_node);
+            const NodeDb* db = service_.db_for(dev);
+            if (db) {
+                if (auto n = db->get(target_node)) {
+                    target_name = n->long_name.empty() ? n->short_name : n->long_name;
+                }
+            }
+        } else {
+            status_("Usage: /traceroute <node|nick> [channel]", tui_color::ERROR);
+            return;
+        }
+    } else {
+        std::string q = args[0];
+        const NodeDb* db = service_.db_for(dev);
+        if (db) {
+            auto n = db->find_fuzzy(q);
+            if (n) {
+                target_node = n->node_num;
+                target_name = n->long_name.empty() ? n->short_name : n->long_name;
+            }
+        }
+        if (target_node == 0) {
+            for (const auto& d : devices) {
+                if (const auto* other_db = service_.db_for(d)) {
+                    if (auto n = other_db->find_fuzzy(q)) {
+                        dev = d;
+                        target_node = n->node_num;
+                        target_name = n->long_name.empty() ? n->short_name : n->long_name;
+                        break;
+                    }
+                }
+            }
+        }
+        if (target_node == 0) {
+            if (!q.empty() && q[0] == '!') {
+                try {
+                    target_node = static_cast<uint32_t>(std::stoul(q.substr(1), nullptr, 16));
+                    target_name = q;
+                } catch (...) {}
+            } else {
+                try {
+                    target_node = static_cast<uint32_t>(std::stoul(q));
+                    target_name = node_num_to_id(target_node);
+                } catch (...) {}
+            }
+        }
+    }
+
+    if (target_node == 0) {
+        status_("Unknown node: " + (args.empty() ? "" : args[0]), tui_color::ERROR);
+        return;
+    }
+
+    uint32_t channel_idx = 0;
+    if (args.size() > 1) {
+        try { channel_idx = static_cast<uint32_t>(std::stoul(args[1])); }
+        catch (...) {}
+    }
+
+    status_("Initiating traceroute to " + target_name + " (" + node_num_to_id(target_node) + ") on " + service_.display_name_for(dev) + "...", tui_color::INFO);
+    uint32_t pid = service_.send_traceroute(dev, target_node, channel_idx);
+    if (pid == 0) {
+        status_("Failed to send traceroute packet.", tui_color::ERROR);
     }
 }
 

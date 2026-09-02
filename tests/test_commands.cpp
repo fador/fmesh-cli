@@ -326,3 +326,85 @@ TEST_F(CommandTest, ClearCommand) {
     EXPECT_TRUE(win->lines().empty());
 }
 
+// -- /traceroute -------------------------------------------------------
+
+TEST_F(CommandTest, TracerouteCommand) {
+    // No args in status window returns usage
+    auto c1 = exec("/traceroute");
+    std::string all1;
+    for (auto& l : c1.lines) all1 += l;
+    EXPECT_NE(all1.find("Usage"), std::string::npos);
+
+    // Unknown node
+    auto c2 = exec("/traceroute unknown_node");
+    std::string all2;
+    for (auto& l : c2.lines) all2 += l;
+    EXPECT_NE(all2.find("Unknown node"), std::string::npos);
+
+    // Valid traceroute by name
+    auto c3 = exec("/traceroute Fad3");
+    std::string all3;
+    for (auto& l : c3.lines) all3 += l;
+    EXPECT_NE(all3.find("Initiating traceroute to Fador #3 Smolboi"), std::string::npos);
+
+    // Traceroute by hex id
+    auto c4 = exec("/trace !d4a70330");
+    std::string all4;
+    for (auto& l : c4.lines) all4 += l;
+    EXPECT_NE(all4.find("Initiating traceroute"), std::string::npos);
+
+    // Traceroute with channel arg
+    auto c5 = exec("/tr Fad3 1");
+    std::string all5;
+    for (auto& l : c5.lines) all5 += l;
+    EXPECT_NE(all5.find("Initiating traceroute to Fador #3 Smolboi"), std::string::npos);
+
+    // Default to current DM peer when in DM window
+    int dm_win = wm_.ensure_dm("test_device", 0xD4A70330, "Fad3");
+    wm_.select(dm_win);
+    auto c6 = exec("/traceroute");
+    std::string all6;
+    for (auto& l : c6.lines) all6 += l;
+    EXPECT_NE(all6.find("Initiating traceroute to Fador #3 Smolboi"), std::string::npos);
+}
+
+// -- /whois telemetry verification -------------------------------------
+
+TEST_F(CommandTest, WhoisWithTelemetry) {
+    Node n;
+    n.node_num = 0xD4A70330;
+    n.long_name = "Fador #3 Smolboi";
+    n.short_name = "Fad3";
+    n.battery_level = 88;
+    n.voltage = 4.05f;
+    n.temperature = 21.5f;
+    n.relative_humidity = 45.0f;
+    n.barometric_pressure = 1013.2f;
+    n.gas_resistance = 12.34f;
+    n.iaq = 42;
+    n.co2 = 510;
+    n.pm25 = 15;
+    n.current = 120.0f;
+    n.uptime_seconds = 7200;
+
+    auto* db = const_cast<NodeDb*>(svc_.db_for("test_device"));
+    ASSERT_NE(db, nullptr);
+    db->upsert_node(n);
+
+    auto c = exec("/whois Fad3");
+    std::string all;
+    for (auto& l : c.lines) all += l + "\n";
+
+    EXPECT_NE(all.find("Battery:  88%"), std::string::npos);
+    EXPECT_NE(all.find("Voltage:  4.05 V"), std::string::npos);
+    EXPECT_NE(all.find("Temp:     21.5 C"), std::string::npos);
+    EXPECT_NE(all.find("Humidity: 45.0%"), std::string::npos);
+    EXPECT_NE(all.find("Pressure: 1013.2 hPa"), std::string::npos);
+    EXPECT_NE(all.find("Gas res:  12.34 MOhm"), std::string::npos);
+    EXPECT_NE(all.find("IAQ:      42"), std::string::npos);
+    EXPECT_NE(all.find("CO2:      510 ppm"), std::string::npos);
+    EXPECT_NE(all.find("PM2.5:    15 ug/m3"), std::string::npos);
+    EXPECT_NE(all.find("Current:  120.0 mA"), std::string::npos);
+    EXPECT_NE(all.find("Uptime:   2h 0m"), std::string::npos);
+}
+

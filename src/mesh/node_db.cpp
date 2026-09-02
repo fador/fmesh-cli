@@ -25,6 +25,15 @@ void NodeDb::upsert_node(Node n) {
         if (n.voltage.has_value()) it->second.voltage = n.voltage;
         if (n.channel_util.has_value()) it->second.channel_util = n.channel_util;
         if (n.air_util_tx.has_value()) it->second.air_util_tx = n.air_util_tx;
+        if (n.uptime_seconds.has_value()) it->second.uptime_seconds = n.uptime_seconds;
+        if (n.temperature.has_value()) it->second.temperature = n.temperature;
+        if (n.relative_humidity.has_value()) it->second.relative_humidity = n.relative_humidity;
+        if (n.barometric_pressure.has_value()) it->second.barometric_pressure = n.barometric_pressure;
+        if (n.gas_resistance.has_value()) it->second.gas_resistance = n.gas_resistance;
+        if (n.iaq.has_value()) it->second.iaq = n.iaq;
+        if (n.pm25.has_value()) it->second.pm25 = n.pm25;
+        if (n.co2.has_value()) it->second.co2 = n.co2;
+        if (n.current.has_value()) it->second.current = n.current;
         if (n.snr.has_value()) it->second.snr = n.snr;
         if (n.hops_away.has_value()) it->second.hops_away = n.hops_away;
         if (n.last_heard.has_value()) it->second.last_heard = n.last_heard;
