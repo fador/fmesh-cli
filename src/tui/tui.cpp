@@ -336,10 +336,10 @@ bool TuiApp::handle_wizard_key(int ch) {
             if (scan_selection_ >= 0 && static_cast<size_t>(scan_selection_) < scan_entries_.size()) {
                 const auto& e = scan_entries_[scan_selection_];
                 BleDeviceSpec spec;
-                if (scan_entries_[scan_selection_].address.empty()) {
-                    spec.name = scan_entries_[scan_selection_].name;
+                if (e.address.empty()) {
+                    spec.name = e.name;
                 } else {
-                    spec.address = scan_entries_[scan_selection_].address;
+                    spec.address = e.address;
                 }
                 spec.pin = wizard_pin_;
                 service_.connect_device(spec, config_.pair);
@@ -1313,13 +1313,6 @@ int TuiApp::run() {
                     ch = getch();
                     continue;
                 }
-#endif
-                if (ch >= KEY_F(1) && ch <= KEY_F(12)) {
-                    wm_.select(ch - KEY_F(1) + 1);
-                    need_redraw_ = true;
-                    ch = getch();
-                    continue;
-                }
                 if (ch == KEY_ALT_L || ch == KEY_ALT_R) { ch = getch(); continue; } // Ignore bare alt keys
                 if (ch == ALT_A) { wm_.select_next_active(); need_redraw_ = true; ch = getch(); continue; }
                 if (ch == ALT_N) { wm_.select_relative(1); need_redraw_ = true; ch = getch(); continue; }
@@ -1333,6 +1326,13 @@ int TuiApp::run() {
                 if (ch == ALT_I) { wm_.select(18); need_redraw_ = true; ch = getch(); continue; }
                 if (ch == ALT_O) { wm_.select(19); need_redraw_ = true; ch = getch(); continue; }
                 if (ch == ALT_P) { wm_.select(20); need_redraw_ = true; ch = getch(); continue; }
+#endif
+                if (ch >= KEY_F(1) && ch <= KEY_F(12)) {
+                    wm_.select(ch - KEY_F(1) + 1);
+                    need_redraw_ = true;
+                    ch = getch();
+                    continue;
+                }
                 if (ch == 27) {
                     timeout(50);
                     int ch2 = getch();
