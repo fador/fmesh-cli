@@ -162,6 +162,7 @@ set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "Disable zstd programs" FORCE)
 set(ZSTD_BUILD_TESTS OFF CACHE BOOL "Disable zstd tests" FORCE)
 set(ZSTD_BUILD_SHARED OFF CACHE BOOL "Disable shared zstd" FORCE)
 set(ZSTD_BUILD_STATIC ON CACHE BOOL "Enable static zstd" FORCE)
+set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "Disable zstd legacy support" FORCE)
 FetchContent_Declare(
     zstd
     GIT_REPOSITORY https://github.com/facebook/zstd.git
@@ -169,6 +170,12 @@ FetchContent_Declare(
     SOURCE_SUBDIR build/cmake
 )
 FetchContent_MakeAvailable(zstd)
+
+if(TARGET libzstd_static)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(libzstd_static PRIVATE -Wno-error -Wno-maybe-uninitialized)
+    endif()
+endif()
 
 # --- nlohmann_json ----------------------------------------------------------
 FetchContent_Declare(
