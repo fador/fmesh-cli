@@ -465,6 +465,43 @@ TEST(WindowManagerEdge, CloseIfEmptySelectViaNumber) {
     EXPECT_EQ(wm.current_index(), 2);
 }
 
+TEST(WindowManagerEdge, CloseWindowExplicit) {
+    MeshService svc;
+    WindowManager wm(svc);
+    wm.ensure_channel("dev", 0, "General");
+    int nl_idx = wm.ensure_nodelist("dev");
+    EXPECT_EQ(wm.windows().size(), 3u);
+
+    // Closing status window (1) returns false
+    EXPECT_FALSE(wm.close_window(1));
+    EXPECT_EQ(wm.windows().size(), 3u);
+
+    // Closing nodelist window (3) succeeds
+    wm.select(nl_idx);
+    EXPECT_TRUE(wm.close_window(nl_idx));
+    EXPECT_EQ(wm.windows().size(), 2u);
+    EXPECT_EQ(wm.current_index(), 2); // adjusted to previous window
+}
+
+TEST(WindowManagerEdge, EnsureNodelistReusesWindow) {
+    MeshService svc;
+    WindowManager wm(svc);
+    int idx1 = wm.ensure_nodelist("dev1");
+    EXPECT_EQ(wm.windows().size(), 2u);
+    EXPECT_EQ(idx1, 2);
+
+    // Calling ensure_nodelist with another device reuses the single nodelist window
+    int idx2 = wm.ensure_nodelist("dev2");
+    EXPECT_EQ(wm.windows().size(), 2u);
+    EXPECT_EQ(idx2, 2);
+
+    // Calling with "*" unified also reuses it
+    int idx3 = wm.ensure_nodelist("*");
+    EXPECT_EQ(wm.windows().size(), 2u);
+    EXPECT_EQ(idx3, 2);
+    EXPECT_EQ(wm.windows()[1]->title(), "Nodes");
+}
+
 // -- Window edge cases --
 
 TEST(WindowRobust, ScrollbackCap) {

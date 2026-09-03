@@ -41,6 +41,7 @@ public:
 
     [[nodiscard]] const std::vector<Line>& lines() const { return lines_; }
     [[nodiscard]] const WindowTarget& target() const { return target_; }
+    void set_target(WindowTarget t) { target_ = std::move(t); }
     [[nodiscard]] const std::string& title() const { return title_; }
     void set_title(std::string t) { title_ = std::move(t); }
 

@@ -66,10 +66,10 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
 
     if (cmd == "help" || cmd == "h")          cmd_help();
     else if (cmd == "list" || cmd == "windows") cmd_list();
-    else if (cmd == "nodes" || cmd == "who")   cmd_nodes();
+    else if (cmd == "nodes" || cmd == "who")   cmd_nodes(tokens);
     else if (cmd == "query" || cmd == "q")     cmd_query(tokens);
     else if (cmd == "msg" || cmd == "m")       cmd_msg(tokens);
-    else if (cmd == "close" || cmd == "c")     cmd_close();
+    else if (cmd == "close" || cmd == "c")     cmd_close(tokens);
     else if (cmd == "window" || cmd == "w")    cmd_window(tokens);
     else if (cmd == "channel" || cmd == "ch")  cmd_channel(tokens);
     else if (cmd == "clear")                   cmd_clear();
@@ -158,18 +158,43 @@ void CommandDispatcher::cmd_list() {
     }
 }
 
-void CommandDispatcher::cmd_nodes() {
+void CommandDispatcher::cmd_nodes(const std::vector<std::string>& args) {
     auto devices = service_.device_ids();
     if (devices.empty()) { status_("(no devices connected)", tui_color::ERROR); return; }
-    // Use unified nodelist when multiple devices are connected.
-    if (devices.size() > 1) {
-        int idx = wm_.ensure_nodelist("*");  // unified
-        wm_.select(idx);
+
+    std::string dev = "*";
+    if (!args.empty() && args[0] != "*" && args[0] != "all") {
+        std::string q = args[0];
+        bool found = false;
+        for (const auto& d : devices) {
+            if (d == q || service_.display_name_for(d) == q) {
+                dev = d;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            for (const auto& d : devices) {
+                if (d.find(q) != std::string::npos || service_.display_name_for(d).find(q) != std::string::npos) {
+                    dev = d;
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found) {
+            status_("No device matched: " + q, tui_color::ERROR);
+            return;
+        }
+    } else if (devices.size() == 1) {
+        dev = devices[0];
+    }
+
+    int idx = wm_.ensure_nodelist(dev);
+    wm_.select(idx);
+    if (dev == "*") {
         status_("Unified node list for " + std::to_string(devices.size()) + " devices (arrows=select, enter=info, s=sort)", tui_color::INFO);
     } else {
-        std::string dev = devices[0];
-        int idx = wm_.ensure_nodelist(dev);
-        wm_.select(idx);
         status_("Nodes for " + service_.display_name_for(dev) + " (arrows=select, enter=info, s=sort)", tui_color::INFO);
     }
 }
@@ -228,13 +253,39 @@ void CommandDispatcher::cmd_msg(const std::vector<std::string>& args) {
     status_("No node matched '" + q + "'", tui_color::ERROR);
 }
 
-void CommandDispatcher::cmd_close() {
-    const auto* tgt = wm_.current_target();
-    if (!tgt) { status_("Cannot close the status window", tui_color::ERROR); return; }
-    // Closing is implemented by selecting the previous window; the window
-    // object itself stays (irssi keeps history). For v1 we just switch away.
-    wm_.select_relative(-1);
-    status_("(window kept; switched away. Use /clear to wipe history)", tui_color::INFO);
+void CommandDispatcher::cmd_close(const std::vector<std::string>& args) {
+    int target_idx = wm_.current_index();
+    if (!args.empty()) {
+        try {
+            target_idx = std::stoi(args[0]);
+        } catch (...) {
+            std::string q = args[0];
+            target_idx = 0;
+            const auto& wins = wm_.windows();
+            for (size_t i = 0; i < wins.size(); ++i) {
+                if (wins[i]->title() == q || wins[i]->target().kind == q) {
+                    target_idx = static_cast<int>(i + 1);
+                    break;
+                }
+            }
+            if (target_idx == 0) {
+                status_("Invalid window number or name: " + q, tui_color::ERROR);
+                return;
+            }
+        }
+    }
+
+    if (target_idx <= 1 || target_idx > static_cast<int>(wm_.windows().size())) {
+        status_("Cannot close the status window", tui_color::ERROR);
+        return;
+    }
+
+    std::string title = wm_.windows()[target_idx - 1]->title();
+    if (wm_.close_window(target_idx)) {
+        status_("Closed window " + std::to_string(target_idx) + " (" + title + ")", tui_color::INFO);
+    } else {
+        status_("Failed to close window", tui_color::ERROR);
+    }
 }
 
 void CommandDispatcher::cmd_window(const std::vector<std::string>& args) {

@@ -326,6 +326,49 @@ TEST_F(CommandTest, ClearCommand) {
     EXPECT_TRUE(win->lines().empty());
 }
 
+// -- /close ------------------------------------------------------------
+
+TEST_F(CommandTest, CloseCommand) {
+    // Cannot close status window
+    auto c1 = exec("/close");
+    std::string all1;
+    for (auto& l : c1.lines) all1 += l;
+    EXPECT_NE(all1.find("Cannot close the status window"), std::string::npos);
+
+    // Create a nodelist window and a channel window
+    wm_.ensure_nodelist("test_device");
+    wm_.ensure_channel("test_device", 0, "EdgeFastLow");
+    EXPECT_EQ(wm_.windows().size(), 3u);
+
+    // Close nodelist window while currently focused on it
+    wm_.select(2);
+    auto c2 = exec("/close");
+    std::string all2;
+    for (auto& l : c2.lines) all2 += l;
+    EXPECT_NE(all2.find("Closed window"), std::string::npos);
+    EXPECT_EQ(wm_.windows().size(), 2u);
+
+    // Close window by number
+    auto c3 = exec("/close 2");
+    std::string all3;
+    for (auto& l : c3.lines) all3 += l;
+    EXPECT_NE(all3.find("Closed window 2"), std::string::npos);
+    EXPECT_EQ(wm_.windows().size(), 1u);
+}
+
+TEST_F(CommandTest, NodesCommandReusesWindow) {
+    auto c1 = exec("/nodes");
+    EXPECT_EQ(wm_.windows().size(), 2u);
+
+    // Re-running /nodes selects the existing window and doesn't duplicate
+    auto c2 = exec("/nodes");
+    EXPECT_EQ(wm_.windows().size(), 2u);
+
+    // Closing it works
+    exec("/close");
+    EXPECT_EQ(wm_.windows().size(), 1u);
+}
+
 // -- /traceroute -------------------------------------------------------
 
 TEST_F(CommandTest, TracerouteCommand) {

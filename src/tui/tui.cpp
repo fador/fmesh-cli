@@ -1276,8 +1276,13 @@ int TuiApp::run() {
 
     // Load offline history
     service_.load_offline_history();
-    for (const auto& dev : service_.device_ids()) {
-        wm_.ensure_nodelist(dev);
+    auto devices = service_.device_ids();
+    if (devices.size() > 1) {
+        wm_.ensure_nodelist("*");
+    } else if (devices.size() == 1) {
+        wm_.ensure_nodelist(devices[0]);
+    }
+    for (const auto& dev : devices) {
         auto windows = service_.database().get_all_windows(dev);
         for (const auto& w : windows) {
             if (w.kind == "channel") {

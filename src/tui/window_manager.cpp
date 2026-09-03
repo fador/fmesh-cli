@@ -174,6 +174,20 @@ int WindowManager::ensure_nodelist(const std::string& device) {
     if (it != by_key_.end()) return it->second;
     std::string dname = service_.display_name_for(device);
     std::string title = dname.empty() ? "Nodes" : "Nodes " + dname;
+
+    // Reuse existing nodelist window if one exists so multiple nodelist windows are never spawned.
+    for (size_t i = 0; i < windows_.size(); ++i) {
+        if (windows_[i]->target().kind == "nodelist") {
+            std::string old_key = windows_[i]->target().device + "|nodelist|0";
+            by_key_.erase(old_key);
+            windows_[i]->set_target(WindowTarget{device, "nodelist", 0});
+            windows_[i]->set_title(title);
+            int idx = static_cast<int>(i + 1);
+            by_key_[key] = idx;
+            return idx;
+        }
+    }
+
     auto w = std::make_unique<Window>(
         WindowTarget{device, "nodelist", 0}, title);
     return add_window(std::move(w));
@@ -341,9 +355,31 @@ void WindowManager::select_relative(int delta) {
     select(idx);
 }
 
+bool WindowManager::close_window(int index) {
+    if (index <= 1 || index > static_cast<int>(windows_.size())) return false;
+    const auto& t = windows_[index - 1]->target();
+    std::string key = t.device + "|" + t.kind + "|" + std::to_string(t.target);
+    by_key_.erase(key);
+    windows_.erase(windows_.begin() + (index - 1));
+    for (auto& [k, idx] : by_key_) {
+        if (idx > index) --idx;
+    }
+    if (current_ == index) {
+        current_ = std::max(1, index - 1);
+    } else if (current_ > index) {
+        --current_;
+    }
+    if (current_ > static_cast<int>(windows_.size())) {
+        current_ = static_cast<int>(windows_.size());
+    }
+    if (auto* w = current_window()) {
+        w->mark_read();
+    }
+    return true;
+}
+
 bool WindowManager::close_if_empty(int index) {
-    if (index < 1 || index > static_cast<int>(windows_.size())) return false;
-    if (index == 1) return false;
+    if (index <= 1 || index > static_cast<int>(windows_.size())) return false;
     Window& w = *windows_[index - 1];
     const auto& t = w.target();
     if (!w.lines().empty()) return false;
@@ -352,15 +388,7 @@ bool WindowManager::close_if_empty(int index) {
         (w.title().find("#ch") == 0) &&
         (w.title().size() > 3 && std::isdigit(w.title()[3]));
     if (!is_empty_dm && !is_unnamed_channel) return false;
-    std::string key = t.device + "|" + t.kind + "|" + std::to_string(t.target);
-    by_key_.erase(key);
-    windows_.erase(windows_.begin() + (index - 1));
-    for (auto& [k, idx] : by_key_) {
-        if (idx > index) --idx;
-    }
-    if (current_ > index) --current_;
-    if (current_ > static_cast<int>(windows_.size())) current_ = static_cast<int>(windows_.size());
-    return true;
+    return close_window(index);
 }
 
 void WindowManager::rebuild_all_nicks(const std::string& device, uint32_t sender_node,

@@ -47,10 +47,10 @@ private:
 
     void cmd_help();
     void cmd_list();
-    void cmd_nodes();
+    void cmd_nodes(const std::vector<std::string>& args);
     void cmd_query(const std::vector<std::string>& args);
     void cmd_msg(const std::vector<std::string>& args);
-    void cmd_close();
+    void cmd_close(const std::vector<std::string>& args);
     void cmd_window(const std::vector<std::string>& args);
     void cmd_channel(const std::vector<std::string>& args);
     void cmd_clear();

@@ -68,6 +68,9 @@ public:
     [[nodiscard]] Window* current_window();
     [[nodiscard]] const std::vector<std::unique_ptr<Window>>& windows() const { return windows_; }
 
+    // Close the window at index (1-based). Returns false if index == 1 (status) or out of bounds.
+    bool close_window(int index);
+
     // Close the window at index (1-based) if it is a channel/dm with no messages.
     // Returns true if the window was closed.
     bool close_if_empty(int index);
