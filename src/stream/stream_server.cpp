@@ -3,6 +3,7 @@
 #ifdef ENABLE_MESH_NET
 
 #include "util/log.h"
+#include "util/compression.h"
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
@@ -390,7 +391,7 @@ void StreamServer::accept_loop() {
                             }
                             if (state == WaitStart2 && buf.size() >= 2) {
                                 unsigned char s2 = static_cast<unsigned char>(buf[1]);
-                                if (s2 != 0xC3 && s2 != 0xD0) {
+                                if (s2 != 0xC3 && s2 != 0xD0 && s2 != 0xD1) {
                                     buf = buf.substr(1);
                                     state = WaitStart1;
                                     continue;
@@ -420,12 +421,19 @@ void StreamServer::accept_loop() {
                                     emit(ev);
                                 } else if (conn->frame_type == 0xD0) {
                                     EvDbSyncPayload ev;
-                                    ev.device = "meshserver"; // or something to identify it? We don't have device IDs per client yet.
-                                    // Actually, StreamServer's emit goes to MeshService. 
-                                    // It needs to be broadcasted to other clients or handled locally.
-                                    ev.device = "meshserver:" + conn->ip; // unique enough
+                                    ev.device = "meshserver:" + conn->ip;
                                     ev.payload = payload;
                                     emit(ev);
+                                } else if (conn->frame_type == 0xD1) {
+                                    auto decomp = Compression::decompress(payload);
+                                    if (decomp) {
+                                        EvDbSyncPayload ev;
+                                        ev.device = "meshserver:" + conn->ip;
+                                        ev.payload = std::move(*decomp);
+                                        emit(ev);
+                                    } else {
+                                        LOG_WARN() << "StreamServer: failed to decompress 0xD1 payload from " << conn->ip;
+                                    }
                                 }
                             } else if (state == ReadPayload) {
                                 break;

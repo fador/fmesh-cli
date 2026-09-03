@@ -1,6 +1,7 @@
 #include "stream_client.h"
 #include "mesh/mesh_codec.h"
 #include "util/log.h"
+#include "util/compression.h"
 
 #include <chrono>
 #include <cstring>
@@ -428,7 +429,7 @@ void StreamClient::read_loop() {
             }
             if (state == WaitStart2 && buf.size() >= 2) {
                 unsigned char s2 = static_cast<unsigned char>(buf[1]);
-                if (s2 != 0xC3 && s2 != 0xD0) {
+                if (s2 != 0xC3 && s2 != 0xD0 && s2 != 0xD1) {
                     // Invalid START2 — skip this byte and retry.
                     buf = buf.substr(1);
                     state = WaitStart1;
@@ -472,6 +473,17 @@ void StreamClient::read_loop() {
                     ev.device = device_id_;
                     ev.payload = payload;
                     emit(ev);
+                } else if (frame_type == 0xD1) {
+                    // Compressed DB Sync payload
+                    auto decomp = Compression::decompress(payload);
+                    if (decomp) {
+                        EvDbSyncPayload ev;
+                        ev.device = device_id_;
+                        ev.payload = std::move(*decomp);
+                        emit(ev);
+                    } else {
+                        LOG_WARN() << "stream failed to decompress 0xD1 payload (" << display_name_ << ")";
+                    }
                 }
             } else if (state == ReadPayload) {
                 // Not enough data yet — wait for more.

@@ -157,6 +157,19 @@ else()
     message(STATUS "OpenSSL NOT found, Mesh network features disabled")
 endif()
 
+# --- zstd -------------------------------------------------------------------
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "Disable zstd programs" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "Disable zstd tests" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "Disable shared zstd" FORCE)
+set(ZSTD_BUILD_STATIC ON CACHE BOOL "Enable static zstd" FORCE)
+FetchContent_Declare(
+    zstd
+    GIT_REPOSITORY https://github.com/facebook/zstd.git
+    GIT_TAG v1.5.6
+    SOURCE_SUBDIR build/cmake
+)
+FetchContent_MakeAvailable(zstd)
+
 # --- nlohmann_json ----------------------------------------------------------
 FetchContent_Declare(
     nlohmann_json
@@ -169,6 +182,7 @@ FetchContent_MakeAvailable(nlohmann_json)
 set(CORE_SRCS
     src/util/log.cpp
     src/util/event_loop.cpp
+    src/util/compression.cpp
     src/mesh/mesh_codec.cpp
     src/mesh/node_db.cpp
     src/mesh/mesh_service.cpp
@@ -197,6 +211,7 @@ target_link_libraries(meshcli_core PUBLIC
     ${SQLITE3_LIB}
     Threads::Threads
     nlohmann_json::nlohmann_json
+    libzstd_static
 )
 if(NOT WIN32)
     target_link_libraries(meshcli_core PUBLIC sdbus-c++)
@@ -252,6 +267,7 @@ add_executable(fmesh-cli-tests
     tests/test_virtual_nodes.cpp
     tests/test_config_modify.cpp
     tests/test_config.cpp
+    tests/test_compression.cpp
     src/app/config.cpp
 )
 target_link_libraries(fmesh-cli-tests PRIVATE meshcli_tui)

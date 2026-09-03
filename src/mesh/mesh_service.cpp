@@ -9,6 +9,7 @@
 #include "mesh/mesh_codec.h"
 #include "mesh/db_sync.h"
 #include "util/log.h"
+#include "util/compression.h"
 
 #include <chrono>
 #include <sstream>
@@ -833,13 +834,16 @@ void MeshService::dispatch_to_ui(MeshEvent ev) {
 
 void MeshService::send_db_sync(const std::string& payload) {
 #ifdef ENABLE_MESH_NET
+    unsigned char marker = 0xD0;
+    std::string to_send = Compression::compress_adaptive(payload, marker, 0xD0, 0xD1);
+
     if (stream_server_) {
-        stream_server_->broadcast(payload, 0xD0);
+        stream_server_->broadcast(to_send, marker);
     }
     std::lock_guard<std::mutex> lock(devices_mu_);
     for (auto& [id, dev] : devices_) {
         if (dev->stream) {
-            dev->stream->send_to_radio(payload, 0xD0);
+            dev->stream->send_to_radio(to_send, marker);
         }
     }
 #endif
