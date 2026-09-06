@@ -825,7 +825,20 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
     }, ev);
 }
 
+void MeshService::add_event_listener(EventListener cb) {
+    std::lock_guard<std::mutex> lock(listeners_mu_);
+    listeners_.push_back(std::move(cb));
+}
+
 void MeshService::dispatch_to_ui(MeshEvent ev) {
+    {
+        std::lock_guard<std::mutex> lock(listeners_mu_);
+        for (const auto& cb : listeners_) {
+            try {
+                cb(ev);
+            } catch (...) {}
+        }
+    }
     if (ui_queue_) {
         ui_queue_->push(std::move(ev));
         if (ui_wake_) ui_wake_->notify();

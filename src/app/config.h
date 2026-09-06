@@ -30,6 +30,12 @@ struct AppConfig {
     std::string server_user = "admin";
     std::string server_password;
     std::string config_path; // path to save/load config file
+
+    // Web dashboard configuration
+    bool web_enabled = false;
+    int web_port = 8080;
+    std::string web_host = "0.0.0.0";
+    std::string web_root = "web";
 };
 
 // Parse argv into an AppConfig. Returns false on parse error / --help.

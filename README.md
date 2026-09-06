@@ -18,6 +18,7 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 - **Remote Config Management**: dynamically view and alter device configurations (`/config [key] [value]`, e.g. `lora.tx_power`, `display.screen_on_secs`) across local and virtual nodes using protobuf reflection
 - **Mesh Synchronization**: multi-client star (hub-and-spoke) and multi-hop daisy chain topology synchronization with automatic SQLite replication, message propagation, and packet deduplication
 - **Map Tracing & Coordinate Telemetry**: transparently decodes and logs `POSITION_APP` coordinate telemetry into SQLite to build historical trails
+- **Web Dashboard & OpenStreetMap Visualization**: real-time web interface (`--web`, default port 8080) featuring OpenStreetMap node overlays, RF link quality visualization, GPS breadcrumb tracks, live messaging, telemetry charts, and diagnostics
 - **Multi-device support**: connect to multiple radios simultaneously via `--device` flag or `/connect`
 - **Active device cycling**: `Ctrl+X` or `/device` switches the active device for context-sensitive commands
 - **Window Management**: `/close` closes the current window and switches back to the previous active window
@@ -100,6 +101,12 @@ ctest --test-dir build -C Release --output-on-failure
 # Headless mode (for testing / bots — logs events, no TUI)
 ./build/fmesh-cli --headless --debug
 
+# Web dashboard daemon mode (access at http://localhost:8080)
+./build/fmesh-cli --headless --web --web-port 8080
+
+# Run TUI with web dashboard enabled simultaneously
+./build/fmesh-cli --web --web-port 8080
+
 # Device spec formats:
 #   ble:<name>[:<pin>]          addr:<mac>[:<pin>]
 #   tcp:<host>[:<port>]         serial:<path>[:<baud>]
@@ -168,6 +175,7 @@ ctest --test-dir build -C Release --output-on-failure
 | `/scan` | `/s` | Open the interactive connection wizard (BLE / TCP / Serial / Mesh Sync) |
 | `/server [on\|off]` | | Open the Mesh Sync Stream Server config dialog or toggle server |
 | `/theme [name]` | | Switch or list color themes (`dark`, `classic`) |
+| `/web` | | Show web dashboard status and URL |
 | `/quit` | `/exit` | Exit fmesh-cli |
 
 Plain text (without leading `/`) sends to the current window's target: channel broadcast or DM.

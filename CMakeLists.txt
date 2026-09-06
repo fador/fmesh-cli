@@ -197,6 +197,9 @@ set(CORE_SRCS
     src/stream/stream_client.cpp
     src/stream/stream_server.cpp
     src/store/database.cpp
+    src/web/http_socket.cpp
+    src/web/http_server.cpp
+    src/web/web_service.cpp
 )
 
 if(NOT WIN32)
@@ -275,6 +278,7 @@ add_executable(fmesh-cli-tests
     tests/test_config_modify.cpp
     tests/test_config.cpp
     tests/test_compression.cpp
+    tests/test_web_server.cpp
     src/app/config.cpp
 )
 target_link_libraries(fmesh-cli-tests PRIVATE meshcli_tui)

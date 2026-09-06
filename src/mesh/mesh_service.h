@@ -62,6 +62,9 @@ public:
     // Wire up the event sink (the TUI sets this so it gets woken on events).
     void set_event_sink(ConcurrentQueue<MeshEvent>* q, EventFd* wake);
 
+    using EventListener = std::function<void(const MeshEvent&)>;
+    void add_event_listener(EventListener cb);
+
     // Open the persistence database. Must be called before connect().
     bool open_database(const std::string& path);
 
@@ -141,6 +144,8 @@ private:
 
     ConcurrentQueue<MeshEvent>* ui_queue_ = nullptr;
     EventFd* ui_wake_ = nullptr;
+    std::mutex listeners_mu_;
+    std::vector<EventListener> listeners_;
 
     Database db_;
     mutable std::mutex devices_mu_;

@@ -90,6 +90,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "theme")                  cmd_theme(tokens);
     else if (cmd == "server")                 cmd_server(tokens);
     else if (cmd == "traceroute" || cmd == "trace" || cmd == "tr") cmd_traceroute(tokens);
+    else if (cmd == "web")                     cmd_web(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -99,6 +100,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
 void CommandDispatcher::cmd_help() {
     status_("Commands:", tui_color::INFO);
     status_("  /help                 this help", tui_color::INFO);
+    status_("  /web                  show web dashboard status and URL", tui_color::INFO);
     status_("  /list                 list windows", tui_color::INFO);
     status_("  /nodes                open interactive node list (arrows, enter, s=sort)", tui_color::INFO);
     status_("  /query <node|nick>    open a DM window with a node", tui_color::INFO);
@@ -987,6 +989,14 @@ void CommandDispatcher::cmd_traceroute(const std::vector<std::string>& args) {
     uint32_t pid = service_.send_traceroute(dev, target_node, channel_idx);
     if (pid == 0) {
         status_("Failed to send traceroute packet.", tui_color::ERROR);
+    }
+}
+
+void CommandDispatcher::cmd_web(const std::vector<std::string>&) {
+    if (config_.web_enabled) {
+        status_("Web dashboard is active: http://" + config_.web_host + ":" + std::to_string(config_.web_port), tui_color::INFO);
+    } else {
+        status_("Web dashboard is not running. Start fmesh-cli with --web or --web-port <port>", tui_color::INFO);
     }
 }
 

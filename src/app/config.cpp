@@ -137,10 +137,14 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
                 "  --debug           verbose logging\n"
                 "  --scan            scan for BLE devices and exit\n"
                 "  --headless        connect + dump events to log, no TUI\n"
+                "  --web             start embedded web dashboard\n"
+                "  --web-port <port> web dashboard port (default: 8080)\n"
+                "  --web-host <host> web dashboard host (default: 0.0.0.0)\n"
+                "  --web-dir <path>  static web assets directory (default: web)\n"
                 "  -h, --help        show this help\n\n"
                 "TUI commands: /help /list /nodes /query /msg /channel /window\n"
                 "              /close /clear /info /me /reconnect /config /whois\n"
-                "              /raw /stats /scan /connect /disconnect /device /quit\n",
+                "              /raw /stats /scan /connect /disconnect /device /web /quit\n",
                 out.device_name.c_str(), out.pin.c_str());
             return false;
         } else if (a == "--device" && need(v)) {
@@ -178,6 +182,17 @@ bool parse_args(int argc, char** argv, AppConfig& out) {
             out.list_only = true;
         } else if (a == "--headless") {
             out.headless = true;
+        } else if (a == "--web") {
+            out.web_enabled = true;
+        } else if (a == "--web-port" && need(v)) {
+            out.web_enabled = true;
+            out.web_port = std::atoi(v);
+        } else if (a == "--web-host" && need(v)) {
+            out.web_enabled = true;
+            out.web_host = v;
+        } else if (a == "--web-dir" && need(v)) {
+            out.web_enabled = true;
+            out.web_root = v;
         } else if (a == "pair") {
             out.pair = true;
         } else {

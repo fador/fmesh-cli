@@ -72,6 +72,8 @@ public:
         uint64_t ts;
     };
     std::vector<LocationRow> get_locations_after(uint64_t ts, int limit = 100);
+    std::vector<LocationRow> get_node_locations(uint32_t node_num, uint64_t since_ts = 0, int limit = 500);
+    std::vector<LocationRow> get_recent_node_locations(uint64_t since_ts = 0, int limit = 1000);
 
     // --- offline history loading -----------------------------------------
     std::vector<std::string> get_all_devices();
@@ -81,6 +83,7 @@ public:
     int64_t insert_message(const StoredMessage& m);
     void update_ack_state(int64_t rowid, const std::string& ack_state);
     std::vector<StoredMessage> recent_messages(const WindowKey& w, int limit = 200);
+    std::vector<StoredMessage> get_messages_paginated(const WindowKey& w, int limit, int offset = 0);
     int64_t max_message_rowid();
     uint64_t max_message_ts();
     std::vector<StoredMessage> get_messages_after(int64_t rowid, int limit = 100);

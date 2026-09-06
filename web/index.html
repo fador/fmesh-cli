@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>fmesh-cli | Mesh Network Dashboard</title>
+  <meta name="description" content="Real-time Web Dashboard and OpenStreetMap visualization for Meshtastic networks via fmesh-cli">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+  <!-- Leaflet Map CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- Dashboard Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-dark">
+  <div id="app">
+    <!-- Top Navigation Header -->
+    <header class="navbar">
+      <div class="nav-brand">
+        <div class="brand-logo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>fmesh-cli</h1>
+          <span class="brand-subtitle">Mesh Network Monitor</span>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="nav-tabs" id="nav-tabs">
+        <button class="nav-tab active" data-tab="map">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>
+          Map Overlay
+        </button>
+        <button class="nav-tab" data-tab="nodes">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+          Nodes <span class="badge" id="nodes-count-badge">0</span>
+        </button>
+        <button class="nav-tab" data-tab="messages">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          Messages <span class="badge" id="unread-count-badge" style="display:none">0</span>
+        </button>
+        <button class="nav-tab" data-tab="telemetry">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+          Telemetry
+        </button>
+        <button class="nav-tab" data-tab="diagnostics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          Diagnostics
+        </button>
+        <button class="nav-tab" data-tab="config">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+          Radio Config
+        </button>
+      </nav>
+
+      <!-- Active Device & Live SSE Connection Status -->
+      <div class="nav-controls">
+        <div class="device-selector-wrapper">
+          <label for="device-select">Device:</label>
+          <select id="device-select" class="device-select" title="Active Radio Device">
+            <option value="">Detecting radios...</option>
+          </select>
+        </div>
+        <div class="live-indicator" id="live-indicator" title="SSE Connection Status">
+          <span class="live-dot pulse"></span>
+          <span class="live-text" id="live-status-text">LIVE</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- 1. MAP VIEW -->
+      <section id="tab-map" class="tab-pane active">
+        <div class="map-container-layout">
+          <!-- The Leaflet OSM Map -->
+          <div id="map" class="osm-map"></div>
+
+          <!-- Floating Map Controls & Filters -->
+          <div class="map-floating-panel">
+            <div class="panel-header">
+              <span class="panel-title">Map Overlay Options</span>
+              <button id="btn-recenter-map" class="btn-icon" title="Recenter to All Nodes">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+              </button>
+            </div>
+            <div class="panel-body">
+              <label class="toggle-control">
+                <input type="checkbox" id="layer-toggle-links" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">RF Network Links</span>
+              </label>
+              <label class="toggle-control">
+                <input type="checkbox" id="layer-toggle-trails" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">GPS Breadcrumb Trails</span>
+              </label>
+              <label class="toggle-control">
+                <input type="checkbox" id="layer-toggle-names" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">Always Show Node Labels</span>
+              </label>
+              <label class="toggle-control">
+                <input type="checkbox" id="layer-toggle-dark-map">
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">Dark Tile Layer</span>
+              </label>
+              
+              <div class="trail-filter-section">
+                <span class="filter-heading">GPS History Window:</span>
+                <div class="filter-pills" id="trail-time-pills">
+                  <button class="pill" data-hours="1">1h</button>
+                  <button class="pill" data-hours="6">6h</button>
+                  <button class="pill active" data-hours="24">24h</button>
+                  <button class="pill" data-hours="168">7d</button>
+                  <button class="pill" data-hours="0">All</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Map Side Drawer for Selected Node Details -->
+          <aside id="map-node-drawer" class="node-drawer collapsed">
+            <button id="btn-close-drawer" class="btn-close">&times;</button>
+            <div class="drawer-content" id="drawer-node-details">
+              <div class="empty-state">Click any node marker on the map to inspect details, breadcrumbs, and telemetry.</div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 2. NODES VIEW -->
+      <section id="tab-nodes" class="tab-pane">
+        <div class="view-header">
+          <div class="search-bar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            <input type="text" id="node-search" placeholder="Search nodes by name, ID, hardware, or role...">
+          </div>
+          <div class="filter-group">
+            <button class="filter-chip active" data-filter="all">All</button>
+            <button class="filter-chip" data-filter="gps">GPS Location</button>
+            <button class="filter-chip" data-filter="recent">Active &lt; 1h</button>
+            <button class="filter-chip" data-filter="favorites">Favorites</button>
+            <button class="filter-chip" data-filter="routers">Routers / Gateways</button>
+          </div>
+          <div class="sort-select-wrapper">
+            <label>Sort:</label>
+            <select id="node-sort">
+              <option value="last_heard">Last Heard</option>
+              <option value="name">Name</option>
+              <option value="battery">Battery %</option>
+              <option value="hops">Hops Away</option>
+              <option value="snr">SNR Quality</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="nodes-grid" id="nodes-grid">
+          <!-- Populated dynamically -->
+        </div>
+      </section>
+
+      <!-- 3. MESSAGES VIEW -->
+      <section id="tab-messages" class="tab-pane">
+        <div class="chat-container">
+          <!-- Sidebar: Channels & DM list -->
+          <aside class="chat-sidebar">
+            <div class="chat-sidebar-section">
+              <h3>Channels</h3>
+              <ul class="chat-target-list" id="channel-list">
+                <!-- Channels populated dynamically -->
+              </ul>
+            </div>
+            <div class="chat-sidebar-section">
+              <h3>Direct Messages</h3>
+              <ul class="chat-target-list" id="dm-list">
+                <!-- DMs populated dynamically -->
+              </ul>
+            </div>
+          </aside>
+
+          <!-- Chat Window -->
+          <div class="chat-main">
+            <div class="chat-header">
+              <div class="chat-title-info">
+                <h2 id="chat-title">#Primary (Channel 0)</h2>
+                <span id="chat-subtitle" class="chat-subtitle">Broadcast channel</span>
+              </div>
+              <div class="chat-actions">
+                <button class="btn btn-sm btn-secondary" id="btn-refresh-messages">Refresh</button>
+              </div>
+            </div>
+
+            <div class="chat-messages" id="chat-messages-container">
+              <!-- Messages stream here -->
+            </div>
+
+            <div class="chat-composer">
+              <input type="text" id="message-input" placeholder="Type a message to transmit over LoRa..." autocomplete="off">
+              <button id="btn-send-message" class="btn btn-primary">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. TELEMETRY VIEW -->
+      <section id="tab-telemetry" class="tab-pane">
+        <div class="telemetry-dashboard">
+          <div class="dashboard-banner">
+            <h2>Environmental & Hardware Telemetry</h2>
+            <div class="telemetry-node-picker">
+              <label for="telemetry-node-select">Inspect Node:</label>
+              <select id="telemetry-node-select"></select>
+            </div>
+          </div>
+
+          <div class="metrics-cards-grid" id="metrics-summary-cards">
+            <!-- Metric summary cards -->
+          </div>
+
+          <div class="charts-grid">
+            <div class="chart-card">
+              <h3>Battery & Voltage</h3>
+              <div class="chart-wrapper"><canvas id="chart-battery"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <h3>Temperature & Humidity</h3>
+              <div class="chart-wrapper"><canvas id="chart-environment"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <h3>Barometric Pressure (hPa)</h3>
+              <div class="chart-wrapper"><canvas id="chart-pressure"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <h3>Channel & Air Utilization</h3>
+              <div class="chart-wrapper"><canvas id="chart-utilization"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. DIAGNOSTICS & TRACEROUTE VIEW -->
+      <section id="tab-diagnostics" class="tab-pane">
+        <div class="diagnostics-layout">
+          <!-- Traceroute Tool -->
+          <div class="diag-card traceroute-card">
+            <h3>Visual Traceroute</h3>
+            <p>Trace mesh routes and hop SNR to remote nodes</p>
+            <div class="diag-form-row">
+              <select id="traceroute-target-select"></select>
+              <button id="btn-run-traceroute" class="btn btn-primary">Run Trace</button>
+            </div>
+            <div class="traceroute-result" id="traceroute-result-container">
+              <div class="empty-state">Select a target node and click "Run Trace" to measure route hops and link quality.</div>
+            </div>
+          </div>
+
+          <!-- Raw Packet Inspector -->
+          <div class="diag-card raw-packet-card">
+            <div class="card-header-actions">
+              <h3>Raw Packet Monitor</h3>
+              <button class="btn btn-sm btn-secondary" id="btn-clear-raw">Clear</button>
+            </div>
+            <div class="raw-packet-stream" id="raw-packet-stream">
+              <!-- Raw FromRadio packets stream here -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6. CONFIG VIEW -->
+      <section id="tab-config" class="tab-pane">
+        <div class="config-layout">
+          <div class="config-sidebar">
+            <h3>Connected Radios</h3>
+            <ul id="config-devices-list" class="config-devices-list"></ul>
+          </div>
+          <div class="config-editor-main">
+            <div class="config-header">
+              <h2 id="config-device-title">Radio Configuration</h2>
+              <div class="config-filter">
+                <input type="text" id="config-search" placeholder="Filter config keys...">
+              </div>
+            </div>
+            <div class="config-table-container">
+              <table class="config-table" id="config-table">
+                <thead>
+                  <tr>
+                    <th>Setting</th>
+                    <th>Current Value</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="config-table-body">
+                  <!-- Config settings populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Leaflet Map JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Application Script -->
+  <script src="app.js"></script>
+</body>
+</html>

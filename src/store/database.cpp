@@ -542,6 +542,90 @@ std::vector<Database::LocationRow> Database::get_locations_after(uint64_t ts, in
     return out;
 }
 
+std::vector<Database::LocationRow> Database::get_node_locations(uint32_t node_num, uint64_t since_ts, int limit) {
+    std::vector<LocationRow> out;
+    if (!db_) return out;
+    const char* sql = "SELECT device,node_num,latitude,longitude,altitude,ts FROM location_history "
+                      "WHERE node_num = ? AND ts >= ? ORDER BY ts ASC LIMIT ?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_int64(st, 1, node_num);
+    sqlite3_bind_int64(st, 2, since_ts);
+    sqlite3_bind_int(st, 3, limit);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        LocationRow row;
+        if (auto* p = sqlite3_column_text(st, 0)) row.device = reinterpret_cast<const char*>(p);
+        row.node_num = static_cast<uint32_t>(sqlite3_column_int64(st, 1));
+        row.latitude = sqlite3_column_double(st, 2);
+        row.longitude = sqlite3_column_double(st, 3);
+        row.altitude = sqlite3_column_int(st, 4);
+        row.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 5));
+        out.push_back(std::move(row));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::vector<Database::LocationRow> Database::get_recent_node_locations(uint64_t since_ts, int limit) {
+    std::vector<LocationRow> out;
+    if (!db_) return out;
+    const char* sql = "SELECT device,node_num,latitude,longitude,altitude,ts FROM location_history "
+                      "WHERE ts >= ? ORDER BY ts ASC LIMIT ?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_int64(st, 1, since_ts);
+    sqlite3_bind_int(st, 2, limit);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        LocationRow row;
+        if (auto* p = sqlite3_column_text(st, 0)) row.device = reinterpret_cast<const char*>(p);
+        row.node_num = static_cast<uint32_t>(sqlite3_column_int64(st, 1));
+        row.latitude = sqlite3_column_double(st, 2);
+        row.longitude = sqlite3_column_double(st, 3);
+        row.altitude = sqlite3_column_int(st, 4);
+        row.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 5));
+        out.push_back(std::move(row));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::vector<StoredMessage> Database::get_messages_paginated(const WindowKey& w, int limit, int offset) {
+    std::vector<StoredMessage> out;
+    if (!db_) return out;
+    const char* sql =
+        "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
+        "channel_idx,text,ts,packet_id,ack_state FROM messages "
+        "WHERE (device=? OR ?='') AND window_kind=? AND window_target=? "
+        "ORDER BY ts DESC LIMIT ? OFFSET ?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_text(st, 1, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, w.kind.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, w.target);
+    sqlite3_bind_int(st, 5, limit);
+    sqlite3_bind_int(st, 6, offset);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        StoredMessage m;
+        m.rowid = sqlite3_column_int64(st, 0);
+        m.device = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+        m.window_kind = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+        m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
+        m.direction = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+        m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
+        m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
+        m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
+        if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
+        m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
+        m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
+        if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
+        out.push_back(std::move(m));
+    }
+    sqlite3_finalize(st);
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
 void Database::maybe_checkpoint() {
     if (++write_count_ >= 100) {
         write_count_ = 0;

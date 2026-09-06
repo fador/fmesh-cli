@@ -7,10 +7,12 @@
 #include "mesh/node_db.h"
 #include "util/event_loop.h"
 #include "util/log.h"
+#include "web/web_service.h"
 
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <memory>
 #include <thread>
 
 namespace meshcli {
@@ -46,6 +48,16 @@ int run_app(int argc, char** argv, MeshService& service) {
 
     LOG_INFO() << "Database path: " << cfg.db_path;
     LOG_INFO() << "Config path: " << cfg.config_path;
+
+    std::unique_ptr<WebService> web_service;
+    if (cfg.web_enabled) {
+        web_service = std::make_unique<WebService>(service);
+        if (web_service->start(cfg.web_host, cfg.web_port, cfg.web_root)) {
+            LOG_INFO() << "Web dashboard running at http://" << cfg.web_host << ":" << web_service->bound_port();
+        } else {
+            LOG_ERROR() << "Failed to start web server on " << cfg.web_host << ":" << cfg.web_port;
+        }
+    }
 
     if (cfg.server_mode) {
         LOG_INFO() << "Starting mesh stream server on port " << cfg.server_port;
@@ -102,7 +114,9 @@ int run_app(int argc, char** argv, MeshService& service) {
 
         if (connected == 0) {
             if (cfg.list_only) return 0;
-            return 1;
+            if (!cfg.web_enabled) return 1;
+            LOG_INFO() << "no immediate device connected, loading offline database history for web dashboard...";
+            service.load_offline_history();
         }
     } else {
         // TUI mode: connect in the background so the UI spawns immediately
@@ -121,10 +135,10 @@ int run_app(int argc, char** argv, MeshService& service) {
     }
 
     if (cfg.headless) {
-        // Headless mode: connect and log all events for 15 seconds, then exit.
-        LOG_INFO() << "headless mode: logging events for 15 seconds...";
+        LOG_INFO() << "headless mode running"
+                   << (cfg.web_enabled ? " (web dashboard active, press Ctrl+C to stop)..." : " for 15 seconds...");
         auto start = std::chrono::steady_clock::now();
-        while (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)) {
+        while (!g_got_sigint && (cfg.web_enabled || (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)))) {
             wake.drain();
             for (auto& ev : queue.drain_all()) {
                 std::visit([](const auto& e) {
@@ -174,6 +188,12 @@ int run_app(int argc, char** argv, MeshService& service) {
                     LOG_INFO() << "  - ch" << c.index << ": " << c.name << " [" << c.role << "]";
             }
         }
+        if (web_service) {
+            web_service->stop();
+        }
+        if (cfg.server_mode) {
+            service.stop_stream_server();
+        }
         service.disconnect_all();
         return 0;
     }
@@ -181,6 +201,9 @@ int run_app(int argc, char** argv, MeshService& service) {
     TuiApp app(service, queue, wake, cfg);
     int rc = app.run();
 
+    if (web_service) {
+        web_service->stop();
+    }
     if (cfg.server_mode) {
         service.stop_stream_server();
     }
