@@ -119,6 +119,7 @@
     await fetchDevices();
     await fetchNodes();
     await fetchChannels();
+    await fetchConversations();
     await fetchLocationHistory();
     await loadMessages();
     await fetchRecentPackets();
@@ -551,6 +552,16 @@
       if (!res.ok) return;
       state.channels = await res.json();
       renderChannelList();
+
+      // If viewing default channel 0, update title from radio channel name
+      if (state.selectedTarget.kind === 'channel' && state.selectedTarget.target === 0) {
+        const ch0 = state.channels.find(c => c.index === 0);
+        if (ch0 && ch0.name) {
+          state.selectedTarget.title = `#${ch0.name}`;
+          if (el.chatTitle) el.chatTitle.textContent = `#${ch0.name} (Channel 0)`;
+          if (el.chatSubtitle) el.chatSubtitle.textContent = `Broadcast channel [${ch0.role || 'PRIMARY'}]`;
+        }
+      }
     } catch (err) {
       console.error('Error fetching channels:', err);
     }
@@ -558,12 +569,45 @@
 
   function renderChannelList() {
     if (!el.channelList) return;
-    el.channelList.innerHTML = state.channels.map(ch => {
+    const activeChannels = state.channels.filter(ch => ch.role !== 'DISABLED');
+    const list = activeChannels.length > 0 ? activeChannels : (state.channels.length > 0 ? state.channels : [{ index: 0, name: 'Primary', role: 'PRIMARY' }]);
+    el.channelList.innerHTML = list.map(ch => {
       const isActive = state.selectedTarget.kind === 'channel' && state.selectedTarget.target === ch.index;
       return `
-        <li class="chat-target-item ${isActive ? 'active' : ''}" onclick="window.meshApp.switchTarget('channel', ${ch.index}, '${escapeHtml(ch.name || 'Channel ' + ch.index)}')">
-          <span>#${escapeHtml(ch.name || 'ch' + ch.index)}</span>
-          <span class="node-badge">${ch.role}</span>
+        <li class="chat-target-item ${isActive ? 'active' : ''}" onclick="window.meshApp.switchTarget('channel', ${ch.index}, '#${escapeHtml(ch.name || 'Channel ' + ch.index)}')">
+          <span>#${escapeHtml(ch.name || 'Channel ' + ch.index)}</span>
+          <span class="node-badge">${escapeHtml(ch.role || '')}</span>
+        </li>
+      `;
+    }).join('');
+  }
+
+  async function fetchConversations() {
+    try {
+      const res = await fetch(`/api/conversations?device=${encodeURIComponent(state.activeDeviceId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      state.activeDms = data.dms || [];
+      renderDmList();
+    } catch (err) {
+      console.error('Error fetching conversations:', err);
+    }
+  }
+
+  function renderDmList() {
+    if (!el.dmList) return;
+    const dms = state.activeDms || [];
+    if (dms.length === 0) {
+      el.dmList.innerHTML = '<li class="chat-target-item disabled" style="opacity:0.5; font-size:0.8rem; cursor:default;">No direct messages</li>';
+      return;
+    }
+    el.dmList.innerHTML = dms.map(dm => {
+      const isActive = state.selectedTarget.kind === 'dm' && state.selectedTarget.target === dm.node_num;
+      const nick = dm.nick || `!${dm.node_num.toString(16)}`;
+      return `
+        <li class="chat-target-item ${isActive ? 'active' : ''}" onclick="window.meshApp.switchTarget('dm', ${dm.node_num}, '@${escapeHtml(nick)}')">
+          <span>@${escapeHtml(nick)}</span>
+          <span class="node-badge" style="font-family:monospace; font-size:0.65rem;">!${(dm.node_num).toString(16)}</span>
         </li>
       `;
     }).join('');
@@ -583,6 +627,20 @@
 
   function renderMessages(messages) {
     if (!el.chatMessagesContainer) return;
+    if (!messages || messages.length === 0) {
+      const targetName = state.selectedTarget.title || 'this conversation';
+      el.chatMessagesContainer.innerHTML = `
+        <div class="chat-empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <div class="chat-empty-title">No messages in ${escapeHtml(targetName)}</div>
+          <div class="chat-empty-hint">${state.selectedTarget.kind === 'channel' ? 'Broadcast packets transmitted or received over LoRa will appear here live.' : 'Direct messages sent to or received from this node will appear here.'}</div>
+        </div>
+      `;
+      return;
+    }
+
     el.chatMessagesContainer.innerHTML = messages.map(m => {
       const isOut = m.direction === 'out';
       const senderNode = state.nodes.get(m.from_node);
@@ -1074,83 +1132,7 @@
     }
   }
 
-  // ==========================================================================
-  // Server-Sent Events (SSE) Live Feed
-  // ==========================================================================
-  function initSSE() {
-    if (state.eventSource) {
-      state.eventSource.close();
-    }
 
-    state.eventSource = new EventSource('/api/events');
-
-    state.eventSource.onopen = () => {
-      el.liveIndicator.style.display = 'flex';
-      el.liveStatusText.textContent = 'LIVE';
-    };
-
-    state.eventSource.onerror = () => {
-      el.liveStatusText.textContent = 'RECONNECTING';
-    };
-
-    state.eventSource.addEventListener('node_updated', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        if (data.node) {
-          state.nodes.set(data.node.node_num, data.node);
-          renderMapNodes();
-          renderNodesGrid();
-          updateTelemetrySummaryCards();
-        }
-      } catch (_) {}
-    });
-
-    state.eventSource.addEventListener('position_received', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        const node = state.nodes.get(data.from_node);
-        if (node) {
-          node.latitude = data.latitude;
-          node.longitude = data.longitude;
-          node.altitude = data.altitude;
-          renderMapNodes();
-        }
-      } catch (_) {}
-    });
-
-    state.eventSource.addEventListener('message_received', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        loadMessages();
-        
-        // If not in messages tab, increment unread badge
-        const isMessagesTab = document.querySelector('.nav-tab[data-tab="messages"]').classList.contains('active');
-        if (!isMessagesTab) {
-          state.unreadCount++;
-          el.unreadCountBadge.textContent = state.unreadCount;
-          el.unreadCountBadge.style.display = 'inline-block';
-        }
-      } catch (_) {}
-    });
-
-    state.eventSource.addEventListener('ack_received', () => {
-      loadMessages();
-    });
-
-    state.eventSource.addEventListener('traceroute_received', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        handleTracerouteReceived(data);
-      } catch (_) {}
-    });
-
-    state.eventSource.addEventListener('raw_packet', (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        handleRawPacket(data);
-      } catch (_) {}
-    });
-  }
 
   // ==========================================================================
   // Fetch APIs
@@ -1692,11 +1674,19 @@
               el.unreadCountBadge.textContent = state.unreadCount;
             }
           }
+          fetchConversations();
           loadMessages();
         } catch (err) {}
       });
 
-      // 5. Traceroute received
+      // 5. ACK received
+      sse.addEventListener('ack_received', () => {
+        try {
+          loadMessages();
+        } catch (err) {}
+      });
+
+      // 6. Traceroute received
       sse.addEventListener('traceroute_received', (e) => {
         try {
           const tr = JSON.parse(e.data);
@@ -1723,18 +1713,22 @@
   // ==========================================================================
   window.meshApp = {
     openDM: function(nodeNum, nick) {
-      state.selectedTarget = { kind: 'dm', target: nodeNum, title: `@${nick}` };
-      el.chatTitle.textContent = `@${nick}`;
+      const displayNick = nick || `!${nodeNum.toString(16)}`;
+      state.selectedTarget = { kind: 'dm', target: nodeNum, title: `@${displayNick}` };
+      el.chatTitle.textContent = `@${displayNick}`;
       el.chatSubtitle.textContent = `Direct Message with node ${nodeNum}`;
+      renderChannelList();
+      renderDmList();
       document.querySelector('.nav-tab[data-tab="messages"]').click();
       loadMessages();
     },
 
     switchTarget: function(kind, target, title) {
       state.selectedTarget = { kind, target, title };
-      el.chatTitle.textContent = title;
-      el.chatSubtitle.textContent = kind === 'channel' ? 'Broadcast channel' : 'Direct Message';
+      el.chatTitle.textContent = title + (kind === 'channel' ? ` (Channel ${target})` : '');
+      el.chatSubtitle.textContent = kind === 'channel' ? 'Broadcast channel' : `Direct Message with node ${target}`;
       renderChannelList();
+      renderDmList();
       loadMessages();
     },
 

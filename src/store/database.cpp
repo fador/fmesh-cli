@@ -263,10 +263,14 @@ std::vector<std::string> Database::get_all_devices() {
 std::vector<WindowKey> Database::get_all_windows(const std::string& device) {
     std::vector<WindowKey> out;
     if (!db_) return out;
-    const char* sql = "SELECT DISTINCT window_kind, window_target FROM messages WHERE device=?";
+    const char* sql = "SELECT DISTINCT window_kind, window_target FROM messages "
+                      "WHERE (device=? OR ?='' OR device='' OR device LIKE '%' || ? OR ? LIKE '%' || device)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, device.c_str(), -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW) {
         WindowKey w;
         w.device = device;
@@ -323,14 +327,18 @@ std::vector<StoredMessage> Database::recent_messages(const WindowKey& w, int lim
     const char* sql =
         "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
         "channel_idx,text,ts,packet_id,ack_state FROM messages "
-        "WHERE device=? AND window_kind=? AND window_target=? "
+        "WHERE (device=? OR ?='' OR device='' OR device LIKE '%' || ? OR ? LIKE '%' || device) "
+        "AND window_kind=? AND window_target=? "
         "ORDER BY ts DESC LIMIT ?";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_text(st, 1, w.device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 2, w.kind.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 3, w.target);
-    sqlite3_bind_int(st, 4, limit);
+    sqlite3_bind_text(st, 2, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, w.kind.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 6, w.target);
+    sqlite3_bind_int(st, 7, limit);
     while (sqlite3_step(st) == SQLITE_ROW) {
         StoredMessage m;
         m.rowid = sqlite3_column_int64(st, 0);
@@ -595,16 +603,19 @@ std::vector<StoredMessage> Database::get_messages_paginated(const WindowKey& w, 
     const char* sql =
         "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
         "channel_idx,text,ts,packet_id,ack_state FROM messages "
-        "WHERE (device=? OR ?='') AND window_kind=? AND window_target=? "
+        "WHERE (device=? OR ?='' OR device='' OR device LIKE '%' || ? OR ? LIKE '%' || device) "
+        "AND window_kind=? AND window_target=? "
         "ORDER BY ts DESC LIMIT ? OFFSET ?";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_text(st, 1, w.device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, w.device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 3, w.kind.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 4, w.target);
-    sqlite3_bind_int(st, 5, limit);
-    sqlite3_bind_int(st, 6, offset);
+    sqlite3_bind_text(st, 3, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, w.kind.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 6, w.target);
+    sqlite3_bind_int(st, 7, limit);
+    sqlite3_bind_int(st, 8, offset);
     while (sqlite3_step(st) == SQLITE_ROW) {
         StoredMessage m;
         m.rowid = sqlite3_column_int64(st, 0);

@@ -242,3 +242,63 @@ TEST(WebService, PacketActivityPipeline) {
     web.stop();
 }
 
+TEST(WebService, MessageAndConversationsApi) {
+    meshcli::MeshService service;
+    service.open_database(":memory:");
+    auto& db = service.database();
+
+    // Insert a channel broadcast message with empty device string
+    meshcli::StoredMessage m1;
+    m1.device = "";
+    m1.window_kind = "channel";
+    m1.window_target = 0;
+    m1.direction = "in";
+    m1.from_node = 0x12345678;
+    m1.to_node = 0xFFFFFFFF;
+    m1.channel_idx = 0;
+    m1.text = "Broadcast alert on Primary";
+    m1.ts = 1000;
+    m1.packet_id = 9991;
+    db.insert_message(m1);
+
+    // Insert a DM with full stream device id
+    meshcli::StoredMessage m2;
+    m2.device = "stream:mesh:192.168.178.23:4404";
+    m2.window_kind = "dm";
+    m2.window_target = 0xAABBCCDD;
+    m2.direction = "out";
+    m2.from_node = 0x12345678;
+    m2.to_node = 0xAABBCCDD;
+    m2.channel_idx = 0;
+    m2.text = "Hello Direct Message";
+    m2.ts = 1010;
+    m2.packet_id = 9992;
+    db.insert_message(m2);
+
+    meshcli::WebService web(service);
+    EXPECT_TRUE(web.start("127.0.0.1", 0, ""));
+    int port = web.bound_port();
+
+    // 1. Query channel messages with device parameter - should return m1 even though m1.device is empty
+    std::string req1 = "GET /api/messages?device=stream:mesh:192.168.178.23:4404&kind=channel&target=0 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res1 = http_client_request(port, req1);
+    EXPECT_NE(res1.find("200 OK"), std::string::npos);
+    EXPECT_NE(res1.find("Broadcast alert on Primary"), std::string::npos);
+
+    // 2. Query DM messages
+    std::string req2 = "GET /api/messages?device=stream:mesh:192.168.178.23:4404&kind=dm&target=" + std::to_string(0xAABBCCDD) + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res2 = http_client_request(port, req2);
+    EXPECT_NE(res2.find("200 OK"), std::string::npos);
+    EXPECT_NE(res2.find("Hello Direct Message"), std::string::npos);
+
+    // 3. Query conversations list
+    std::string req3 = "GET /api/conversations?device=stream:mesh:192.168.178.23:4404 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res3 = http_client_request(port, req3);
+    EXPECT_NE(res3.find("200 OK"), std::string::npos);
+    EXPECT_NE(res3.find("\"channels\""), std::string::npos);
+    EXPECT_NE(res3.find("\"dms\""), std::string::npos);
+    EXPECT_NE(res3.find(std::to_string(0xAABBCCDD)), std::string::npos);
+
+    web.stop();
+}
+

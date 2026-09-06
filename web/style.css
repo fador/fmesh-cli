@@ -1184,6 +1184,39 @@ body {
   border-color: var(--border-active);
 }
 
+.chat-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: auto;
+  text-align: center;
+  padding: 3rem 1.5rem;
+  color: var(--text-muted);
+}
+
+.chat-empty-state svg {
+  width: 48px;
+  height: 48px;
+  stroke: var(--text-muted);
+  opacity: 0.5;
+  margin-bottom: 1rem;
+}
+
+.chat-empty-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 0.35rem;
+}
+
+.chat-empty-hint {
+  font-size: 0.85rem;
+  max-width: 340px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 /* ==========================================================================
    4. Telemetry Dashboard
    ========================================================================== */

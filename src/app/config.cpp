@@ -69,12 +69,19 @@ bool parse_device_spec(const std::string& spec, BleDeviceSpec& out) {
         // format: mesh:<host>:<port>[:<user>:<password>]
         auto colon2 = rest.find(':');
         if (colon2 != std::string::npos) {
-            out.mesh_host = rest.substr(0, colon2) + ":" + rest.substr(colon2 + 1);
-            // Wait, we just keep the whole host:port in mesh_host for now.
-            // Let's assume mesh_host is "host:port" and user/password are empty for now if not provided,
-            // or we parse them out if there's an '@' or multiple colons.
-            // Let's just use the whole string as mesh_host. If they want user/pass, they can use the UI wizard.
-            out.mesh_host = rest;
+            auto colon3 = rest.find(':', colon2 + 1);
+            if (colon3 != std::string::npos) {
+                out.mesh_host = rest.substr(0, colon3);
+                auto colon4 = rest.find(':', colon3 + 1);
+                if (colon4 != std::string::npos) {
+                    out.mesh_user = rest.substr(colon3 + 1, colon4 - (colon3 + 1));
+                    out.mesh_password = rest.substr(colon4 + 1);
+                } else {
+                    out.mesh_user = rest.substr(colon3 + 1);
+                }
+            } else {
+                out.mesh_host = rest;
+            }
         } else {
             out.mesh_host = rest;
         }
@@ -85,6 +92,9 @@ bool parse_device_spec(const std::string& spec, BleDeviceSpec& out) {
 
 std::string format_device_spec(const BleDeviceSpec& spec) {
     if (!spec.mesh_host.empty()) {
+        if (!spec.mesh_user.empty() || !spec.mesh_password.empty()) {
+            return "mesh:" + spec.mesh_host + ":" + spec.mesh_user + ":" + spec.mesh_password;
+        }
         return "mesh:" + spec.mesh_host;
     } else if (!spec.tcp_host.empty()) {
         return "tcp:" + spec.tcp_host;
@@ -282,6 +292,14 @@ void load_config(AppConfig& c) {
         }
     }
     fclose(f);
+
+    // Fallback mesh_user/mesh_password to server_user/server_password if unspecified
+    for (auto& d : c.devices) {
+        if (!d.mesh_host.empty()) {
+            if (d.mesh_user.empty()) d.mesh_user = c.server_user;
+            if (d.mesh_password.empty()) d.mesh_password = c.server_password;
+        }
+    }
     
     // Ensure there is a password
     if (c.server_password.empty()) {

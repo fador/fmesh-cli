@@ -318,6 +318,49 @@ void WebService::register_routes() {
         return HttpResponse::json(200, arr);
     });
 
+    // GET /api/conversations
+    server_.get("/api/conversations", [this](const HttpRequest& req) {
+        std::string dev = req.get_query("device");
+        if (dev.empty()) dev = active_device_id_;
+        if (dev.empty()) {
+            auto ids = mesh_service_.device_ids();
+            if (!ids.empty()) dev = ids.front();
+        }
+        auto windows = mesh_service_.database().get_all_windows(dev);
+        const NodeDb* db = mesh_service_.db_for(dev);
+        nlohmann::json ch_arr = nlohmann::json::array();
+        nlohmann::json dm_arr = nlohmann::json::array();
+        for (const auto& w : windows) {
+            if (w.kind == "channel") {
+                std::string name = "";
+                if (db) {
+                    auto ch = db->channel(w.target);
+                    if (ch) name = ch->name;
+                }
+                ch_arr.push_back({
+                    {"index", w.target},
+                    {"name", name}
+                });
+            } else if (w.kind == "dm") {
+                std::string nick = "";
+                if (db) {
+                    auto n = db->get(w.target);
+                    if (n) nick = n->short_name.empty() ? n->long_name : n->short_name;
+                }
+                if (nick.empty()) nick = node_num_to_id(w.target);
+                dm_arr.push_back({
+                    {"node_num", w.target},
+                    {"nick", nick}
+                });
+            }
+        }
+        nlohmann::json res = {
+            {"channels", ch_arr},
+            {"dms", dm_arr}
+        };
+        return HttpResponse::json(200, res);
+    });
+
     // POST /api/messages
     server_.post("/api/messages", [this](const HttpRequest& req) {
         try {
