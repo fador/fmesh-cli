@@ -18,6 +18,7 @@
     selectedNodeNumForTelemetry: null,
     historyHours: 24,
     showLinks: true,
+    showPacketAnim: true,
     showTrails: true,
     showLabels: true,
     darkMap: false,
@@ -26,6 +27,7 @@
     nodeTrails: new Map(),      // node_num -> Leaflet Polyline
     rfLinks: [],                // array of Leaflet Polylines
     rawPackets: [],
+    packetCount: 0,
     eventSource: null
   };
 
@@ -42,6 +44,7 @@
     mapContainer: document.getElementById('map'),
     btnRecenterMap: document.getElementById('btn-recenter-map'),
     layerToggleLinks: document.getElementById('layer-toggle-links'),
+    layerTogglePacketAnim: document.getElementById('layer-toggle-packet-anim'),
     layerToggleTrails: document.getElementById('layer-toggle-trails'),
     layerToggleNames: document.getElementById('layer-toggle-names'),
     layerToggleDarkMap: document.getElementById('layer-toggle-dark-map'),
@@ -49,6 +52,11 @@
     mapNodeDrawer: document.getElementById('map-node-drawer'),
     btnCloseDrawer: document.getElementById('btn-close-drawer'),
     drawerNodeDetails: document.getElementById('drawer-node-details'),
+    packetActivityHud: document.getElementById('packet-activity-hud'),
+    packetHudList: document.getElementById('packet-hud-list'),
+    packetHudCount: document.getElementById('packet-hud-count'),
+    btnClearPacketHud: document.getElementById('btn-clear-packet-hud'),
+
 
     // Nodes
     nodeSearch: document.getElementById('node-search'),
@@ -89,6 +97,7 @@
   let layerGroupNodes = null;
   let layerGroupLinks = null;
   let layerGroupTrails = null;
+  let layerGroupPacketAnim = null;
 
   // --- Tile Layers ---
   const osmTileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
@@ -107,6 +116,7 @@
     await fetchChannels();
     await fetchLocationHistory();
     await loadMessages();
+    await fetchRecentPackets();
     initTelemetryCharts();
     initSSE();
   }
@@ -165,8 +175,10 @@
 
     layerGroupLinks = L.layerGroup().addTo(map);
     layerGroupTrails = L.layerGroup().addTo(map);
+    layerGroupPacketAnim = L.layerGroup().addTo(map);
     layerGroupNodes = L.layerGroup().addTo(map);
   }
+
 
   function updateMapTiles(useDark) {
     if (!map || !tileLayer) return;
@@ -1090,6 +1102,21 @@
       renderRfLinks();
     });
 
+    el.layerTogglePacketAnim?.addEventListener('change', () => {
+      state.showPacketAnim = el.layerTogglePacketAnim.checked;
+      if (!state.showPacketAnim && layerGroupPacketAnim) {
+        layerGroupPacketAnim.clearLayers();
+      }
+    });
+
+    el.btnClearPacketHud?.addEventListener('click', () => {
+      if (el.packetHudList) {
+        el.packetHudList.innerHTML = '<div class="packet-hud-empty">Packet history cleared. Waiting for traffic...</div>';
+      }
+      state.packetCount = 0;
+      if (el.packetHudCount) el.packetHudCount.textContent = '0 pkts';
+    });
+
     el.layerToggleTrails?.addEventListener('change', () => {
       state.showTrails = el.layerToggleTrails.checked;
       fetchLocationHistory();
@@ -1147,6 +1174,385 @@
     // Config search
     el.configSearch?.addEventListener('input', loadConfig);
   }
+
+  // ==========================================================================
+  // Live Packet Activity HUD & Map Transmission Visuals
+  // ==========================================================================
+
+  async function fetchRecentPackets() {
+    try {
+      const res = await fetch('/api/packets?limit=30');
+      if (!res.ok) return;
+      const packets = await res.json();
+      if (!Array.isArray(packets)) return;
+      packets.forEach(p => {
+        addPacketToHud(p, false);
+      });
+    } catch (err) {
+      console.warn('Error fetching recent packets:', err);
+    }
+  }
+
+  function addPacketToHud(packet, isNew = true) {
+    if (!el.packetHudList) return;
+
+    const emptyEl = el.packetHudList.querySelector('.packet-hud-empty');
+    if (emptyEl) emptyEl.remove();
+
+    state.packetCount++;
+    if (el.packetHudCount) el.packetHudCount.textContent = `${state.packetCount} pkts`;
+
+    const fromNode = state.nodes.get(packet.from_node);
+    const toNode = (packet.to_node && packet.to_node !== 0xFFFFFFFF) ? state.nodes.get(packet.to_node) : null;
+
+    const fromName = fromNode ? (fromNode.short_name || fromNode.long_name) : (packet.from_id || `!${packet.from_node.toString(16)}`);
+    const toName = packet.broadcast ? 'All (Broadcast)' : (toNode ? (toNode.short_name || toNode.long_name) : (packet.to_id || `!${packet.to_node.toString(16)}`));
+
+    let portBadgeClass = 'port-badge-text';
+    let portText = 'TXT';
+    if (packet.port_name === 'POSITION_APP') {
+      portBadgeClass = 'port-badge-pos';
+      portText = 'POS';
+    } else if (packet.port_name === 'TRACEROUTE_APP') {
+      portBadgeClass = 'port-badge-trace';
+      portText = 'TRACE';
+    } else if (packet.port_name === 'ROUTING_APP') {
+      portBadgeClass = 'port-badge-ack';
+      portText = 'ACK';
+    } else if (packet.port_name === 'NODEINFO_APP' || packet.port_name === 'TELEMETRY_APP') {
+      portBadgeClass = 'port-badge-info';
+      portText = packet.port_name === 'NODEINFO_APP' ? 'INFO' : 'TLM';
+    }
+
+    const snrText = packet.rx_snr ? `${packet.rx_snr > 0 ? '+' : ''}${packet.rx_snr.toFixed(1)}dB` : '';
+    const timeText = formatTimeAgo(packet.ts || Math.floor(Date.now() / 1000));
+
+    const item = document.createElement('div');
+    item.className = 'packet-hud-item';
+    if (!isNew) item.style.animation = 'none';
+
+    item.title = `${packet.port_name}: ${packet.summary || ''}\nFrom: ${fromName} (${packet.from_id})\nTo: ${toName} (${packet.to_id})\nClick to focus on map`;
+
+    item.innerHTML = `
+      <div class="packet-hud-left">
+        <span class="hud-port-badge ${portBadgeClass}">${portText}</span>
+        <div class="hud-nodes-flow">
+          <span class="hud-node-pill">${escapeHtml(fromName)}</span>
+          <span class="hud-arrow">&rarr;</span>
+          <span class="hud-node-pill">${escapeHtml(toName)}</span>
+        </div>
+      </div>
+      <div class="packet-hud-right">
+        ${snrText ? `<span class="hud-snr-badge">${snrText}</span>` : ''}
+        <span class="hud-time">${timeText}</span>
+      </div>
+    `;
+
+    item.addEventListener('click', () => {
+      focusPacketOnMap(packet);
+    });
+
+    el.packetHudList.prepend(item);
+
+    while (el.packetHudList.children.length > 50) {
+      el.packetHudList.lastElementChild.remove();
+    }
+  }
+
+  function focusPacketOnMap(packet) {
+    if (!map) return;
+    document.querySelector('.nav-tab[data-tab="map"]')?.click();
+
+    const fromNode = state.nodes.get(packet.from_node);
+    const toNode = (packet.to_node && packet.to_node !== 0xFFFFFFFF) ? state.nodes.get(packet.to_node) : null;
+
+    const coords = [];
+    if (fromNode && fromNode.latitude && fromNode.longitude) {
+      coords.push([fromNode.latitude, fromNode.longitude]);
+    }
+    if (toNode && toNode.latitude && toNode.longitude) {
+      coords.push([toNode.latitude, toNode.longitude]);
+    }
+
+    if (coords.length === 2) {
+      map.fitBounds(L.latLngBounds(coords), { padding: [80, 80], maxZoom: 15 });
+    } else if (coords.length === 1) {
+      map.setView(coords[0], 14);
+    }
+    animatePacketTransmission(packet);
+  }
+
+  function animatePacketTransmission(packet) {
+    if (!map || !layerGroupPacketAnim || !state.showPacketAnim) return;
+
+    const fromNode = state.nodes.get(packet.from_node);
+    const toNode = (packet.to_node && packet.to_node !== 0xFFFFFFFF) ? state.nodes.get(packet.to_node) : null;
+
+    // Flash transmitter marker pin
+    if (state.nodeMarkers.has(packet.from_node)) {
+      const marker = state.nodeMarkers.get(packet.from_node);
+      const markerEl = marker.getElement();
+      if (markerEl) {
+        markerEl.classList.remove('node-tx-pulse');
+        void markerEl.offsetWidth;
+        markerEl.classList.add('node-tx-pulse');
+        setTimeout(() => markerEl.classList.remove('node-tx-pulse'), 3600);
+      }
+    }
+
+    // Flash receiver marker pin if unicast
+    if (toNode && state.nodeMarkers.has(packet.to_node)) {
+      const marker = state.nodeMarkers.get(packet.to_node);
+      const markerEl = marker.getElement();
+      if (markerEl) {
+        markerEl.classList.remove('node-rx-pulse');
+        void markerEl.offsetWidth;
+        markerEl.classList.add('node-rx-pulse');
+        setTimeout(() => markerEl.classList.remove('node-rx-pulse'), 3600);
+      }
+    }
+
+    // 1. Broadcast packet: Expanding radio ripple wave
+    if (packet.broadcast || packet.to_node === 0xFFFFFFFF || packet.port_name === 'POSITION_APP') {
+      if (fromNode && fromNode.latitude && fromNode.longitude) {
+        createRadioRipple([fromNode.latitude, fromNode.longitude], '#06b6d4');
+      }
+      return;
+    }
+
+    // 2. Traceroute multi-hop chain
+    if (packet.port_name === 'TRACEROUTE_APP' && Array.isArray(packet.route) && packet.route.length > 0) {
+      const hopsChain = [packet.from_node, ...packet.route];
+      if (packet.to_node && packet.to_node !== hopsChain[hopsChain.length - 1]) {
+        hopsChain.push(packet.to_node);
+      }
+      for (let i = 0; i < hopsChain.length - 1; i++) {
+        const u = hopsChain[i];
+        const v = hopsChain[i + 1];
+        const uNode = state.nodes.get(u);
+        const vNode = state.nodes.get(v);
+        if (uNode && vNode && uNode.latitude && uNode.longitude && vNode.latitude && vNode.longitude) {
+          setTimeout(() => {
+            createBeamLine([uNode.latitude, uNode.longitude], [vNode.latitude, vNode.longitude], '#a855f7', `Hop ${i + 1}`);
+          }, i * 600);
+        }
+      }
+      return;
+    }
+
+    // 3. Direct / Unicast transmission beam
+    if (fromNode && toNode && fromNode.latitude && fromNode.longitude && toNode.latitude && toNode.longitude) {
+      let beamColor = '#06b6d4';
+      if (packet.port_name === 'ROUTING_APP') beamColor = '#f59e0b';
+      else if (packet.port_name === 'TRACEROUTE_APP') beamColor = '#a855f7';
+      
+      const tooltipText = packet.port_name === 'ROUTING_APP' ? 'ACK' : (packet.rx_snr ? `${packet.rx_snr.toFixed(1)} dB` : 'Direct Packet');
+      createBeamLine([fromNode.latitude, fromNode.longitude], [toNode.latitude, toNode.longitude], beamColor, tooltipText);
+    } else if (fromNode && fromNode.latitude && fromNode.longitude) {
+      // Fallback: ripple if destination position unknown
+      createRadioRipple([fromNode.latitude, fromNode.longitude], '#f59e0b');
+    }
+  }
+
+  function createRadioRipple(latLng, color = '#06b6d4') {
+    if (!map || !layerGroupPacketAnim) return;
+
+    const circle = L.circle(latLng, {
+      radius: 400,
+      color: color,
+      weight: 2,
+      fillColor: color,
+      fillOpacity: 0.35,
+      className: 'radio-ripple-wave'
+    }).addTo(layerGroupPacketAnim);
+
+    let start = performance.now();
+    const duration = 2200;
+    const maxRadius = 3500;
+
+    function animate(now) {
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const curRadius = 400 + progress * (maxRadius - 400);
+      circle.setRadius(curRadius);
+      circle.setStyle({
+        opacity: 0.8 * (1 - progress),
+        fillOpacity: 0.35 * (1 - progress)
+      });
+
+      if (progress < 1) {
+        requestAnimationFrame(animate);
+      } else {
+        layerGroupPacketAnim.removeLayer(circle);
+      }
+    }
+    requestAnimationFrame(animate);
+  }
+
+  function createBeamLine(latLng1, latLng2, color = '#06b6d4', tooltipText = '') {
+    if (!map || !layerGroupPacketAnim) return;
+
+    const line = L.polyline([latLng1, latLng2], {
+      color: color,
+      weight: 4,
+      opacity: 0.9,
+      className: 'packet-beam-line'
+    }).addTo(layerGroupPacketAnim);
+
+    if (tooltipText) {
+      line.bindTooltip(tooltipText, {
+        permanent: true,
+        direction: 'center',
+        className: 'packet-beam-tooltip'
+      });
+    }
+
+    const photonIcon = L.divIcon({
+      className: 'packet-photon-container',
+      html: `<div class="packet-photon-dot" style="box-shadow:0 0 10px 4px ${color}, 0 0 20px 8px ${color};"></div>`,
+      iconSize: [10, 10],
+      iconAnchor: [5, 5]
+    });
+
+    const photonMarker = L.marker(latLng1, { icon: photonIcon }).addTo(layerGroupPacketAnim);
+
+    let start = performance.now();
+    const speed = 1200;
+
+    function movePhoton(now) {
+      const elapsed = now - start;
+      const t = Math.min(elapsed / speed, 1);
+      const curLat = latLng1[0] + t * (latLng2[0] - latLng1[0]);
+      const curLng = latLng1[1] + t * (latLng2[1] - latLng1[1]);
+      photonMarker.setLatLng([curLat, curLng]);
+
+      if (t < 1) {
+        requestAnimationFrame(movePhoton);
+      } else {
+        layerGroupPacketAnim.removeLayer(photonMarker);
+      }
+    }
+    requestAnimationFrame(movePhoton);
+
+    setTimeout(() => {
+      let fadeStart = performance.now();
+      function fade(now) {
+        const p = Math.min((now - fadeStart) / 600, 1);
+        line.setStyle({ opacity: 0.9 * (1 - p) });
+        if (p < 1) {
+          requestAnimationFrame(fade);
+        } else {
+          layerGroupPacketAnim.removeLayer(line);
+        }
+      }
+      requestAnimationFrame(fade);
+    }, 3800);
+  }
+
+  // ==========================================================================
+  // SSE Real-time Updates Pipeline
+  // ==========================================================================
+
+  function initSSE() {
+    if (state.eventSource) {
+      try { state.eventSource.close(); } catch (_) {}
+      state.eventSource = null;
+    }
+
+    try {
+      const sse = new EventSource('/api/events');
+      state.eventSource = sse;
+
+      sse.onopen = () => {
+        if (el.liveIndicator) {
+          el.liveIndicator.querySelector('.live-dot').className = 'live-dot active';
+          el.liveStatusText.textContent = 'LIVE';
+        }
+      };
+
+      sse.onerror = () => {
+        if (el.liveIndicator) {
+          el.liveIndicator.querySelector('.live-dot').className = 'live-dot pulse';
+          el.liveStatusText.textContent = 'RECONNECTING';
+        }
+      };
+
+      // 1. Live Packet Activity
+      sse.addEventListener('packet_activity', (e) => {
+        try {
+          const packet = JSON.parse(e.data);
+          addPacketToHud(packet, true);
+          animatePacketTransmission(packet);
+        } catch (err) {
+          console.error('Error handling packet_activity SSE:', err);
+        }
+      });
+
+      // 2. Node updated
+      sse.addEventListener('node_updated', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.node) {
+            state.nodes.set(data.node.node_num, data.node);
+            renderMapNodes();
+            renderNodesGrid();
+            updateTelemetrySummaryCards();
+          }
+        } catch (err) {}
+      });
+
+      // 3. Position received
+      sse.addEventListener('position_received', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          const node = state.nodes.get(data.from_node);
+          if (node) {
+            node.latitude = data.latitude;
+            node.longitude = data.longitude;
+            node.altitude = data.altitude;
+            renderMapNodes();
+            fetchLocationHistory();
+          }
+        } catch (err) {}
+      });
+
+      // 4. Message received
+      sse.addEventListener('message_received', (e) => {
+        try {
+          const m = JSON.parse(e.data);
+          const activeTab = document.querySelector('.nav-tab.active')?.dataset.tab;
+          if (activeTab !== 'messages') {
+            state.unreadCount++;
+            if (el.unreadCountBadge) {
+              el.unreadCountBadge.style.display = 'inline-block';
+              el.unreadCountBadge.textContent = state.unreadCount;
+            }
+          }
+          loadMessages();
+        } catch (err) {}
+      });
+
+      // 5. Traceroute received
+      sse.addEventListener('traceroute_received', (e) => {
+        try {
+          const tr = JSON.parse(e.data);
+          renderTracerouteResult(tr);
+        } catch (err) {}
+      });
+
+      // 6. Raw packet
+      sse.addEventListener('raw_packet', (e) => {
+        try {
+          const raw = JSON.parse(e.data);
+          appendRawPacket(raw);
+        } catch (err) {}
+      });
+
+    } catch (err) {
+      console.warn('SSE initialization failed:', err);
+    }
+  }
+
 
   // ==========================================================================
   // Public Global API for Inline Callbacks

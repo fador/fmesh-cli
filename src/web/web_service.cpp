@@ -95,7 +95,49 @@ nlohmann::json location_to_json(const Database::LocationRow& r) {
     };
 }
 
+nlohmann::json packet_activity_to_json(const PacketActivity& p) {
+    nlohmann::json route_arr = nlohmann::json::array();
+    for (uint32_t hop : p.route) route_arr.push_back(node_num_to_id(hop));
+    return {
+        {"device", p.device},
+        {"from_node", p.from_node},
+        {"from_id", p.from_id.empty() ? node_num_to_id(p.from_node) : p.from_id},
+        {"to_node", p.to_node},
+        {"to_id", p.to_id.empty() ? (p.broadcast ? "!ffffffff" : node_num_to_id(p.to_node)) : p.to_id},
+        {"packet_id", p.packet_id},
+        {"channel_idx", p.channel_idx},
+        {"port_name", p.port_name},
+        {"summary", p.summary},
+        {"rx_snr", p.rx_snr},
+        {"rx_rssi", p.rx_rssi},
+        {"hop_limit", p.hop_limit},
+        {"hop_start", p.hop_start},
+        {"broadcast", p.broadcast},
+        {"route", p.route},
+        {"route_ids", route_arr},
+        {"snr_towards", p.snr_towards},
+        {"ts", p.ts}
+    };
+}
+
 } // namespace
+
+std::vector<PacketActivity> WebService::recent_packets() const {
+    std::lock_guard<std::mutex> lock(packets_mu_);
+    return {recent_packets_.begin(), recent_packets_.end()};
+}
+
+void WebService::record_and_broadcast_activity(const PacketActivity& act) {
+    {
+        std::lock_guard<std::mutex> lock(packets_mu_);
+        recent_packets_.push_back(act);
+        if (recent_packets_.size() > kMaxRecentPackets) {
+            recent_packets_.pop_front();
+        }
+    }
+    server_.broadcast_sse("packet_activity", packet_activity_to_json(act).dump());
+}
+
 
 WebService::WebService(MeshService& mesh_service)
     : mesh_service_(mesh_service) {
@@ -303,6 +345,23 @@ void WebService::register_routes() {
                 return HttpResponse::error("Failed to transmit message");
             }
 
+            const NodeDb* db = mesh_service_.db_for(device);
+            uint32_t my_node = db ? db->my_node_num() : 0;
+            PacketActivity act;
+            act.device = device;
+            act.from_node = my_node;
+            act.from_id = node_num_to_id(my_node);
+            act.to_node = to_node;
+            act.to_id = (to_node == kBroadcastNodeNum) ? "!ffffffff" : node_num_to_id(to_node);
+            act.packet_id = packet_id;
+            act.channel_idx = channel_idx;
+            act.port_name = "TEXT_MESSAGE_APP";
+            act.summary = text;
+            act.broadcast = (to_node == kBroadcastNodeNum);
+            act.ts = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+            record_and_broadcast_activity(act);
+
             return HttpResponse::json(200, {
                 {"success", true},
                 {"packet_id", packet_id},
@@ -341,6 +400,24 @@ void WebService::register_routes() {
                 return HttpResponse::error("Failed to dispatch traceroute");
             }
 
+            const NodeDb* db = mesh_service_.db_for(device);
+            uint32_t my_node = db ? db->my_node_num() : 0;
+            PacketActivity act;
+            act.device = device;
+            act.from_node = my_node;
+            act.from_id = node_num_to_id(my_node);
+            act.to_node = to_node;
+            act.to_id = node_num_to_id(to_node);
+            act.packet_id = packet_id;
+            act.channel_idx = channel_idx;
+            act.hop_limit = hop_limit;
+            act.port_name = "TRACEROUTE_APP";
+            act.summary = "Traceroute request to " + node_num_to_id(to_node);
+            act.broadcast = false;
+            act.ts = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+            record_and_broadcast_activity(act);
+
             return HttpResponse::json(200, {
                 {"success", true},
                 {"packet_id", packet_id},
@@ -363,7 +440,14 @@ void WebService::register_routes() {
         auto lines = mesh_service_.config_lines_for(device);
         nlohmann::json arr = nlohmann::json::array();
         for (const auto& line : lines) {
-            arr.push_back(line);
+            size_t eq = line.find('=');
+            if (eq != std::string::npos) {
+                std::string k = line.substr(0, eq);
+                std::string v = line.substr(eq + 1);
+                while (!k.empty() && k.back() == ' ') k.pop_back();
+                while (!v.empty() && v.front() == ' ') v.erase(v.begin());
+                arr.push_back({{"key", k}, {"value", v}});
+            }
         }
         return HttpResponse::json(200, {{"device", device}, {"config", arr}});
     });
@@ -410,6 +494,21 @@ void WebService::register_routes() {
         }
         return HttpResponse::json(200, arr);
     });
+
+    // GET /api/packets
+    server_.get("/api/packets", [this](const HttpRequest& req) {
+        int limit = 50;
+        try { limit = std::stoi(req.get_query("limit", "50")); } catch (...) {}
+        if (limit <= 0) limit = 50;
+
+        auto all = recent_packets();
+        nlohmann::json arr = nlohmann::json::array();
+        size_t start_idx = (all.size() > static_cast<size_t>(limit)) ? (all.size() - static_cast<size_t>(limit)) : 0;
+        for (size_t i = start_idx; i < all.size(); ++i) {
+            arr.push_back(packet_activity_to_json(all[i]));
+        }
+        return HttpResponse::json(200, arr);
+    });
 }
 
 void WebService::on_mesh_event(const MeshEvent& ev) {
@@ -424,6 +523,23 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                 {"is_new", e.is_new}
             };
             server_.broadcast_sse("node_updated", data.dump());
+
+            if (e.is_new || e.node.battery_level || e.node.voltage) {
+                PacketActivity act;
+                act.device = e.device;
+                act.from_node = e.node.node_num;
+                act.from_id = e.node.node_id;
+                act.to_node = kBroadcastNodeNum;
+                act.to_id = "!ffffffff";
+                act.port_name = e.is_new ? "NODEINFO_APP" : "TELEMETRY_APP";
+                act.summary = e.node.long_name.empty() ? e.node.node_id : e.node.long_name;
+                if (e.node.snr) act.rx_snr = *e.node.snr;
+                act.broadcast = true;
+                act.ts = e.node.last_heard ? *e.node.last_heard : static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count());
+                record_and_broadcast_activity(act);
+            }
         }
         else if constexpr (std::is_same_v<T, EvPositionReceived>) {
             nlohmann::json data = {
@@ -437,6 +553,20 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                 {"rx_time", e.rx_time}
             };
             server_.broadcast_sse("position_received", data.dump());
+
+            PacketActivity act;
+            act.device = e.device;
+            act.from_node = e.from_node;
+            act.from_id = node_num_to_id(e.from_node);
+            act.to_node = kBroadcastNodeNum;
+            act.to_id = "!ffffffff";
+            act.port_name = "POSITION_APP";
+            act.summary = "GPS Position Update";
+            act.broadcast = true;
+            act.ts = e.rx_time ? e.rx_time : static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+            record_and_broadcast_activity(act);
         }
         else if constexpr (std::is_same_v<T, EvTextReceived>) {
             nlohmann::json data = {
@@ -453,6 +583,26 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                 {"broadcast", e.broadcast}
             };
             server_.broadcast_sse("message_received", data.dump());
+
+            PacketActivity act;
+            act.device = e.device;
+            act.from_node = e.from_node;
+            act.from_id = node_num_to_id(e.from_node);
+            act.to_node = e.to_node;
+            act.to_id = (e.broadcast || e.to_node == kBroadcastNodeNum) ? "!ffffffff" : node_num_to_id(e.to_node);
+            act.packet_id = e.packet_id;
+            act.channel_idx = e.channel_idx;
+            act.port_name = "TEXT_MESSAGE_APP";
+            act.summary = e.text;
+            act.rx_snr = e.rx_snr;
+            act.rx_rssi = e.rx_rssi;
+            act.hop_limit = e.hop_limit;
+            act.hop_start = e.hop_start;
+            act.broadcast = e.broadcast;
+            act.ts = e.rx_time ? e.rx_time : static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+            record_and_broadcast_activity(act);
         }
         else if constexpr (std::is_same_v<T, EvAckReceived>) {
             nlohmann::json data = {
@@ -464,6 +614,23 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                 {"error_reason", e.error_reason}
             };
             server_.broadcast_sse("ack_received", data.dump());
+
+            const NodeDb* db = mesh_service_.db_for(e.device);
+            uint32_t my_node = db ? db->my_node_num() : 0;
+            PacketActivity act;
+            act.device = e.device;
+            act.from_node = e.from_node;
+            act.from_id = node_num_to_id(e.from_node);
+            act.to_node = my_node;
+            act.to_id = node_num_to_id(my_node);
+            act.packet_id = e.packet_id;
+            act.port_name = "ROUTING_APP";
+            act.summary = e.success ? "ACK (Acknowledged)" : ("NAK (" + e.error_reason + ")");
+            act.broadcast = false;
+            act.ts = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+            record_and_broadcast_activity(act);
         }
         else if constexpr (std::is_same_v<T, EvTracerouteReceived>) {
             nlohmann::json route_arr = nlohmann::json::array();
@@ -486,7 +653,24 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                 {"snr_back", e.snr_back}
             };
             server_.broadcast_sse("traceroute_received", data.dump());
+
+            PacketActivity act;
+            act.device = e.device;
+            act.from_node = e.from_node;
+            act.from_id = node_num_to_id(e.from_node);
+            act.to_node = e.to_node;
+            act.to_id = node_num_to_id(e.to_node);
+            act.port_name = "TRACEROUTE_APP";
+            act.summary = "Traceroute response (" + std::to_string(e.route.size()) + " hops)";
+            act.route = e.route;
+            act.snr_towards = e.snr_towards;
+            act.broadcast = false;
+            act.ts = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+            record_and_broadcast_activity(act);
         }
+
         else if constexpr (std::is_same_v<T, EvConnected>) {
             nlohmann::json data = {
                 {"type", "device_connected"},

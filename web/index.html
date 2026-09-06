@@ -105,6 +105,11 @@
                 <span class="toggle-label">RF Network Links</span>
               </label>
               <label class="toggle-control">
+                <input type="checkbox" id="layer-toggle-packet-anim" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">Live Packet Activity</span>
+              </label>
+              <label class="toggle-control">
                 <input type="checkbox" id="layer-toggle-trails" checked>
                 <span class="toggle-slider"></span>
                 <span class="toggle-label">GPS Breadcrumb Trails</span>
@@ -133,6 +138,21 @@
             </div>
           </div>
 
+          <!-- Floating Live Packet Activity HUD Overlay -->
+          <div id="packet-activity-hud" class="packet-activity-hud">
+            <div class="packet-hud-header">
+              <div class="packet-hud-title-wrap">
+                <span class="pulse-dot"></span>
+                <span class="packet-hud-title">Live RF Packet Traffic</span>
+                <span class="packet-hud-count" id="packet-hud-count">0 pkts</span>
+              </div>
+              <button id="btn-clear-packet-hud" class="btn-clear-hud" title="Clear HUD list">Clear</button>
+            </div>
+            <div class="packet-hud-list" id="packet-hud-list">
+              <div class="packet-hud-empty">Listening for live packet transmissions...</div>
+            </div>
+          </div>
+
           <!-- Map Side Drawer for Selected Node Details -->
           <aside id="map-node-drawer" class="node-drawer collapsed">
             <button id="btn-close-drawer" class="btn-close">&times;</button>
@@ -140,6 +160,7 @@
               <div class="empty-state">Click any node marker on the map to inspect details, breadcrumbs, and telemetry.</div>
             </div>
           </aside>
+
         </div>
       </section>
 

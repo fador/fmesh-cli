@@ -192,3 +192,53 @@ TEST(WebService, StaticFilesServing) {
 
     web.stop();
 }
+
+TEST(WebService, PacketActivityPipeline) {
+    meshcli::MeshService service;
+    meshcli::WebService web(service);
+    EXPECT_TRUE(web.start("127.0.0.1", 0, "web"));
+    int port = web.bound_port();
+
+    // Record some mock packet activities
+    meshcli::PacketActivity p1;
+    p1.device = "test-device";
+    p1.from_node = 0x11112222;
+    p1.from_id = "!11112222";
+    p1.to_node = 0x33334444;
+    p1.to_id = "!33334444";
+    p1.port_name = "TEXT_MESSAGE_APP";
+    p1.summary = "Hello from Node 1";
+    p1.rx_snr = 7.5f;
+    p1.broadcast = false;
+    p1.ts = 1000;
+    web.record_and_broadcast_activity(p1);
+
+    meshcli::PacketActivity p2;
+    p2.device = "test-device";
+    p2.from_node = 0x33334444;
+    p2.from_id = "!33334444";
+    p2.to_node = 0xFFFFFFFF;
+    p2.to_id = "!ffffffff";
+    p2.port_name = "POSITION_APP";
+    p2.summary = "GPS Position";
+    p2.broadcast = true;
+    p2.ts = 1005;
+    web.record_and_broadcast_activity(p2);
+
+    // Verify recent_packets()
+    auto packets = web.recent_packets();
+    EXPECT_EQ(packets.size(), 2);
+    EXPECT_EQ(packets[0].from_node, 0x11112222);
+    EXPECT_EQ(packets[1].broadcast, true);
+
+    // Query /api/packets via HTTP
+    std::string req = "GET /api/packets HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res = http_client_request(port, req);
+    EXPECT_NE(res.find("200 OK"), std::string::npos);
+    EXPECT_NE(res.find("!11112222"), std::string::npos);
+    EXPECT_NE(res.find("TEXT_MESSAGE_APP"), std::string::npos);
+    EXPECT_NE(res.find("POSITION_APP"), std::string::npos);
+
+    web.stop();
+}
+
