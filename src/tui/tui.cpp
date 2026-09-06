@@ -1212,25 +1212,77 @@ void TuiApp::render_server_config() {
 }
 
 void TuiApp::render_scrollback(const Window& w, int top, int height, int width) {
+    if (height <= 0 || width <= 0) return;
     const auto& lines = w.lines();
     if (lines.empty()) {
+        mvhline(top, 0, ' ', width);
         mvprintw(top, 0, "(empty)");
         return;
     }
-    int total = static_cast<int>(lines.size());
-    int end_idx = total - w.scroll_offset();
-    int start_idx = std::max(0, end_idx - height);
-    int row = top + (height - (end_idx - start_idx));
+
+    struct DisplayLine {
+        std::string text;
+        int color_pair = 0;
+        bool is_meta = false;
+    };
+
+    std::vector<DisplayLine> dlines;
+    std::vector<int> line_vcounts;
+    line_vcounts.reserve(lines.size());
+
+    for (const auto& ln : lines) {
+        auto wrapped = wrap_text(ln.text, width);
+        line_vcounts.push_back(static_cast<int>(wrapped.size()));
+        for (auto& s : wrapped) {
+            dlines.push_back(DisplayLine{std::move(s), ln.color_pair, ln.is_meta});
+        }
+    }
+
+    int total_visual = static_cast<int>(dlines.size());
+    if (total_visual == 0) {
+        mvhline(top, 0, ' ', width);
+        mvprintw(top, 0, "(empty)");
+        return;
+    }
+
+    int total_lines = static_cast<int>(lines.size());
+    int end_idx = total_visual;
+    for (int i = 0; i < w.scroll_offset() && i < total_lines; ++i) {
+        end_idx -= line_vcounts[total_lines - 1 - i];
+    }
+
+    int start_idx = 0;
+    int row = top;
+
+    if (total_visual < height) {
+        start_idx = 0;
+        end_idx = total_visual;
+        row = top + (height - total_visual);
+    } else {
+        if (end_idx < height) {
+            end_idx = height;
+            start_idx = 0;
+            row = top;
+        } else {
+            start_idx = end_idx - height;
+            row = top;
+        }
+    }
+
+    for (int r = top; r < row; ++r) {
+        mvhline(r, 0, ' ', width);
+    }
+
     for (int i = start_idx; i < end_idx; ++i, ++row) {
-        const Line& ln = lines[i];
-        if (ln.color_pair) attron(COLOR_PAIR(ln.color_pair));
-        if (ln.is_meta) attron(A_DIM);
-        std::string s = ln.text;
+        const DisplayLine& dln = dlines[i];
+        if (dln.color_pair) attron(COLOR_PAIR(dln.color_pair));
+        if (dln.is_meta) attron(A_DIM);
+        std::string s = dln.text;
         if (static_cast<int>(s.size()) > width) s = s.substr(0, width);
         mvhline(row, 0, ' ', width);
         mvprintw(row, 0, "%s", s.c_str());
-        if (ln.is_meta) attroff(A_DIM);
-        if (ln.color_pair) attroff(COLOR_PAIR(ln.color_pair));
+        if (dln.is_meta) attroff(A_DIM);
+        if (dln.color_pair) attroff(COLOR_PAIR(dln.color_pair));
     }
 }
 

@@ -108,4 +108,92 @@ void Window::scroll_to_bottom() {
     scroll_offset_ = 0;
 }
 
+std::vector<std::string> wrap_text(const std::string& text, int width) {
+    std::vector<std::string> result;
+    if (width <= 0) return result;
+    if (text.empty()) {
+        result.push_back("");
+        return result;
+    }
+
+    if (text.find('\n') == std::string::npos && static_cast<int>(text.size()) <= width) {
+        result.push_back(text);
+        return result;
+    }
+
+    size_t line_start = 0;
+    while (line_start <= text.size()) {
+        size_t nl_pos = text.find('\n', line_start);
+        std::string segment = (nl_pos == std::string::npos)
+                                  ? text.substr(line_start)
+                                  : text.substr(line_start, nl_pos - line_start);
+
+        if (segment.empty()) {
+            result.push_back("");
+        } else if (static_cast<int>(segment.size()) <= width) {
+            result.push_back(segment);
+        } else {
+            const std::string indent = (width > 15) ? "  " : "";
+            const int indent_w = static_cast<int>(indent.size());
+            size_t seg_pos = 0;
+            bool first = true;
+
+            while (seg_pos < segment.size()) {
+                int avail = first ? width : (width - indent_w);
+                if (avail <= 0) avail = 1;
+
+                size_t remaining = segment.size() - seg_pos;
+                if (static_cast<int>(remaining) <= avail) {
+                    if (first) {
+                        result.push_back(segment.substr(seg_pos));
+                    } else {
+                        result.push_back(indent + segment.substr(seg_pos));
+                    }
+                    break;
+                }
+
+                size_t max_chunk = static_cast<size_t>(avail);
+                // Ensure we don't break in the middle of a multi-byte UTF-8 sequence
+                while (max_chunk > 0 && (static_cast<unsigned char>(segment[seg_pos + max_chunk]) & 0xC0) == 0x80) {
+                    max_chunk--;
+                }
+                if (max_chunk == 0) {
+                    max_chunk = 1;
+                    while (seg_pos + max_chunk < segment.size() &&
+                           (static_cast<unsigned char>(segment[seg_pos + max_chunk]) & 0xC0) == 0x80) {
+                        max_chunk++;
+                    }
+                }
+
+                size_t brk = segment.rfind(' ', seg_pos + max_chunk);
+                if (brk != std::string::npos && brk > seg_pos) {
+                    std::string part = segment.substr(seg_pos, brk - seg_pos);
+                    if (first) {
+                        result.push_back(part);
+                    } else {
+                        result.push_back(indent + part);
+                    }
+                    seg_pos = brk;
+                    while (seg_pos < segment.size() && segment[seg_pos] == ' ') {
+                        seg_pos++;
+                    }
+                } else {
+                    std::string part = segment.substr(seg_pos, max_chunk);
+                    if (first) {
+                        result.push_back(part);
+                    } else {
+                        result.push_back(indent + part);
+                    }
+                    seg_pos += max_chunk;
+                }
+                first = false;
+            }
+        }
+
+        if (nl_pos == std::string::npos) break;
+        line_start = nl_pos + 1;
+    }
+    return result;
+}
+
 } // namespace meshcli

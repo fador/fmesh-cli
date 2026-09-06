@@ -31,6 +31,10 @@ struct Line {
     uint32_t ts = 0;          // timestamp of the line (0 if unknown)
 };
 
+// Word-wraps text to fit within `width` columns.
+// Continuation lines are indented by 2 spaces if width > 15.
+std::vector<std::string> wrap_text(const std::string& text, int width);
+
 class Window {
 public:
     explicit Window(WindowTarget t, std::string title);

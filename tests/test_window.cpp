@@ -85,3 +85,58 @@ TEST(WindowManager, SelectRelativeWraps) {
     wm.select_relative(1);
     EXPECT_EQ(wm.current_index(), 1);
 }
+
+TEST(WrapText, FitsInWidth) {
+    auto res = wrap_text("hello world", 20);
+    ASSERT_EQ(res.size(), 1u);
+    EXPECT_EQ(res[0], "hello world");
+
+    res = wrap_text("12345", 5);
+    ASSERT_EQ(res.size(), 1u);
+    EXPECT_EQ(res[0], "12345");
+}
+
+TEST(WrapText, WordBoundaryWrap) {
+    std::string text = "the quick brown fox jumps over the lazy dog";
+    auto res = wrap_text(text, 20);
+    // Line 0: "the quick brown fox" (19 chars <= 20)
+    // Continuation line: indented by 2 spaces ("  ")
+    // Line 1: "  jumps over the" (16 chars <= 20)
+    // Line 2: "  lazy dog" (10 chars <= 20)
+    ASSERT_EQ(res.size(), 3u);
+    EXPECT_EQ(res[0], "the quick brown fox");
+    EXPECT_EQ(res[1], "  jumps over the");
+    EXPECT_EQ(res[2], "  lazy dog");
+}
+
+TEST(WrapText, LongTokenHardWrap) {
+    std::string text = "http://example.com/very/long/url/without/spaces";
+    auto res = wrap_text(text, 16);
+    // First line 16 chars: "http://example.c"
+    // Next line: indent "  " (2 chars) + 14 chars = 16 chars: "  om/very/long/u"
+    // Next line: indent "  " + 14 chars: "  rl/without/spa"
+    // Next line: indent "  " + 3 chars: "  ces"
+    ASSERT_GT(res.size(), 1u);
+    for (const auto& line : res) {
+        EXPECT_TRUE(static_cast<int>(line.size()) <= 16);
+    }
+}
+
+TEST(WrapText, MultilineWithNewlines) {
+    std::string text = "line one\nline two is longer and should wrap";
+    auto res = wrap_text(text, 20);
+    ASSERT_GT(res.size(), 2u);
+    EXPECT_EQ(res[0], "line one");
+    EXPECT_EQ(res[1], "line two is longer");
+    EXPECT_EQ(res[2], "  and should wrap");
+}
+
+TEST(WrapText, EdgeCases) {
+    auto res = wrap_text("", 20);
+    ASSERT_EQ(res.size(), 1u);
+    EXPECT_EQ(res[0], "");
+
+    res = wrap_text("test", 0);
+    EXPECT_EQ(res.size(), 0u);
+}
+
