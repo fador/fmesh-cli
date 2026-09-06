@@ -1272,6 +1272,37 @@ body {
   width: 100%;
 }
 
+.chart-empty-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-style: italic;
+  pointer-events: none;
+  z-index: 5;
+  text-align: center;
+  padding: 1rem;
+}
+
+.chart-empty-overlay svg {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+
 /* ==========================================================================
    5. Diagnostics & Traceroute
    ========================================================================== */

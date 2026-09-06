@@ -259,23 +259,48 @@
           <div class="charts-grid">
             <div class="chart-card">
               <h3>Battery & Voltage</h3>
-              <div class="chart-wrapper"><canvas id="chart-battery"></canvas></div>
+              <div class="chart-wrapper">
+                <canvas id="chart-battery"></canvas>
+                <div class="chart-empty-overlay" id="overlay-battery" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><rect x="1" y="6" width="18" height="12" rx="2"/><line x1="23" y1="11" x2="23" y2="13"/></svg>
+                  <span>No battery or voltage telemetry reported</span>
+                </div>
+              </div>
             </div>
             <div class="chart-card">
               <h3>Temperature & Humidity</h3>
-              <div class="chart-wrapper"><canvas id="chart-environment"></canvas></div>
+              <div class="chart-wrapper">
+                <canvas id="chart-environment"></canvas>
+                <div class="chart-empty-overlay" id="overlay-environment" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>
+                  <span>No temperature or humidity sensor data reported</span>
+                </div>
+              </div>
             </div>
             <div class="chart-card">
               <h3>Barometric Pressure (hPa)</h3>
-              <div class="chart-wrapper"><canvas id="chart-pressure"></canvas></div>
+              <div class="chart-wrapper">
+                <canvas id="chart-pressure"></canvas>
+                <div class="chart-empty-overlay" id="overlay-pressure" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><circle cx="12" cy="12" r="10"/><path d="m14 14-4-4"/><path d="m14 10-4 4"/></svg>
+                  <span>No barometric pressure sensor data reported</span>
+                </div>
+              </div>
             </div>
             <div class="chart-card">
               <h3>Channel & Air Utilization</h3>
-              <div class="chart-wrapper"><canvas id="chart-utilization"></canvas></div>
+              <div class="chart-wrapper">
+                <canvas id="chart-utilization"></canvas>
+                <div class="chart-empty-overlay" id="overlay-utilization" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><path d="M2 20h20"/><path d="M5 20v-4"/><path d="M12 20V4"/><path d="M19 20v-8"/></svg>
+                  <span>No channel utilization metrics reported</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
+
 
       <!-- 5. DIAGNOSTICS & TRACEROUTE VIEW -->
       <section id="tab-diagnostics" class="tab-pane">

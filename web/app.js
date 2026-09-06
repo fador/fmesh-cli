@@ -28,6 +28,7 @@
     rfLinks: [],                // array of Leaflet Polylines
     rawPackets: [],
     packetCount: 0,
+    telemetryHistory: new Map(), // node_num -> Array<{ts, battery_level, voltage, temperature, relative_humidity, barometric_pressure, channel_util, air_util_tx}>
     eventSource: null
   };
 
@@ -57,7 +58,6 @@
     packetHudCount: document.getElementById('packet-hud-count'),
     btnClearPacketHud: document.getElementById('btn-clear-packet-hud'),
 
-
     // Nodes
     nodeSearch: document.getElementById('node-search'),
     nodeSort: document.getElementById('node-sort'),
@@ -76,6 +76,11 @@
     // Telemetry
     telemetryNodeSelect: document.getElementById('telemetry-node-select'),
     metricsSummaryCards: document.getElementById('metrics-summary-cards'),
+    overlayBattery: document.getElementById('overlay-battery'),
+    overlayEnvironment: document.getElementById('overlay-environment'),
+    overlayPressure: document.getElementById('overlay-pressure'),
+    overlayUtilization: document.getElementById('overlay-utilization'),
+
 
     // Diagnostics
     tracerouteTargetSelect: document.getElementById('traceroute-target-select'),
@@ -145,11 +150,15 @@
         el.unreadCountBadge.style.display = 'none';
         scrollToChatBottom();
       }
+      if (targetTab === 'telemetry') {
+        updateTelemetryView();
+      }
       if (targetTab === 'config') {
         loadConfig();
       }
     });
   }
+
 
   // ==========================================================================
   // OpenStreetMap Setup
@@ -650,8 +659,48 @@
   }
 
   // ==========================================================================
-  // Telemetry Dashboard & Charts
+  // Telemetry Dashboard & Charts (Real Data Only)
   // ==========================================================================
+  function recordTelemetrySample(node) {
+    if (!node) return;
+    const hasAny = node.battery_level != null || node.voltage != null ||
+                   node.temperature != null || node.relative_humidity != null ||
+                   node.barometric_pressure != null || node.channel_util != null ||
+                   node.air_util_tx != null;
+    if (!hasAny) return;
+
+    if (!state.telemetryHistory.has(node.node_num)) {
+      state.telemetryHistory.set(node.node_num, []);
+    }
+    const samples = state.telemetryHistory.get(node.node_num);
+    const ts = node.last_heard || Math.floor(Date.now() / 1000);
+
+    if (samples.length > 0 && samples[samples.length - 1].ts === ts) {
+      samples[samples.length - 1] = {
+        ts,
+        battery_level: node.battery_level,
+        voltage: node.voltage,
+        temperature: node.temperature,
+        relative_humidity: node.relative_humidity,
+        barometric_pressure: node.barometric_pressure,
+        channel_util: node.channel_util,
+        air_util_tx: node.air_util_tx
+      };
+    } else {
+      samples.push({
+        ts,
+        battery_level: node.battery_level,
+        voltage: node.voltage,
+        temperature: node.temperature,
+        relative_humidity: node.relative_humidity,
+        barometric_pressure: node.barometric_pressure,
+        channel_util: node.channel_util,
+        air_util_tx: node.air_util_tx
+      });
+      if (samples.length > 50) samples.shift();
+    }
+  }
+
   function initTelemetryCharts() {
     if (!window.Chart) return;
 
@@ -666,16 +715,16 @@
       plugins: { legend: { labels: { color: '#94a3b8' } } }
     };
 
-    // 1. Battery & Voltage Chart
+    // 1. Battery & Voltage Chart (Initialized empty - real data only)
     const ctxBattery = document.getElementById('chart-battery')?.getContext('2d');
     if (ctxBattery) {
       state.charts.battery = new Chart(ctxBattery, {
         type: 'line',
         data: {
-          labels: ['-50m', '-40m', '-30m', '-20m', '-10m', 'Now'],
+          labels: [],
           datasets: [
-            { label: 'Battery (%)', data: [98, 97, 97, 96, 95, 95], borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.3 },
-            { label: 'Voltage (V)', data: [4.15, 4.14, 4.13, 4.12, 4.11, 4.10], borderColor: '#06b6d4', yAxisID: 'y1', tension: 0.3 }
+            { label: 'Battery (%)', data: [], borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.3 },
+            { label: 'Voltage (V)', data: [], borderColor: '#06b6d4', yAxisID: 'y1', tension: 0.3 }
           ]
         },
         options: {
@@ -689,69 +738,79 @@
       });
     }
 
-    // 2. Environment Chart (Temp & Humidity)
+    // 2. Environment Chart (Temp & Humidity - Initialized empty)
     const ctxEnv = document.getElementById('chart-environment')?.getContext('2d');
     if (ctxEnv) {
       state.charts.environment = new Chart(ctxEnv, {
         type: 'line',
         data: {
-          labels: ['-50m', '-40m', '-30m', '-20m', '-10m', 'Now'],
+          labels: [],
           datasets: [
-            { label: 'Temperature (°C)', data: [21.4, 21.6, 21.8, 22.0, 22.1, 22.3], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', tension: 0.3 },
-            { label: 'Humidity (%)', data: [45, 46, 46, 47, 48, 48], borderColor: '#3b82f6', tension: 0.3 }
+            { label: 'Temperature (°C)', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.1)', tension: 0.3 },
+            { label: 'Humidity (%)', data: [], borderColor: '#3b82f6', tension: 0.3 }
           ]
         },
         options: chartOptions
       });
     }
 
-    // 3. Pressure Chart
+    // 3. Pressure Chart (Initialized empty)
     const ctxPressure = document.getElementById('chart-pressure')?.getContext('2d');
     if (ctxPressure) {
       state.charts.pressure = new Chart(ctxPressure, {
         type: 'line',
         data: {
-          labels: ['-50m', '-40m', '-30m', '-20m', '-10m', 'Now'],
+          labels: [],
           datasets: [
-            { label: 'Pressure (hPa)', data: [1013.2, 1013.3, 1013.1, 1013.4, 1013.2, 1013.5], borderColor: '#8b5cf6', tension: 0.3 }
+            { label: 'Pressure (hPa)', data: [], borderColor: '#8b5cf6', tension: 0.3 }
           ]
         },
         options: chartOptions
       });
     }
 
-    // 4. Channel Utilization
+    // 4. Channel Utilization (Initialized empty)
     const ctxUtil = document.getElementById('chart-utilization')?.getContext('2d');
     if (ctxUtil) {
       state.charts.utilization = new Chart(ctxUtil, {
         type: 'bar',
         data: {
-          labels: ['Ch 0', 'Ch 1', 'Ch 2'],
+          labels: [],
           datasets: [
-            { label: 'Channel Util (%)', data: [12.4, 3.2, 0.8], backgroundColor: '#06b6d4' },
-            { label: 'Air Time TX (%)', data: [2.1, 0.5, 0.1], backgroundColor: '#10b981' }
+            { label: 'Channel Util (%)', data: [], backgroundColor: '#06b6d4' },
+            { label: 'Air Time TX (%)', data: [], backgroundColor: '#10b981' }
           ]
         },
         options: chartOptions
       });
     }
 
-    updateTelemetrySummaryCards();
+    updateTelemetryView();
   }
 
-  function updateTelemetrySummaryCards() {
-    if (!el.metricsSummaryCards) return;
-
+  function updateTelemetryView() {
     let targetNode = null;
     if (state.selectedNodeNumForTelemetry) {
       targetNode = state.nodes.get(state.selectedNodeNumForTelemetry);
     }
     if (!targetNode && state.nodes.size > 0) {
       targetNode = Array.from(state.nodes.values())[0];
+      state.selectedNodeNumForTelemetry = targetNode.node_num;
     }
 
+    if (el.telemetryNodeSelect && targetNode) {
+      el.telemetryNodeSelect.value = targetNode.node_num;
+    }
+
+    updateTelemetrySummaryCards(targetNode);
+    updateTelemetryCharts(targetNode);
+  }
+
+  function updateTelemetrySummaryCards(targetNode) {
+    if (!el.metricsSummaryCards) return;
+
     if (!targetNode) {
-      el.metricsSummaryCards.innerHTML = '<div class="empty-state">No nodes available for telemetry.</div>';
+      el.metricsSummaryCards.innerHTML = '<div class="empty-state">No node selected for telemetry.</div>';
       return;
     }
 
@@ -785,7 +844,93 @@
     `;
   }
 
+  function updateTelemetryCharts(targetNode) {
+    if (!state.charts.battery) return;
+
+    if (!targetNode) {
+      ['battery', 'environment', 'pressure', 'utilization'].forEach(key => {
+        if (state.charts[key]) {
+          state.charts[key].data.labels = [];
+          state.charts[key].data.datasets.forEach(ds => ds.data = []);
+          state.charts[key].update();
+        }
+      });
+      if (el.overlayBattery) el.overlayBattery.style.display = 'flex';
+      if (el.overlayEnvironment) el.overlayEnvironment.style.display = 'flex';
+      if (el.overlayPressure) el.overlayPressure.style.display = 'flex';
+      if (el.overlayUtilization) el.overlayUtilization.style.display = 'flex';
+      return;
+    }
+
+    recordTelemetrySample(targetNode);
+    const samples = state.telemetryHistory.get(targetNode.node_num) || [];
+
+    const formatTimeLabel = (ts) => {
+      if (!ts) return '';
+      return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    // 1. Battery & Voltage Chart (Real Data Only)
+    const batterySamples = samples.filter(s => s.battery_level != null || s.voltage != null);
+    if (batterySamples.length > 0) {
+      if (el.overlayBattery) el.overlayBattery.style.display = 'none';
+      state.charts.battery.data.labels = batterySamples.map(s => formatTimeLabel(s.ts));
+      state.charts.battery.data.datasets[0].data = batterySamples.map(s => s.battery_level != null ? s.battery_level : null);
+      state.charts.battery.data.datasets[1].data = batterySamples.map(s => s.voltage != null ? s.voltage : null);
+    } else {
+      if (el.overlayBattery) el.overlayBattery.style.display = 'flex';
+      state.charts.battery.data.labels = [];
+      state.charts.battery.data.datasets[0].data = [];
+      state.charts.battery.data.datasets[1].data = [];
+    }
+    state.charts.battery.update();
+
+    // 2. Environment Chart (Temp & Humidity - Real Data Only)
+    const envSamples = samples.filter(s => s.temperature != null || s.relative_humidity != null);
+    if (envSamples.length > 0) {
+      if (el.overlayEnvironment) el.overlayEnvironment.style.display = 'none';
+      state.charts.environment.data.labels = envSamples.map(s => formatTimeLabel(s.ts));
+      state.charts.environment.data.datasets[0].data = envSamples.map(s => s.temperature != null ? s.temperature : null);
+      state.charts.environment.data.datasets[1].data = envSamples.map(s => s.relative_humidity != null ? s.relative_humidity : null);
+    } else {
+      if (el.overlayEnvironment) el.overlayEnvironment.style.display = 'flex';
+      state.charts.environment.data.labels = [];
+      state.charts.environment.data.datasets[0].data = [];
+      state.charts.environment.data.datasets[1].data = [];
+    }
+    state.charts.environment.update();
+
+    // 3. Pressure Chart (Real Data Only)
+    const pressSamples = samples.filter(s => s.barometric_pressure != null);
+    if (pressSamples.length > 0) {
+      if (el.overlayPressure) el.overlayPressure.style.display = 'none';
+      state.charts.pressure.data.labels = pressSamples.map(s => formatTimeLabel(s.ts));
+      state.charts.pressure.data.datasets[0].data = pressSamples.map(s => s.barometric_pressure);
+    } else {
+      if (el.overlayPressure) el.overlayPressure.style.display = 'flex';
+      state.charts.pressure.data.labels = [];
+      state.charts.pressure.data.datasets[0].data = [];
+    }
+    state.charts.pressure.update();
+
+    // 4. Channel Utilization (Real Data Only)
+    const hasUtil = targetNode.channel_util != null || targetNode.air_util_tx != null;
+    if (hasUtil) {
+      if (el.overlayUtilization) el.overlayUtilization.style.display = 'none';
+      state.charts.utilization.data.labels = [targetNode.short_name || targetNode.node_id];
+      state.charts.utilization.data.datasets[0].data = [targetNode.channel_util != null ? targetNode.channel_util : 0];
+      state.charts.utilization.data.datasets[1].data = [targetNode.air_util_tx != null ? targetNode.air_util_tx : 0];
+    } else {
+      if (el.overlayUtilization) el.overlayUtilization.style.display = 'flex';
+      state.charts.utilization.data.labels = [];
+      state.charts.utilization.data.datasets[0].data = [];
+      state.charts.utilization.data.datasets[1].data = [];
+    }
+    state.charts.utilization.update();
+  }
+
   // ==========================================================================
+
   // Diagnostics & Traceroute
   // ==========================================================================
   async function runTraceroute() {
@@ -1050,11 +1195,15 @@
       const list = await res.json();
 
       state.nodes.clear();
-      list.forEach(n => state.nodes.set(n.node_num, n));
+      list.forEach(n => {
+        state.nodes.set(n.node_num, n);
+        recordTelemetrySample(n);
+      });
 
       renderMapNodes();
       renderNodesGrid();
       updateNodePickers();
+      updateTelemetryView();
     } catch (err) {
       console.error('Error fetching nodes:', err);
     }
@@ -1065,7 +1214,12 @@
       <option value="${n.node_num}">${escapeHtml(n.long_name || n.short_name)} (${n.node_id})</option>
     `).join('');
 
-    if (el.telemetryNodeSelect) el.telemetryNodeSelect.innerHTML = options;
+    if (el.telemetryNodeSelect) {
+      el.telemetryNodeSelect.innerHTML = options;
+      if (state.selectedNodeNumForTelemetry) {
+        el.telemetryNodeSelect.value = state.selectedNodeNumForTelemetry;
+      }
+    }
     if (el.tracerouteTargetSelect) el.tracerouteTargetSelect.innerHTML = options;
   }
 
@@ -1085,6 +1239,13 @@
       await fetchChannels();
       await loadMessages();
     });
+
+    // Telemetry node select
+    el.telemetryNodeSelect?.addEventListener('change', () => {
+      state.selectedNodeNumForTelemetry = parseInt(el.telemetryNodeSelect.value, 10);
+      updateTelemetryView();
+    });
+
 
     // Map controls
     el.btnRecenterMap?.addEventListener('click', () => {
@@ -1494,9 +1655,12 @@
           const data = JSON.parse(e.data);
           if (data.node) {
             state.nodes.set(data.node.node_num, data.node);
+            recordTelemetrySample(data.node);
             renderMapNodes();
             renderNodesGrid();
-            updateTelemetrySummaryCards();
+            if (state.selectedNodeNumForTelemetry === data.node.node_num) {
+              updateTelemetryView();
+            }
           }
         } catch (err) {}
       });
@@ -1601,8 +1765,9 @@
       state.selectedNodeNumForTelemetry = nodeNum;
       document.querySelector('.nav-tab[data-tab="telemetry"]').click();
       if (el.telemetryNodeSelect) el.telemetryNodeSelect.value = nodeNum;
-      updateTelemetrySummaryCards();
+      updateTelemetryView();
     },
+
 
     selectDevice: function(deviceId) {
       state.activeDeviceId = deviceId;
