@@ -3,6 +3,7 @@
 #include "util/log.h"
 
 #include <chrono>
+#include <set>
 
 namespace meshcli {
 
@@ -421,6 +422,11 @@ void WebService::register_routes() {
         try { offset = std::stoi(req.get_query("offset", "0")); } catch (...) {}
 
         auto msgs = mesh_service_.database().get_messages_paginated(w, limit, offset);
+        if (msgs.empty() && w.kind == "channel" && !w.device.empty()) {
+            WindowKey any_dev = w;
+            any_dev.device = "";
+            msgs = mesh_service_.database().get_messages_paginated(any_dev, limit, offset);
+        }
         nlohmann::json arr = nlohmann::json::array();
         for (const auto& m : msgs) {
             arr.push_back(message_to_json(m));
@@ -437,9 +443,13 @@ void WebService::register_routes() {
             if (!ids.empty()) dev = ids.front();
         }
         auto windows = mesh_service_.database().get_all_windows(dev);
+        if (windows.empty() && !dev.empty()) {
+            windows = mesh_service_.database().get_all_windows("");
+        }
         const NodeDb* db = mesh_service_.db_for(dev);
         nlohmann::json ch_arr = nlohmann::json::array();
         nlohmann::json dm_arr = nlohmann::json::array();
+        std::set<uint32_t> seen_channels;
         for (const auto& w : windows) {
             if (w.kind == "channel") {
                 std::string name = "";
@@ -451,6 +461,7 @@ void WebService::register_routes() {
                     {"index", w.target},
                     {"name", name}
                 });
+                seen_channels.insert(w.target);
             } else if (w.kind == "dm") {
                 std::string nick = "";
                 if (db) {
@@ -463,6 +474,23 @@ void WebService::register_routes() {
                     {"nick", nick}
                 });
             }
+        }
+        if (db) {
+            for (const auto& ch : db->channels()) {
+                if (ch.role != "DISABLED" && seen_channels.find(ch.index) == seen_channels.end()) {
+                    ch_arr.push_back({
+                        {"index", ch.index},
+                        {"name", ch.name}
+                    });
+                    seen_channels.insert(ch.index);
+                }
+            }
+        }
+        if (seen_channels.find(0) == seen_channels.end()) {
+            ch_arr.push_back({
+                {"index", 0},
+                {"name", "Primary"}
+            });
         }
         nlohmann::json res = {
             {"channels", ch_arr},

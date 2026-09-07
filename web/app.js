@@ -154,7 +154,10 @@
       }
       if (targetTab === 'messages') {
         state.unreadCount = 0;
-        el.unreadCountBadge.style.display = 'none';
+        if (el.unreadCountBadge) el.unreadCountBadge.style.display = 'none';
+        fetchChannels();
+        fetchConversations();
+        loadMessages();
         scrollToChatBottom();
       }
       if (targetTab === 'telemetry') {
@@ -611,17 +614,31 @@
   async function fetchChannels() {
     try {
       const res = await fetch(`/api/channels?device=${encodeURIComponent(state.activeDeviceId)}`);
-      if (!res.ok) return;
-      state.channels = await res.json();
+      if (res.ok) {
+        const fetched = await res.json();
+        if (Array.isArray(fetched) && fetched.length > 0) {
+          fetched.forEach(ch => {
+            const idx = state.channels.findIndex(c => c.index === ch.index);
+            if (idx >= 0) {
+              state.channels[idx] = { ...state.channels[idx], ...ch };
+            } else {
+              state.channels.push(ch);
+            }
+          });
+        }
+      }
+      if (!state.channels.some(c => c.index === 0)) {
+        state.channels.unshift({ index: 0, name: 'Primary', role: 'PRIMARY' });
+      }
+      state.channels.sort((a, b) => a.index - b.index);
       renderChannelList();
 
-      // If viewing default channel 0, update title from radio channel name
-      if (state.selectedTarget.kind === 'channel' && state.selectedTarget.target === 0) {
-        const ch0 = state.channels.find(c => c.index === 0);
-        if (ch0 && ch0.name) {
-          state.selectedTarget.title = `#${ch0.name}`;
-          if (el.chatTitle) el.chatTitle.textContent = `#${ch0.name} (Channel 0)`;
-          if (el.chatSubtitle) el.chatSubtitle.textContent = `Broadcast channel [${ch0.role || 'PRIMARY'}]`;
+      if (state.selectedTarget.kind === 'channel') {
+        const curCh = state.channels.find(c => c.index === state.selectedTarget.target);
+        if (curCh && curCh.name) {
+          state.selectedTarget.title = `#${curCh.name}`;
+          if (el.chatTitle) el.chatTitle.textContent = `#${curCh.name} (Channel ${curCh.index})`;
+          if (el.chatSubtitle) el.chatSubtitle.textContent = `Broadcast channel [${curCh.role || 'PRIMARY'}]`;
         }
       }
     } catch (err) {
@@ -650,6 +667,22 @@
       if (!res.ok) return;
       const data = await res.json();
       state.activeDms = data.dms || [];
+      if (Array.isArray(data.channels) && data.channels.length > 0) {
+        data.channels.forEach(convCh => {
+          const existing = state.channels.find(c => c.index === convCh.index);
+          if (existing) {
+            if (!existing.name && convCh.name) existing.name = convCh.name;
+          } else {
+            state.channels.push({
+              index: convCh.index,
+              name: convCh.name || ('Channel ' + convCh.index),
+              role: convCh.index === 0 ? 'PRIMARY' : 'SECONDARY'
+            });
+          }
+        });
+        state.channels.sort((a, b) => a.index - b.index);
+        renderChannelList();
+      }
       renderDmList();
     } catch (err) {
       console.error('Error fetching conversations:', err);
@@ -706,8 +739,18 @@
     el.chatMessagesContainer.innerHTML = messages.map(m => {
       const isOut = m.direction === 'out';
       const senderNode = state.nodes.get(m.from_node);
-      const senderName = senderNode ? (senderNode.short_name || senderNode.long_name) : `!${(m.from_node).toString(16)}`;
-      const timeStr = new Date(m.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      let senderName = '';
+      if (isOut) {
+        senderName = 'You';
+      } else if (senderNode && (senderNode.short_name || senderNode.long_name)) {
+        senderName = senderNode.short_name || senderNode.long_name;
+      } else if (m.from_node) {
+        senderName = '!' + m.from_node.toString(16).padStart(8, '0');
+      } else {
+        senderName = 'Unknown';
+      }
+
+      const timeStr = m.ts ? new Date(m.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
 
       let ackBadge = '';
       if (isOut && m.ack_state) {
@@ -718,7 +761,7 @@
       return `
         <div class="chat-message-row ${isOut ? 'outgoing' : 'incoming'}">
           <div class="chat-message-meta">
-            <span class="chat-sender-nick">${escapeHtml(isOut ? 'You' : senderName)}</span>
+            <span class="chat-sender-nick">${escapeHtml(senderName)}</span>
             <span>${timeStr}</span>
             ${ackBadge}
           </div>

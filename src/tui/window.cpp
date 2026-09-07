@@ -9,6 +9,26 @@ Window::Window(WindowTarget t, std::string title)
     : target_(std::move(t)), title_(std::move(title)) {}
 
 void Window::append_line(Line line) {
+    if (!line.is_meta && !lines_.empty()) {
+        const auto& last = lines_.back();
+        if (!last.is_meta && last.sender_node == line.sender_node) {
+            auto pos_last = last.text.find("> ");
+            auto pos_line = line.text.find("> ");
+            if (pos_last != std::string::npos && pos_line != std::string::npos) {
+                std::string body_last = last.text.substr(pos_last + 2);
+                std::string body_line = line.text.substr(pos_line + 2);
+                if (body_last.find(" [") != std::string::npos)
+                    body_last = body_last.substr(0, body_last.rfind(" ["));
+                if (body_line.find(" [") != std::string::npos)
+                    body_line = body_line.substr(0, body_line.rfind(" ["));
+                if (body_last == body_line) {
+                    uint32_t dt = (line.ts >= last.ts) ? (line.ts - last.ts) : (last.ts - line.ts);
+                    if (dt <= 2) return;
+                }
+            }
+        }
+    }
+
     if (line.ts != 0) {
         if (last_day_ts_ != 0) {
             std::time_t old_t = last_day_ts_;

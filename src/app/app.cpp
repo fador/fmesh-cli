@@ -54,6 +54,7 @@ int run_app(int argc, char** argv, MeshService& service) {
         web_service = std::make_unique<WebService>(service);
         if (web_service->start(cfg.web_host, cfg.web_port, cfg.web_root)) {
             LOG_INFO() << "Web dashboard running at http://" << cfg.web_host << ":" << web_service->bound_port();
+            service.load_offline_history();
         } else {
             LOG_ERROR() << "Failed to start web server on " << cfg.web_host << ":" << cfg.web_port;
         }

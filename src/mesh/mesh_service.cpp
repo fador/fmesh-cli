@@ -384,6 +384,18 @@ uint32_t MeshService::send_text(const std::string& device_id,
         sync_manager_->push_message(m);
     }
     
+    EvTextReceived out_ev;
+    out_ev.device = device_id;
+    out_ev.from_node = m.from_node;
+    out_ev.to_node = to_node;
+    out_ev.channel_idx = channel_idx;
+    out_ev.packet_id = pid;
+    out_ev.rx_time = static_cast<uint32_t>(m.ts);
+    out_ev.broadcast = (to_node == kBroadcastNodeNum);
+    out_ev.want_ack = want_ack;
+    out_ev.text = text;
+    dispatch_to_ui(out_ev);
+
     return pid;
 }
 

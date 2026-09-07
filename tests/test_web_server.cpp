@@ -299,6 +299,12 @@ TEST(WebService, MessageAndConversationsApi) {
     EXPECT_NE(res3.find("\"dms\""), std::string::npos);
     EXPECT_NE(res3.find(std::to_string(0xAABBCCDD)), std::string::npos);
 
+    // 4. Query channel messages with completely mismatched device ID - should still return broadcast messages
+    std::string req4 = "GET /api/messages?device=completely_different_device&kind=channel&target=0 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res4 = http_client_request(port, req4);
+    EXPECT_NE(res4.find("200 OK"), std::string::npos);
+    EXPECT_NE(res4.find("Broadcast alert on Primary"), std::string::npos);
+
     web.stop();
 }
 
