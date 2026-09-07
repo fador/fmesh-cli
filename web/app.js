@@ -23,9 +23,12 @@
     showLabels: true,
     darkMap: false,
     charts: {},
+    myNodeNum: 0,
+    myNodeId: '',
     nodeMarkers: new Map(),     // node_num -> Leaflet Marker
     nodeTrails: new Map(),      // node_num -> Leaflet Polyline
-    rfLinks: [],                // array of Leaflet Polylines
+    rfLinks: [],                // array of raw link objects from /api/links
+    rfLinkPolylines: [],        // array of Leaflet Polylines
     rawPackets: [],
     packetCount: 0,
     telemetryHistory: new Map(), // node_num -> Array<{ts, battery_level, voltage, temperature, relative_humidity, barometric_pressure, channel_util, air_util_tx}>
@@ -118,6 +121,7 @@
     await fetchStatus();
     await fetchDevices();
     await fetchNodes();
+    await fetchRfLinks();
     await fetchChannels();
     await fetchConversations();
     await fetchLocationHistory();
@@ -205,6 +209,7 @@
   function createNodeMarkerIcon(node) {
     const shortName = node.short_name || (node.node_id ? node.node_id.slice(-4) : '????');
     const battery = node.battery_level != null ? node.battery_level : '?';
+    const isMyNode = Boolean(state.myNodeNum && node.node_num === state.myNodeNum);
     
     // Status color
     const now = Math.floor(Date.now() / 1000);
@@ -212,14 +217,19 @@
     const diffMin = (now - lastHeard) / 60;
     
     let color = '#10b981'; // green (<15 min)
-    if (diffMin > 120) color = '#64748b'; // grey (>2 hours)
+    if (isMyNode) color = '#3b82f6'; // vibrant blue for connected device
+    else if (diffMin > 120) color = '#64748b'; // grey (>2 hours)
     else if (diffMin > 15) color = '#f59e0b'; // amber
 
+    const pinGlow = isMyNode ? 'box-shadow: 0 0 14px rgba(59, 130, 246, 0.9), 0 0 4px #fff;' : '';
+    const myBadge = isMyNode ? '<span class="my-node-badge">ME</span>' : '';
+
     const html = `
-      <div class="custom-node-marker">
-        <div class="marker-pin" style="background: ${color};"></div>
+      <div class="custom-node-marker ${isMyNode ? 'my-node-marker' : ''}">
+        <div class="marker-pin" style="background: ${color}; ${pinGlow}"></div>
         <span class="marker-avatar">${escapeHtml(shortName)}</span>
-        ${state.showLabels ? `<span class="marker-label">${escapeHtml(node.long_name || shortName)} (${battery}%)</span>` : ''}
+        ${myBadge}
+        ${state.showLabels ? `<span class="marker-label ${isMyNode ? 'local-label' : ''}">${isMyNode ? '★ ' : ''}${escapeHtml(node.long_name || shortName)} (${battery}%)</span>` : ''}
       </div>
     `;
 
@@ -280,55 +290,71 @@
     renderRfLinks();
   }
 
+  async function fetchRfLinks() {
+    try {
+      const res = await fetch(`/api/links?device=${encodeURIComponent(state.activeDeviceId)}`);
+      if (!res.ok) return;
+      state.rfLinks = await res.json();
+      renderRfLinks();
+    } catch (err) {
+      console.error('Error fetching RF links:', err);
+    }
+  }
+
   function renderRfLinks() {
     if (!map || !layerGroupLinks) return;
     layerGroupLinks.clearLayers();
-    state.rfLinks = [];
+    state.rfLinkPolylines = [];
 
-    if (!state.showLinks) return;
+    if (!state.showLinks || !Array.isArray(state.rfLinks) || state.rfLinks.length === 0) return;
 
-    // Find local radio node as hub
-    let hubNode = null;
-    state.nodes.forEach(n => {
-      if (n.hops_away === 0 && n.latitude != null && n.longitude != null) {
-        hubNode = n;
-      }
-    });
+    state.rfLinks.forEach(link => {
+      const fromNode = state.nodes.get(link.from_node);
+      const toNode = state.nodes.get(link.to_node);
 
-    if (!hubNode) {
-      // Pick first node with valid position as reference
-      for (const n of state.nodes.values()) {
-        if (n.latitude != null && n.longitude != null) {
-          hubNode = n;
-          break;
-        }
-      }
-    }
+      if (!fromNode || !toNode) return;
+      if (fromNode.latitude == null || fromNode.longitude == null) return;
+      if (toNode.latitude == null || toNode.longitude == null) return;
+      if (fromNode.latitude === 0 && fromNode.longitude === 0) return;
+      if (toNode.latitude === 0 && toNode.longitude === 0) return;
 
-    if (!hubNode) return;
+      const snr = link.snr != null ? link.snr : 0;
+      let color = '#10b981'; // green (> 5 dB)
+      if (snr < -5) color = '#f43f5e'; // red (< -5 dB)
+      else if (snr < 5) color = '#f59e0b'; // amber (-5 to 5 dB)
 
-    state.nodes.forEach(node => {
-      if (node.node_num !== hubNode.node_num && node.latitude != null && node.longitude != null) {
-        const snr = node.snr != null ? node.snr : 0;
-        let color = '#10b981'; // green
-        if (snr < -5) color = '#f43f5e'; // red
-        else if (snr < 5) color = '#f59e0b'; // amber
+      const isDirect = link.source === 'direct';
+      const isTraceroute = link.source === 'traceroute';
 
-        const latLngs = [
-          [hubNode.latitude, hubNode.longitude],
-          [node.latitude, node.longitude]
-        ];
+      const line = L.polyline([
+        [fromNode.latitude, fromNode.longitude],
+        [toNode.latitude, toNode.longitude]
+      ], {
+        color: color,
+        weight: Math.max(2, Math.min(5, 2.5 + (snr / 8))),
+        opacity: 0.8,
+        dashArray: isTraceroute ? '6, 6' : undefined
+      }).addTo(layerGroupLinks);
 
-        const line = L.polyline(latLngs, {
-          color: color,
-          weight: Math.max(1.5, Math.min(4, 2 + (snr / 10))),
-          opacity: 0.6,
-          dashArray: node.hops_away && node.hops_away > 1 ? '5, 8' : undefined
-        }).addTo(layerGroupLinks);
+      const fromName = fromNode.short_name || fromNode.long_name || link.from_id;
+      const toName = toNode.short_name || toNode.long_name || link.to_id;
+      const sourceLabel = isDirect ? 'Direct RF Neighbor (0 hops)' : (isTraceroute ? 'Traceroute Relay Hop' : (link.source === 'neighbor_info' ? 'Reported NeighborInfo' : 'Observed Packet Link'));
+      const timeStr = formatTimeAgo(link.last_heard);
 
-        line.bindTooltip(`SNR: ${snr.toFixed(1)} dB | Hops: ${node.hops_away ?? 1}`);
-        state.rfLinks.push(line);
-      }
+      line.bindTooltip(`
+        <div class="rf-link-tooltip" style="font-size:0.75rem; line-height:1.4;">
+          <div style="font-weight:700; color:var(--text-primary); margin-bottom:2px;">
+            ${escapeHtml(fromName)} &harr; ${escapeHtml(toName)}
+          </div>
+          <div style="color:${color}; font-weight:600;">
+            SNR: ${snr > 0 ? '+' : ''}${snr.toFixed(1)} dB
+          </div>
+          <div style="color:#94a3b8; font-size:0.7rem;">
+            ${sourceLabel} • ${timeStr}
+          </div>
+        </div>
+      `);
+      state.rfLinkPolylines.push(line);
     });
   }
 
@@ -1143,6 +1169,10 @@
       if (!res.ok) return;
       const data = await res.json();
       state.activeDeviceId = data.active_device || '';
+      if (data.my_node_num) {
+        state.myNodeNum = data.my_node_num;
+        state.myNodeId = data.my_node_id || '';
+      }
     } catch (err) {
       console.error('Error fetching status:', err);
     }
@@ -1153,6 +1183,12 @@
       const res = await fetch('/api/devices');
       if (!res.ok) return;
       state.devices = await res.json();
+
+      const cur = state.devices.find(d => d.id === state.activeDeviceId);
+      if (cur && cur.my_node_num) {
+        state.myNodeNum = cur.my_node_num;
+        state.myNodeId = cur.my_node_id || '';
+      }
 
       el.deviceSelect.innerHTML = state.devices.map(d => `
         <option value="${escapeHtml(d.id)}" ${d.id === state.activeDeviceId ? 'selected' : ''}>
@@ -1218,6 +1254,7 @@
         body: JSON.stringify({ device: state.activeDeviceId })
       });
       await fetchNodes();
+      await fetchRfLinks();
       await fetchChannels();
       await loadMessages();
     });
@@ -1691,6 +1728,23 @@
         try {
           const tr = JSON.parse(e.data);
           renderTracerouteResult(tr);
+          fetchRfLinks();
+        } catch (err) {}
+      });
+
+      // 7. RF Link updated
+      sse.addEventListener('link_updated', (e) => {
+        try {
+          const link = JSON.parse(e.data);
+          const k1 = Math.min(link.from_node, link.to_node);
+          const k2 = Math.max(link.from_node, link.to_node);
+          const idx = state.rfLinks.findIndex(l => Math.min(l.from_node, l.to_node) === k1 && Math.max(l.from_node, l.to_node) === k2);
+          if (idx >= 0) {
+            state.rfLinks[idx] = link;
+          } else {
+            state.rfLinks.push(link);
+          }
+          renderRfLinks();
         } catch (err) {}
       });
 

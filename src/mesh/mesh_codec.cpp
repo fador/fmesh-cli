@@ -383,6 +383,21 @@ std::optional<MeshEvent> decode_packet(
         }
         return ev;
     }
+    if (d.portnum() == PortNum::NEIGHBORINFO_APP) {
+        meshtastic::NeighborInfo ni;
+        if (!ni.ParseFromString(d.payload())) return std::nullopt;
+        EvNeighborInfoReceived ev;
+        ev.device = device;
+        ev.node_num = ni.node_id() != 0 ? ni.node_id() : pkt.from();
+        for (const auto& nb : ni.neighbors()) {
+            NeighborInfoEntry entry;
+            entry.node_id = nb.node_id();
+            entry.rx_snr = nb.snr();
+            entry.rx_time = nb.last_rx_time();
+            ev.neighbors.push_back(entry);
+        }
+        return ev;
+    }
     // Other portnums (nodeinfo) arriving as packets
     // would normally be processed into the node DB; the firmware typically
     // sends them as FromRadio.node_info rather than FromRadio.packet, so we

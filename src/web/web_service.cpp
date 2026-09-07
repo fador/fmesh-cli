@@ -120,6 +120,19 @@ nlohmann::json packet_activity_to_json(const PacketActivity& p) {
     };
 }
 
+nlohmann::json rf_link_to_json(const RfLink& l) {
+    return {
+        {"device", l.device},
+        {"from_node", l.from_node},
+        {"from_id", l.from_id},
+        {"to_node", l.to_node},
+        {"to_id", l.to_id},
+        {"snr", l.snr},
+        {"source", l.source},
+        {"last_heard", l.last_heard}
+    };
+}
+
 } // namespace
 
 std::vector<PacketActivity> WebService::recent_packets() const {
@@ -136,6 +149,86 @@ void WebService::record_and_broadcast_activity(const PacketActivity& act) {
         }
     }
     server_.broadcast_sse("packet_activity", packet_activity_to_json(act).dump());
+}
+
+void WebService::update_link(const std::string& device, uint32_t from_node, uint32_t to_node,
+                             float snr, const std::string& source, uint64_t last_heard) {
+    if (from_node == 0 || to_node == 0 || from_node == kBroadcastNodeNum ||
+        to_node == kBroadcastNodeNum || from_node == to_node) {
+        return;
+    }
+
+    uint32_t u1 = (std::min)(from_node, to_node);
+    uint32_t u2 = (std::max)(from_node, to_node);
+    auto key = std::make_pair(u1, u2);
+
+    RfLink link;
+    link.device = device;
+    link.from_node = from_node;
+    link.from_id = node_num_to_id(from_node);
+    link.to_node = to_node;
+    link.to_id = node_num_to_id(to_node);
+    link.snr = snr;
+    link.source = source;
+    link.last_heard = last_heard != 0 ? last_heard : static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+
+    {
+        std::lock_guard<std::mutex> lock(links_mu_);
+        links_[key] = link;
+    }
+
+    server_.broadcast_sse("link_updated", rf_link_to_json(link).dump());
+}
+
+std::vector<RfLink> WebService::get_links(const std::string& device) const {
+    std::map<std::pair<uint32_t, uint32_t>, RfLink> result;
+    {
+        std::lock_guard<std::mutex> lock(links_mu_);
+        for (const auto& [k, link] : links_) {
+            if (device.empty() || link.device.empty() || link.device == device) {
+                result[k] = link;
+            }
+        }
+    }
+
+    // Include direct neighbors from NodeDb (nodes with hops_away == 0)
+    auto dev_ids = mesh_service_.device_ids();
+    for (const auto& dev_id : dev_ids) {
+        if (!device.empty() && device != dev_id) continue;
+        const NodeDb* db = mesh_service_.db_for(dev_id);
+        if (!db) continue;
+        uint32_t my_node = db->my_node_num();
+        if (my_node == 0) continue;
+
+        for (const auto& node : db->all()) {
+            if (node.node_num != my_node && node.hops_away.has_value() && *node.hops_away == 0) {
+                uint32_t u1 = (std::min)(my_node, node.node_num);
+                uint32_t u2 = (std::max)(my_node, node.node_num);
+                auto key = std::make_pair(u1, u2);
+                if (result.find(key) == result.end()) {
+                    RfLink l;
+                    l.device = dev_id;
+                    l.from_node = my_node;
+                    l.from_id = node_num_to_id(my_node);
+                    l.to_node = node.node_num;
+                    l.to_id = node_num_to_id(node.node_num);
+                    l.snr = node.snr.value_or(0.0f);
+                    l.source = "direct";
+                    l.last_heard = node.last_heard.value_or(0);
+                    result[key] = l;
+                }
+            }
+        }
+    }
+
+    std::vector<RfLink> list;
+    list.reserve(result.size());
+    for (auto& [_, l] : result) {
+        list.push_back(std::move(l));
+    }
+    return list;
 }
 
 
@@ -175,10 +268,16 @@ void WebService::register_routes() {
             });
         }
 
+        std::string active_id = active_device_id_.empty() && !dev_ids.empty() ? dev_ids.front() : active_device_id_;
+        const NodeDb* act_db = mesh_service_.db_for(active_id);
+        uint32_t my_node = act_db ? act_db->my_node_num() : 0;
+
         nlohmann::json status = {
             {"status", "online"},
             {"version", "fmesh-cli 1.0"},
-            {"active_device", active_device_id_.empty() && !dev_ids.empty() ? dev_ids.front() : active_device_id_},
+            {"active_device", active_id},
+            {"my_node_num", my_node},
+            {"my_node_id", node_num_to_id(my_node)},
             {"devices", devices},
             {"web_port", server_.bound_port()}
         };
@@ -242,6 +341,17 @@ void WebService::register_routes() {
         nlohmann::json arr = nlohmann::json::array();
         for (const auto& [_, node] : unique_nodes) {
             arr.push_back(node_to_json(node));
+        }
+        return HttpResponse::json(200, arr);
+    });
+
+    // GET /api/links
+    server_.get("/api/links", [this](const HttpRequest& req) {
+        std::string dev_id = req.get_query("device");
+        auto links = get_links(dev_id);
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& l : links) {
+            arr.push_back(rf_link_to_json(l));
         }
         return HttpResponse::json(200, arr);
     });
@@ -583,6 +693,17 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                         std::chrono::system_clock::now().time_since_epoch()).count());
                 record_and_broadcast_activity(act);
             }
+
+            if (e.node.hops_away.has_value() && *e.node.hops_away == 0) {
+                const NodeDb* db = mesh_service_.db_for(e.device);
+                uint32_t my_node = db ? db->my_node_num() : 0;
+                if (my_node != 0 && e.node.node_num != my_node) {
+                    uint64_t ts = e.node.last_heard.value_or(static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count()));
+                    update_link(e.device, my_node, e.node.node_num, e.node.snr.value_or(0.0f), "direct", ts);
+                }
+            }
         }
         else if constexpr (std::is_same_v<T, EvPositionReceived>) {
             nlohmann::json data = {
@@ -646,6 +767,14 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                 std::chrono::duration_cast<std::chrono::seconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count());
             record_and_broadcast_activity(act);
+
+            if (e.hop_start > 0 && e.hop_start == e.hop_limit) {
+                const NodeDb* db = mesh_service_.db_for(e.device);
+                uint32_t my_node = db ? db->my_node_num() : 0;
+                if (my_node != 0 && e.from_node != my_node) {
+                    update_link(e.device, my_node, e.from_node, e.rx_snr, "direct", act.ts);
+                }
+            }
         }
         else if constexpr (std::is_same_v<T, EvAckReceived>) {
             nlohmann::json data = {
@@ -712,6 +841,45 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                 std::chrono::duration_cast<std::chrono::seconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count());
             record_and_broadcast_activity(act);
+
+            // Update verified RF links along the traceroute path
+            const NodeDb* db = mesh_service_.db_for(e.device);
+            uint32_t my_node = db ? db->my_node_num() : 0;
+
+            // Forward path: my_node -> route[0] -> ... -> from_node
+            std::vector<uint32_t> fwd;
+            if (my_node != 0) fwd.push_back(my_node);
+            for (uint32_t hop : e.route) fwd.push_back(hop);
+            if (e.from_node != 0 && (fwd.empty() || fwd.back() != e.from_node)) {
+                fwd.push_back(e.from_node);
+            }
+            for (size_t i = 0; i + 1 < fwd.size(); ++i) {
+                float snr = (i < e.snr_towards.size()) ? e.snr_towards[i] : 0.0f;
+                update_link(e.device, fwd[i], fwd[i+1], snr, "traceroute", act.ts);
+            }
+
+            // Return path: from_node -> route_back[0] -> ... -> my_node
+            if (!e.route_back.empty()) {
+                std::vector<uint32_t> bck;
+                if (e.from_node != 0) bck.push_back(e.from_node);
+                for (uint32_t hop : e.route_back) bck.push_back(hop);
+                if (my_node != 0 && (bck.empty() || bck.back() != my_node)) {
+                    bck.push_back(my_node);
+                }
+                for (size_t i = 0; i + 1 < bck.size(); ++i) {
+                    float snr = (i < e.snr_back.size()) ? e.snr_back[i] : 0.0f;
+                    update_link(e.device, bck[i], bck[i+1], snr, "traceroute", act.ts);
+                }
+            }
+        }
+        else if constexpr (std::is_same_v<T, EvNeighborInfoReceived>) {
+            uint64_t now_ts = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+            for (const auto& nb : e.neighbors) {
+                update_link(e.device, e.node_num, nb.node_id, nb.rx_snr, "neighbor_info",
+                            nb.rx_time != 0 ? nb.rx_time : now_ts);
+            }
         }
 
         else if constexpr (std::is_same_v<T, EvConnected>) {

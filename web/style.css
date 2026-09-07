@@ -547,6 +547,33 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+.my-node-marker .marker-pin {
+  border: 2.5px solid #60a5fa;
+  box-shadow: 0 0 16px rgba(59, 130, 246, 0.8), 0 0 4px #fff;
+}
+
+.my-node-badge {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #2563eb;
+  color: white;
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
+  z-index: 12;
+  pointer-events: none;
+}
+
+.marker-label.local-label {
+  border-color: #3b82f6;
+  color: #93c5fd;
+}
+
 /* Leaflet dark theme tweaks */
 .leaflet-popup-content-wrapper {
   background: var(--bg-surface) !important;

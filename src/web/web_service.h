@@ -33,6 +33,17 @@ struct PacketActivity {
     uint64_t ts = 0;
 };
 
+struct RfLink {
+    std::string device;
+    uint32_t from_node = 0;
+    std::string from_id;
+    uint32_t to_node = 0;
+    std::string to_id;
+    float snr = 0.0f;
+    std::string source; // "direct" | "traceroute" | "neighbor_info" | "packet"
+    uint64_t last_heard = 0;
+};
+
 class WebService {
 public:
     explicit WebService(MeshService& mesh_service);
@@ -53,6 +64,10 @@ public:
     std::vector<PacketActivity> recent_packets() const;
     void record_and_broadcast_activity(const PacketActivity& act);
 
+    std::vector<RfLink> get_links(const std::string& device) const;
+    void update_link(const std::string& device, uint32_t from_node, uint32_t to_node,
+                     float snr, const std::string& source, uint64_t last_heard = 0);
+
 private:
     void register_routes();
     void on_mesh_event(const MeshEvent& ev);
@@ -64,6 +79,9 @@ private:
     mutable std::mutex packets_mu_;
     std::deque<PacketActivity> recent_packets_;
     static constexpr size_t kMaxRecentPackets = 100;
+
+    mutable std::mutex links_mu_;
+    std::map<std::pair<uint32_t, uint32_t>, RfLink> links_;
 };
 
 } // namespace meshcli

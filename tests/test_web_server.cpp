@@ -302,3 +302,72 @@ TEST(WebService, MessageAndConversationsApi) {
     web.stop();
 }
 
+TEST(WebService, RfLinksApi) {
+    meshcli::MeshService service;
+    const std::string dev = "test_dev";
+    uint32_t my_node = 0x11111111;
+
+    auto rt = std::make_shared<meshcli::DeviceRuntime>();
+    rt->db = std::make_unique<meshcli::NodeDb>();
+    rt->display_name = dev;
+    rt->my_node_num = my_node;
+    rt->db->set_my_node_num(my_node);
+
+    // Add direct neighbor (0 hops away)
+    meshcli::Node n_direct;
+    n_direct.node_num = 0x22222222;
+    n_direct.hops_away = 0;
+    n_direct.snr = 8.5f;
+    n_direct.latitude = 60.1;
+    n_direct.longitude = 24.9;
+    rt->db->upsert_node(n_direct);
+
+    // Add indirect node (2 hops away via repeaters)
+    meshcli::Node n_indirect;
+    n_indirect.node_num = 0x33333333;
+    n_indirect.hops_away = 2;
+    n_indirect.snr = -2.0f;
+    n_indirect.latitude = 60.2;
+    n_indirect.longitude = 25.0;
+    rt->db->upsert_node(n_indirect);
+
+    {
+        std::lock_guard<std::mutex> lock(service.devices_mu_for_test());
+        service.devices_for_test()[dev] = rt;
+    }
+
+    meshcli::WebService web(service);
+    EXPECT_TRUE(web.start("127.0.0.1", 0, ""));
+    int port = web.bound_port();
+
+    // 1. Initial links should only have direct neighbor to my_node, not indirect
+    auto links1 = web.get_links(dev);
+    EXPECT_EQ(links1.size(), 1u);
+    EXPECT_EQ(links1[0].from_node, my_node);
+    EXPECT_EQ(links1[0].to_node, 0x22222222);
+    EXPECT_EQ(links1[0].source, "direct");
+
+    // 2. Simulate traceroute discovery to 0x33333333 via 0x22222222
+    meshcli::EvTracerouteReceived tr;
+    tr.device = dev;
+    tr.from_node = 0x33333333;
+    tr.to_node = my_node;
+    tr.route = { 0x22222222 };
+    tr.snr_towards = { 8.5f, 3.2f };
+    service.dispatch_to_ui(tr);
+
+    // 3. Now links should contain both real hops: my_node <-> 0x22222222 and 0x22222222 <-> 0x33333333
+    auto links2 = web.get_links(dev);
+    EXPECT_EQ(links2.size(), 2u);
+
+    // Verify via HTTP GET /api/links
+    std::string req = "GET /api/links?device=" + dev + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res = http_client_request(port, req);
+    EXPECT_NE(res.find("200 OK"), std::string::npos);
+    EXPECT_NE(res.find("!22222222"), std::string::npos);
+    EXPECT_NE(res.find("!33333333"), std::string::npos);
+    EXPECT_NE(res.find("traceroute"), std::string::npos);
+
+    web.stop();
+}
+

@@ -159,6 +159,19 @@ struct EvTracerouteReceived {
     std::vector<float> snr_back;
 };
 
+struct NeighborInfoEntry {
+    uint32_t node_id = 0;
+    float rx_snr = 0.0f;
+    uint32_t rx_time = 0;
+};
+
+// NeighborInfo packet received from the mesh
+struct EvNeighborInfoReceived {
+    DeviceId device;
+    uint32_t node_num = 0;
+    std::vector<NeighborInfoEntry> neighbors;
+};
+
 using MeshEvent = std::variant<
     EvConnected,
     EvDisconnected,
@@ -179,7 +192,8 @@ using MeshEvent = std::variant<
     EvDbSyncPayload,
     EvConfigBytes,
     EvPositionReceived,
-    EvTracerouteReceived
+    EvTracerouteReceived,
+    EvNeighborInfoReceived
 >;
 
 } // namespace meshcli
