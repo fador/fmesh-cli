@@ -1335,12 +1335,24 @@ int TuiApp::run() {
         wm_.ensure_nodelist(devices[0]);
     }
     for (const auto& dev : devices) {
+        if (const auto* db = service_.db_for(dev)) {
+            for (const auto& ch : db->channels()) {
+                if (ch.role != "DISABLED") {
+                    std::string name = ch.name;
+                    if (name.empty() && ch.role == "PRIMARY") name = "Primary";
+                    wm_.ensure_channel(dev, ch.index, name);
+                }
+            }
+        }
         auto windows = service_.database().get_all_windows(dev);
+        if (windows.empty() && !dev.empty()) {
+            windows = service_.database().get_all_windows("");
+        }
         for (const auto& w : windows) {
             if (w.kind == "channel") {
-                wm_.ensure_channel(w.device, w.target, "");
+                wm_.ensure_channel(dev, w.target, "");
             } else if (w.kind == "dm") {
-                wm_.ensure_dm(w.device, w.target, "");
+                wm_.ensure_dm(dev, w.target, "");
             }
         }
     }

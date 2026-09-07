@@ -422,7 +422,7 @@ void WebService::register_routes() {
         try { offset = std::stoi(req.get_query("offset", "0")); } catch (...) {}
 
         auto msgs = mesh_service_.database().get_messages_paginated(w, limit, offset);
-        if (msgs.empty() && w.kind == "channel" && !w.device.empty()) {
+        if (msgs.empty() && !w.device.empty()) {
             WindowKey any_dev = w;
             any_dev.device = "";
             msgs = mesh_service_.database().get_messages_paginated(any_dev, limit, offset);

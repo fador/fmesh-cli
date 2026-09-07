@@ -278,7 +278,10 @@ std::optional<MeshEvent> decode_packet(
 
     const auto& d = pkt.decoded();
 
-    if (d.portnum() == PortNum::TEXT_MESSAGE_APP) {
+    if (d.portnum() == PortNum::TEXT_MESSAGE_APP ||
+        d.portnum() == PortNum::TEXT_MESSAGE_COMPRESSED_APP ||
+        d.portnum() == PortNum::ALERT_APP ||
+        d.portnum() == PortNum::DETECTION_SENSOR_APP) {
         EvTextReceived ev;
         ev.device = device;
         ev.from_node = pkt.from();
@@ -290,9 +293,15 @@ std::optional<MeshEvent> decode_packet(
         ev.rx_rssi = pkt.rx_rssi();
         ev.hop_start = pkt.hop_start();
         ev.hop_limit = pkt.hop_limit();
-        ev.broadcast = (pkt.to() == kBroadcastNodeNum);
+        ev.broadcast = (pkt.to() == kBroadcastNodeNum || pkt.to() == 0);
         ev.want_ack = pkt.want_ack();
-        ev.text = d.payload();
+        if (d.portnum() == PortNum::ALERT_APP) {
+            ev.text = "[ALERT] " + d.payload();
+        } else if (d.portnum() == PortNum::DETECTION_SENSOR_APP) {
+            ev.text = "[SENSOR] " + d.payload();
+        } else {
+            ev.text = d.payload();
+        }
         return ev;
     }
     if (d.portnum() == PortNum::ROUTING_APP) {

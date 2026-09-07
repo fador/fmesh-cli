@@ -189,7 +189,7 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             // We ignore rowid, letting SQLite assign a new local rowid.
             // Check if we already have this packet_id (from same sender).
             uint32_t pkt = msg.value("packet_id", (uint32_t)0);
-            if (db_.find_by_packet_id(pkt)) continue; // Already have it
+            if (pkt != 0 && db_.find_by_packet_id(pkt)) continue; // Already have it
 
             StoredMessage m;
             m.device = msg.value("device", "");

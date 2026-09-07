@@ -28,6 +28,7 @@ namespace {
 } // namespace
 
 bool MeshService::is_duplicate(uint32_t from_node, uint32_t packet_id) {
+    if (packet_id == 0) return false;
     uint64_t key = (static_cast<uint64_t>(from_node) << 32) | packet_id;
     for (auto k : seen_messages_)
         if (k == key) return true;

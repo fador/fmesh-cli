@@ -233,7 +233,7 @@ std::string StreamClient::start() {
         char resp[16] = {0};
         SSL_read(ssl_, resp, sizeof(resp) - 1);
         if (std::string(resp).find("OK") == std::string::npos) {
-            emit_error("Mesh authentication failed");
+            emit_error("Mesh authentication failed: check password for " + tls_user_ + " in config.txt (format: mesh:<host>:<port>:<user>:<password>)");
             set_blocking(fd_, false);
             return "";
         }

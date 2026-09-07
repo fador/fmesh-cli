@@ -105,6 +105,33 @@ int WindowManager::ensure_channel(const std::string& device, uint32_t idx,
             windows_[it->second - 1]->set_title(channel_title(device, idx, name));
         return it->second;
     }
+
+    // Look for an existing channel window with empty device or matching channel index
+    std::string empty_key = "|channel|" + std::to_string(idx);
+    auto eit = by_key_.find(empty_key);
+    if (eit != by_key_.end()) {
+        int win_idx = eit->second;
+        by_key_.erase(eit);
+        by_key_[key] = win_idx;
+        windows_[win_idx - 1]->set_target(WindowTarget{device, "channel", idx});
+        if (!name.empty())
+            windows_[win_idx - 1]->set_title(channel_title(device, idx, name));
+        return win_idx;
+    }
+    // Also check if any existing window has the same channel index
+    for (size_t i = 0; i < windows_.size(); ++i) {
+        if (windows_[i]->target().kind == "channel" && windows_[i]->target().target == idx) {
+            std::string old_key = windows_[i]->target().device + "|channel|" + std::to_string(idx);
+            by_key_.erase(old_key);
+            windows_[i]->set_target(WindowTarget{device, "channel", idx});
+            if (!name.empty())
+                windows_[i]->set_title(channel_title(device, idx, name));
+            int win_idx = static_cast<int>(i + 1);
+            by_key_[key] = win_idx;
+            return win_idx;
+        }
+    }
+
     auto w = std::make_unique<Window>(
         WindowTarget{device, "channel", idx},
         channel_title(device, idx, name));
@@ -131,6 +158,32 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
         }
         return it->second;
     }
+
+    // Look for an existing DM window with empty device or matching peer node
+    std::string empty_key = "|dm|" + std::to_string(peer_node);
+    auto eit = by_key_.find(empty_key);
+    if (eit != by_key_.end()) {
+        int win_idx = eit->second;
+        by_key_.erase(eit);
+        by_key_[key] = win_idx;
+        windows_[win_idx - 1]->set_target(WindowTarget{device, "dm", peer_node});
+        if (!nick.empty())
+            windows_[win_idx - 1]->set_title(dm_title(device, peer_node, nick));
+        return win_idx;
+    }
+    for (size_t i = 0; i < windows_.size(); ++i) {
+        if (windows_[i]->target().kind == "dm" && windows_[i]->target().target == peer_node) {
+            std::string old_key = windows_[i]->target().device + "|dm|" + std::to_string(peer_node);
+            by_key_.erase(old_key);
+            windows_[i]->set_target(WindowTarget{device, "dm", peer_node});
+            if (!nick.empty())
+                windows_[i]->set_title(dm_title(device, peer_node, nick));
+            int win_idx = static_cast<int>(i + 1);
+            by_key_[key] = win_idx;
+            return win_idx;
+        }
+    }
+
     auto w = std::make_unique<Window>(
         WindowTarget{device, "dm", peer_node},
         dm_title(device, peer_node, nick));
@@ -258,6 +311,9 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
         w.bump_activity(mention ? 2 : 1);
         if (!broadcast) {
             append_status("*** New DM from " + sender_nick + ": " + text, 3); // 3 is tui_color::DM
+        } else {
+            std::string ch_name = channel_title(device, channel_idx, "");
+            append_status("[" + ch_name + "] <" + sender_nick + "> " + text + sig, 2); // 2 is tui_color::CHANNEL
         }
     } else {
         w.mark_read();
