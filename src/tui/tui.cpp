@@ -1602,19 +1602,29 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             const NodeDb* db = service_.db_for(e.device);
             std::string nick = e.node.short_name.empty()
                                    ? e.node.long_name : e.node.short_name;
+            if (nick.empty() && db) {
+                auto existing = db->get(e.node.node_num);
+                if (existing) {
+                    nick = existing->short_name.empty() ? existing->long_name : existing->short_name;
+                }
+            }
             std::string old_nick = e.old_short_name.empty()
                                        ? e.old_long_name : e.old_short_name;
 
             if (e.is_new) {
-                wm_.append_status("*** Node joined: " + e.node.long_name +
+                std::string display_name = e.node.long_name.empty() ? nick : e.node.long_name;
+                if (display_name.empty()) display_name = e.node.node_id;
+                wm_.append_status("*** Node joined: " + display_name +
                                   " (" + e.node.node_id + ")", tui_color::INFO);
-            } else if (!old_nick.empty() && old_nick != nick) {
+            } else if (!old_nick.empty() && !nick.empty() && old_nick != nick) {
                 wm_.append_status("*** Node renamed: " + old_nick + " -> " + nick +
                                   " (" + e.node.node_id + ")", tui_color::INFO);
                 wm_.rebuild_all_nicks(e.device, e.node.node_num, old_nick, nick);
             }
 
-            wm_.update_dm_nick(e.device, e.node.node_num, nick);
+            if (!nick.empty()) {
+                wm_.update_dm_nick(e.device, e.node.node_num, nick);
+            }
             // Clamp nodelist cursor if viewing this device.
             if (nodelist_device_ == e.device && db) {
                 int total = static_cast<int>(db->all().size());

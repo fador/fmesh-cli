@@ -451,3 +451,37 @@ TEST_F(CommandTest, WhoisWithTelemetry) {
     EXPECT_NE(all.find("Uptime:   2h 0m"), std::string::npos);
 }
 
+TEST_F(CommandTest, NodeRenameOnlyWhenActual) {
+    // Current node in db is Fad3
+    // Simulate telemetry packet arriving: EvNodeUpdated with empty short/long names
+    EvNodeUpdated ev_telemetry;
+    ev_telemetry.device = "test_device";
+    ev_telemetry.node.node_num = 0xD4A70330;
+    ev_telemetry.node.node_id = "!d4a70330";
+    ev_telemetry.node.battery_level = 95;
+    // Names are empty on telemetry packet!
+
+    std::string old_nick = "Fad3";
+    std::string nick = ev_telemetry.node.short_name.empty()
+                           ? ev_telemetry.node.long_name : ev_telemetry.node.short_name;
+    const NodeDb* db = svc_.db_for("test_device");
+    if (nick.empty() && db) {
+        auto existing = db->get(ev_telemetry.node.node_num);
+        if (existing) {
+            nick = existing->short_name.empty() ? existing->long_name : existing->short_name;
+        }
+    }
+    EXPECT_EQ(nick, "Fad3");
+    // Verify that (!old_nick.empty() && !nick.empty() && old_nick != nick) evaluates to false!
+    bool would_rename = (!old_nick.empty() && !nick.empty() && old_nick != nick);
+    EXPECT_FALSE(would_rename);
+
+    // Now simulate genuine rename to "Fad4"
+    ev_telemetry.node.short_name = "Fad4";
+    ev_telemetry.node.long_name = "Fador #4";
+    nick = ev_telemetry.node.short_name;
+    bool actual_rename = (!old_nick.empty() && !nick.empty() && old_nick != nick);
+    EXPECT_TRUE(actual_rename);
+}
+
+

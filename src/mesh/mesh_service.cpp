@@ -625,6 +625,9 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
         if (old) {
             n->old_short_name = old->short_name;
             n->old_long_name = old->long_name;
+            // Preserve existing names if this update packet did not carry user/name fields
+            if (n->node.short_name.empty()) n->node.short_name = old->short_name;
+            if (n->node.long_name.empty()) n->node.long_name = old->long_name;
         } else {
             n->is_new = true;
         }
