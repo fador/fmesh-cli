@@ -29,6 +29,7 @@
     nodeTrails: new Map(),      // node_num -> Leaflet Polyline
     rfLinks: [],                // array of raw link objects from /api/links
     rfLinkPolylines: [],        // array of Leaflet Polylines
+    hasInitialMapFit: false,    // true once the map has initially fit bounds to nodes
     rawPackets: [],
     packetCount: 0,
     telemetryHistory: new Map(), // node_num -> Array<{ts, battery_level, voltage, temperature, relative_humidity, barometric_pressure, channel_util, air_util_tx}>
@@ -180,6 +181,13 @@
       attributionControl: false
     }).setView([60.1699, 24.9384], 11);
 
+    // If the user manually drags or zooms the map, mark that initial auto-fit is done
+    map.on('movestart zoomstart', (e) => {
+      if (e && e.originalEvent) {
+        state.hasInitialMapFit = true;
+      }
+    });
+
     tileLayer = L.tileLayer(osmTileUrl, {
       maxZoom: 19,
       attribution: '&copy; OpenStreetMap contributors'
@@ -244,27 +252,21 @@
 
   function renderMapNodes() {
     if (!map) return;
-    layerGroupNodes.clearLayers();
-    state.nodeMarkers.clear();
 
     const bounds = [];
+    const currentNodesWithPos = new Set();
 
     state.nodes.forEach(node => {
       if (node.latitude != null && node.longitude != null && node.latitude !== 0 && node.longitude !== 0) {
         const latLng = [node.latitude, node.longitude];
         bounds.push(latLng);
+        currentNodesWithPos.add(node.node_num);
 
         const icon = createNodeMarkerIcon(node);
-        const marker = L.marker(latLng, { icon: icon }).addTo(layerGroupNodes);
-
-        marker.on('click', () => {
-          selectNodeForMap(node);
-        });
-
         const batteryText = node.battery_level != null ? `${node.battery_level}%` : 'Unknown';
         const snrText = node.snr != null ? `${node.snr.toFixed(1)} dB` : 'N/A';
 
-        marker.bindPopup(`
+        const popupHtml = `
           <div style="font-family: var(--font-sans); min-width: 180px;">
             <h4 style="margin:0 0 4px; font-weight:700;">${escapeHtml(node.long_name || node.short_name)}</h4>
             <div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--accent-cyan); margin-bottom:8px;">${node.node_id}</div>
@@ -275,15 +277,45 @@
             </div>
             <button onclick="window.meshApp.openDM(${node.node_num}, '${escapeHtml(node.short_name)}')" class="btn btn-sm btn-primary" style="margin-top:8px; width:100%; justify-content:center;">Direct Message</button>
           </div>
-        `);
+        `;
 
-        state.nodeMarkers.set(node.node_num, marker);
+        if (state.nodeMarkers.has(node.node_num)) {
+          const existingMarker = state.nodeMarkers.get(node.node_num);
+          const curPos = existingMarker.getLatLng();
+          if (curPos.lat !== latLng[0] || curPos.lng !== latLng[1]) {
+            existingMarker.setLatLng(latLng);
+          }
+          existingMarker.setIcon(icon);
+          const popup = existingMarker.getPopup();
+          if (popup) {
+            popup.setContent(popupHtml);
+          } else {
+            existingMarker.bindPopup(popupHtml);
+          }
+        } else {
+          const marker = L.marker(latLng, { icon: icon }).addTo(layerGroupNodes);
+          marker.on('click', () => {
+            selectNodeForMap(node);
+          });
+          marker.bindPopup(popupHtml);
+          state.nodeMarkers.set(node.node_num, marker);
+        }
       }
     });
 
-    if (bounds.length > 0 && !state.selectedNodeNumForMap) {
+    // Remove markers for nodes that no longer have positions or were removed
+    for (const [nodeNum, marker] of state.nodeMarkers.entries()) {
+      if (!currentNodesWithPos.has(nodeNum)) {
+        layerGroupNodes.removeLayer(marker);
+        state.nodeMarkers.delete(nodeNum);
+      }
+    }
+
+    // Auto-fit bounds only on the initial data load, never on subsequent updates
+    if (!state.hasInitialMapFit && bounds.length > 0) {
       try {
         map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+        state.hasInitialMapFit = true;
       } catch (_) {}
     }
 
@@ -1248,6 +1280,7 @@
     // Device select
     el.deviceSelect?.addEventListener('change', async () => {
       state.activeDeviceId = el.deviceSelect.value;
+      state.hasInitialMapFit = false;
       await fetch('/api/devices/select', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
