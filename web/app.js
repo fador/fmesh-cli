@@ -128,6 +128,7 @@
     await fetchLocationHistory();
     await loadMessages();
     await fetchRecentPackets();
+    await fetchRawPackets();
     initTelemetryCharts();
     initSSE();
   }
@@ -158,6 +159,9 @@
       }
       if (targetTab === 'telemetry') {
         updateTelemetryView();
+      }
+      if (targetTab === 'diagnostics') {
+        fetchRawPackets();
       }
       if (targetTab === 'config') {
         loadConfig();
@@ -1076,7 +1080,7 @@
     }
   }
 
-  function handleTracerouteReceived(ev) {
+  function renderTracerouteResult(ev) {
     if (!el.tracerouteResultContainer) return;
 
     const routeHops = ev.route_ids || [];
@@ -1096,10 +1100,25 @@
     el.tracerouteResultContainer.innerHTML = `
       <div>
         <h4 style="color:var(--accent-emerald); margin-bottom:0.5rem;">✓ Route Resolved</h4>
-        <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">Target: ${ev.to_id}</div>
+        <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">Target: ${escapeHtml(ev.from_id || ev.to_id || '')}</div>
         ${hopsHtml || '<div class="empty-state">Direct 1-hop link (no intermediate repeaters).</div>'}
       </div>
     `;
+  }
+  const handleTracerouteReceived = renderTracerouteResult;
+
+  async function fetchRawPackets() {
+    try {
+      const res = await fetch(`/api/raw?device=${encodeURIComponent(state.activeDeviceId)}`);
+      if (!res.ok) return;
+      const list = await res.json();
+      if (!el.rawPacketStream) return;
+      el.rawPacketStream.innerHTML = '';
+      state.rawPackets = [];
+      list.forEach(pkt => handleRawPacket(pkt));
+    } catch (err) {
+      console.error('Error fetching raw packets:', err);
+    }
   }
 
   function handleRawPacket(pkt) {
@@ -1108,7 +1127,7 @@
     state.rawPackets.unshift(pkt);
     if (state.rawPackets.length > 50) state.rawPackets.pop();
 
-    const timeStr = new Date().toLocaleTimeString();
+    const timeStr = pkt.ts ? new Date(pkt.ts * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
     const entry = document.createElement('div');
     entry.className = 'raw-packet-entry';
     entry.innerHTML = `
@@ -1124,6 +1143,7 @@
       el.rawPacketStream.removeChild(el.rawPacketStream.lastChild);
     }
   }
+  const appendRawPacket = handleRawPacket;
 
   // ==========================================================================
   // Radio Configuration View
@@ -1139,22 +1159,32 @@
     }
   }
 
-  function renderConfigTable(lines) {
+  function renderConfigTable(items) {
     if (!el.configTableBody) return;
     const search = el.configSearch.value.toLowerCase().trim();
 
-    el.configTableBody.innerHTML = lines
-      .filter(line => !search || line.toLowerCase().includes(search))
-      .map(line => {
-        const parts = line.split('=');
-        const key = parts[0]?.trim() || '';
-        const val = parts.slice(1).join('=').trim();
+    const normalized = (items || []).map(item => {
+      if (typeof item === 'string') {
+        const parts = item.split('=');
+        return {
+          key: parts[0]?.trim() || '',
+          value: parts.slice(1).join('=').trim()
+        };
+      }
+      return {
+        key: item.key || '',
+        value: item.value != null ? String(item.value) : ''
+      };
+    });
 
+    el.configTableBody.innerHTML = normalized
+      .filter(item => !search || item.key.toLowerCase().includes(search) || item.value.toLowerCase().includes(search))
+      .map(({ key, value }) => {
         return `
           <tr>
             <td class="config-key">${escapeHtml(key)}</td>
             <td>
-              <input type="text" class="config-val-input" id="cfg-val-${escapeHtml(key)}" value="${escapeHtml(val)}">
+              <input type="text" class="config-val-input" id="cfg-val-${escapeHtml(key)}" value="${escapeHtml(value)}">
             </td>
             <td>
               <button class="btn btn-sm btn-primary" onclick="window.meshApp.saveConfigKey('${escapeHtml(key)}')">Save</button>
@@ -1290,6 +1320,7 @@
       await fetchRfLinks();
       await fetchChannels();
       await loadMessages();
+      await fetchRawPackets();
     });
 
     // Telemetry node select
@@ -1781,11 +1812,11 @@
         } catch (err) {}
       });
 
-      // 6. Raw packet
+      // 8. Raw packet
       sse.addEventListener('raw_packet', (e) => {
         try {
           const raw = JSON.parse(e.data);
-          appendRawPacket(raw);
+          handleRawPacket(raw);
         } catch (err) {}
       });
 
