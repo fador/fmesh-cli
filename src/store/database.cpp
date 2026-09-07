@@ -52,7 +52,12 @@ CREATE TABLE IF NOT EXISTS messages(
     text          TEXT,
     ts            INTEGER,
     packet_id     INTEGER,
-    ack_state     TEXT
+    ack_state     TEXT,
+    rx_snr        REAL,
+    rx_rssi       INTEGER,
+    hop_start     INTEGER,
+    hop_limit     INTEGER,
+    relay_node    INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_messages_window
     ON messages(device, window_kind, window_target, ts);
@@ -68,6 +73,33 @@ CREATE TABLE IF NOT EXISTS location_history(
 CREATE INDEX IF NOT EXISTS idx_location_device_node
     ON location_history(device, node_num, ts);
 )SQL";
+
+const char* kSelectMessagesPrefix =
+    "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
+    "channel_idx,text,ts,packet_id,ack_state,rx_snr,rx_rssi,hop_start,hop_limit,relay_node "
+    "FROM messages ";
+
+StoredMessage read_message_row(sqlite3_stmt* st) {
+    StoredMessage m;
+    m.rowid = sqlite3_column_int64(st, 0);
+    if (auto* p = sqlite3_column_text(st, 1)) m.device = reinterpret_cast<const char*>(p);
+    if (auto* p = sqlite3_column_text(st, 2)) m.window_kind = reinterpret_cast<const char*>(p);
+    m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
+    if (auto* p = sqlite3_column_text(st, 4)) m.direction = reinterpret_cast<const char*>(p);
+    m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
+    m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
+    m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
+    if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
+    m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
+    m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
+    if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
+    m.rx_snr = static_cast<float>(sqlite3_column_double(st, 12));
+    m.rx_rssi = static_cast<int32_t>(sqlite3_column_int(st, 13));
+    m.hop_start = static_cast<uint32_t>(sqlite3_column_int64(st, 14));
+    m.hop_limit = static_cast<uint32_t>(sqlite3_column_int64(st, 15));
+    m.relay_node = static_cast<uint32_t>(sqlite3_column_int64(st, 16));
+    return m;
+}
 
 int null_cb(void*, int, char**, char**) { return 0; }
 
@@ -98,6 +130,12 @@ bool Database::open(const std::string& path) {
     sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN channel_util REAL;", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN air_util_tx REAL;", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE nodes ADD COLUMN uptime_seconds INTEGER;", nullptr, nullptr, nullptr);
+    // Migration: add signal and hop columns to existing messages tables if absent
+    sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN rx_snr REAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN rx_rssi INTEGER;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN hop_start INTEGER;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN hop_limit INTEGER;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN relay_node INTEGER;", nullptr, nullptr, nullptr);
 
     LOG_INFO() << "db opened: " << path;
     return true;
@@ -288,7 +326,8 @@ int64_t Database::insert_message(const StoredMessage& m) {
     if (!db_) return 0;
     const char* sql =
         "INSERT INTO messages(device,window_kind,window_target,direction,from_node,to_node,"
-        "channel_idx,text,ts,packet_id,ack_state) VALUES(?,?,?,?,?,?,?,?,?,?,?)";
+        "channel_idx,text,ts,packet_id,ack_state,rx_snr,rx_rssi,hop_start,hop_limit,relay_node) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
     sqlite3_bind_text(st, 1, m.device.c_str(), -1, SQLITE_TRANSIENT);
@@ -302,6 +341,11 @@ int64_t Database::insert_message(const StoredMessage& m) {
     sqlite3_bind_int64(st, 9, m.ts);
     sqlite3_bind_int64(st, 10, m.packet_id);
     sqlite3_bind_text(st, 11, m.ack_state.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(st, 12, m.rx_snr);
+    sqlite3_bind_int(st, 13, m.rx_rssi);
+    sqlite3_bind_int64(st, 14, m.hop_start);
+    sqlite3_bind_int64(st, 15, m.hop_limit);
+    sqlite3_bind_int64(st, 16, m.relay_node);
     int64_t rowid = 0;
     if (sqlite3_step(st) == SQLITE_DONE) rowid = sqlite3_last_insert_rowid(db_);
     sqlite3_finalize(st);
@@ -324,14 +368,12 @@ void Database::update_ack_state(int64_t rowid, const std::string& ack_state) {
 std::vector<StoredMessage> Database::recent_messages(const WindowKey& w, int limit) {
     std::vector<StoredMessage> out;
     if (!db_) return out;
-    const char* sql =
-        "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
-        "channel_idx,text,ts,packet_id,ack_state FROM messages "
+    std::string sql = std::string(kSelectMessagesPrefix) +
         "WHERE (device=? OR ?='' OR device='' OR device LIKE '%' || ? OR ? LIKE '%' || device) "
         "AND window_kind=? AND window_target=? "
         "ORDER BY ts DESC LIMIT ?";
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_text(st, 1, w.device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, w.device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 3, w.device.c_str(), -1, SQLITE_TRANSIENT);
@@ -340,20 +382,7 @@ std::vector<StoredMessage> Database::recent_messages(const WindowKey& w, int lim
     sqlite3_bind_int64(st, 6, w.target);
     sqlite3_bind_int(st, 7, limit);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        StoredMessage m;
-        m.rowid = sqlite3_column_int64(st, 0);
-        m.device = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
-        m.window_kind = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
-        m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
-        m.direction = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
-        m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
-        m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
-        m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
-        if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
-        m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
-        m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
-        if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
-        out.push_back(std::move(m));
+        out.push_back(read_message_row(st));
     }
     sqlite3_finalize(st);
     std::reverse(out.begin(), out.end());
@@ -362,28 +391,14 @@ std::vector<StoredMessage> Database::recent_messages(const WindowKey& w, int lim
 
 std::optional<StoredMessage> Database::find_by_packet_id(uint32_t packet_id) {
     if (!db_) return std::nullopt;
-    const char* sql = "SELECT rowid,device,window_kind,window_target,direction,"
-                      "from_node,to_node,channel_idx,text,ts,packet_id,ack_state "
-                      "FROM messages WHERE packet_id=? ORDER BY rowid DESC LIMIT 1";
+    std::string sql = std::string(kSelectMessagesPrefix) +
+        "WHERE packet_id=? ORDER BY rowid DESC LIMIT 1";
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return std::nullopt;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return std::nullopt;
     sqlite3_bind_int64(st, 1, packet_id);
     std::optional<StoredMessage> out;
     if (sqlite3_step(st) == SQLITE_ROW) {
-        StoredMessage m;
-        m.rowid = sqlite3_column_int64(st, 0);
-        m.device = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
-        m.window_kind = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
-        m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
-        m.direction = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
-        m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
-        m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
-        m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
-        if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
-        m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
-        m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
-        if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
-        out = std::move(m);
+        out = read_message_row(st);
     }
     sqlite3_finalize(st);
     return out;
@@ -442,29 +457,14 @@ int64_t Database::max_message_rowid() {
 std::vector<StoredMessage> Database::get_messages_after(int64_t rowid, int limit) {
     std::vector<StoredMessage> out;
     if (!db_) return out;
-    const char* sql =
-        "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
-        "channel_idx,text,ts,packet_id,ack_state FROM messages "
+    std::string sql = std::string(kSelectMessagesPrefix) +
         "WHERE rowid > ? ORDER BY rowid ASC LIMIT ?";
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_int64(st, 1, rowid);
     sqlite3_bind_int(st, 2, limit);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        StoredMessage m;
-        m.rowid = sqlite3_column_int64(st, 0);
-        if (auto* p = sqlite3_column_text(st, 1)) m.device = reinterpret_cast<const char*>(p);
-        if (auto* p = sqlite3_column_text(st, 2)) m.window_kind = reinterpret_cast<const char*>(p);
-        m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
-        if (auto* p = sqlite3_column_text(st, 4)) m.direction = reinterpret_cast<const char*>(p);
-        m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
-        m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
-        m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
-        if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
-        m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
-        m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
-        if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
-        out.push_back(std::move(m));
+        out.push_back(read_message_row(st));
     }
     sqlite3_finalize(st);
     return out;
@@ -486,29 +486,14 @@ uint64_t Database::max_message_ts() {
 std::vector<StoredMessage> Database::get_messages_after_ts(uint64_t ts, int limit) {
     std::vector<StoredMessage> out;
     if (!db_) return out;
-    const char* sql =
-        "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
-        "channel_idx,text,ts,packet_id,ack_state FROM messages "
+    std::string sql = std::string(kSelectMessagesPrefix) +
         "WHERE ts > ? ORDER BY ts ASC LIMIT ?";
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_int64(st, 1, ts);
     sqlite3_bind_int(st, 2, limit);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        StoredMessage m;
-        m.rowid = sqlite3_column_int64(st, 0);
-        if (auto* p = sqlite3_column_text(st, 1)) m.device = reinterpret_cast<const char*>(p);
-        if (auto* p = sqlite3_column_text(st, 2)) m.window_kind = reinterpret_cast<const char*>(p);
-        m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
-        if (auto* p = sqlite3_column_text(st, 4)) m.direction = reinterpret_cast<const char*>(p);
-        m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
-        m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
-        m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
-        if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
-        m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
-        m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
-        if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
-        out.push_back(std::move(m));
+        out.push_back(read_message_row(st));
     }
     sqlite3_finalize(st);
     return out;
@@ -600,14 +585,12 @@ std::vector<Database::LocationRow> Database::get_recent_node_locations(uint64_t 
 std::vector<StoredMessage> Database::get_messages_paginated(const WindowKey& w, int limit, int offset) {
     std::vector<StoredMessage> out;
     if (!db_) return out;
-    const char* sql =
-        "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
-        "channel_idx,text,ts,packet_id,ack_state FROM messages "
+    std::string sql = std::string(kSelectMessagesPrefix) +
         "WHERE (device=? OR ?='' OR device='' OR device LIKE '%' || ? OR ? LIKE '%' || device) "
         "AND window_kind=? AND window_target=? "
         "ORDER BY ts DESC LIMIT ? OFFSET ?";
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_text(st, 1, w.device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, w.device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 3, w.device.c_str(), -1, SQLITE_TRANSIENT);
@@ -617,20 +600,7 @@ std::vector<StoredMessage> Database::get_messages_paginated(const WindowKey& w, 
     sqlite3_bind_int(st, 7, limit);
     sqlite3_bind_int(st, 8, offset);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        StoredMessage m;
-        m.rowid = sqlite3_column_int64(st, 0);
-        m.device = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
-        m.window_kind = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
-        m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
-        m.direction = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
-        m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
-        m.to_node = static_cast<uint32_t>(sqlite3_column_int64(st, 6));
-        m.channel_idx = static_cast<uint32_t>(sqlite3_column_int64(st, 7));
-        if (auto* p = sqlite3_column_text(st, 8)) m.text = reinterpret_cast<const char*>(p);
-        m.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 9));
-        m.packet_id = static_cast<uint32_t>(sqlite3_column_int64(st, 10));
-        if (auto* p = sqlite3_column_text(st, 11)) m.ack_state = reinterpret_cast<const char*>(p);
-        out.push_back(std::move(m));
+        out.push_back(read_message_row(st));
     }
     sqlite3_finalize(st);
     std::reverse(out.begin(), out.end());

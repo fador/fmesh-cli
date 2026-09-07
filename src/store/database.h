@@ -39,6 +39,11 @@ struct StoredMessage {
     uint64_t ts = 0;         // unix seconds
     uint32_t packet_id = 0;
     std::string ack_state;   // "pending" / "acked" / "naked" / ""
+    float rx_snr = 0.0f;
+    int32_t rx_rssi = 0;
+    uint32_t hop_start = 0;
+    uint32_t hop_limit = 0;
+    uint32_t relay_node = 0;
 };
 
 // SQLite-backed persistence. One DB file holds nodes, channels, messages,

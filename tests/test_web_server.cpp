@@ -259,6 +259,11 @@ TEST(WebService, MessageAndConversationsApi) {
     m1.text = "Broadcast alert on Primary";
     m1.ts = 1000;
     m1.packet_id = 9991;
+    m1.rx_snr = 8.5f;
+    m1.rx_rssi = -70;
+    m1.hop_start = 3;
+    m1.hop_limit = 3;
+    m1.relay_node = 0;
     db.insert_message(m1);
 
     // Insert a DM with full stream device id
@@ -284,6 +289,9 @@ TEST(WebService, MessageAndConversationsApi) {
     std::string res1 = http_client_request(port, req1);
     EXPECT_NE(res1.find("200 OK"), std::string::npos);
     EXPECT_NE(res1.find("Broadcast alert on Primary"), std::string::npos);
+    EXPECT_NE(res1.find("\"rx_snr\": 8.5"), std::string::npos);
+    EXPECT_NE(res1.find("\"rx_rssi\": -70"), std::string::npos);
+    EXPECT_NE(res1.find("\"hops\": 0"), std::string::npos);
 
     // 2. Query DM messages
     std::string req2 = "GET /api/messages?device=stream:mesh:192.168.178.23:4404&kind=dm&target=" + std::to_string(0xAABBCCDD) + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";

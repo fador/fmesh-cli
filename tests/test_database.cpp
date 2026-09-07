@@ -423,3 +423,77 @@ TEST_F(DatabaseTest, UpsertAndLoadTelemetry) {
     EXPECT_EQ(*loaded->uptime_seconds, 172800u);
 }
 
+TEST_F(DatabaseTest, MessageSignalAndHopsPersistence) {
+    StoredMessage direct_msg;
+    direct_msg.device = "dev1";
+    direct_msg.window_kind = "channel";
+    direct_msg.window_target = 0;
+    direct_msg.direction = "in";
+    direct_msg.from_node = 0x12345678;
+    direct_msg.to_node = 0xFFFFFFFF;
+    direct_msg.channel_idx = 0;
+    direct_msg.text = "Direct 0-hop message";
+    direct_msg.ts = 1700000001;
+    direct_msg.packet_id = 1111;
+    direct_msg.rx_snr = 7.5f;
+    direct_msg.rx_rssi = -82;
+    direct_msg.hop_start = 3;
+    direct_msg.hop_limit = 3;
+    direct_msg.relay_node = 0;
+    int64_t row1 = db_.insert_message(direct_msg);
+    EXPECT_GT(row1, 0);
+
+    StoredMessage multi_hop_msg;
+    multi_hop_msg.device = "dev1";
+    multi_hop_msg.window_kind = "channel";
+    multi_hop_msg.window_target = 0;
+    multi_hop_msg.direction = "in";
+    multi_hop_msg.from_node = 0x87654321;
+    multi_hop_msg.to_node = 0xFFFFFFFF;
+    multi_hop_msg.channel_idx = 0;
+    multi_hop_msg.text = "Relayed message via relay";
+    multi_hop_msg.ts = 1700000002;
+    multi_hop_msg.packet_id = 2222;
+    multi_hop_msg.rx_snr = 3.2f;
+    multi_hop_msg.rx_rssi = -95;
+    multi_hop_msg.hop_start = 3;
+    multi_hop_msg.hop_limit = 1; // 2 hops
+    multi_hop_msg.relay_node = 0x30;
+    int64_t row2 = db_.insert_message(multi_hop_msg);
+    EXPECT_GT(row2, 0);
+
+    // Reopen DB to verify round-trip to disk
+    db_.close();
+    ASSERT_TRUE(db_.open(db_path_));
+
+    WindowKey wk{"dev1", "channel", 0};
+    auto msgs = db_.recent_messages(wk);
+    ASSERT_EQ(msgs.size(), 2u);
+
+    EXPECT_EQ(msgs[0].text, "Direct 0-hop message");
+    EXPECT_FLOAT_EQ(msgs[0].rx_snr, 7.5f);
+    EXPECT_EQ(msgs[0].rx_rssi, -82);
+    EXPECT_EQ(msgs[0].hop_start, 3u);
+    EXPECT_EQ(msgs[0].hop_limit, 3u);
+    EXPECT_EQ(msgs[0].relay_node, 0u);
+
+    EXPECT_EQ(msgs[1].text, "Relayed message via relay");
+    EXPECT_FLOAT_EQ(msgs[1].rx_snr, 3.2f);
+    EXPECT_EQ(msgs[1].rx_rssi, -95);
+    EXPECT_EQ(msgs[1].hop_start, 3u);
+    EXPECT_EQ(msgs[1].hop_limit, 1u);
+    EXPECT_EQ(msgs[1].relay_node, 0x30u);
+
+    // Also test find_by_packet_id
+    auto p1 = db_.find_by_packet_id(1111);
+    ASSERT_TRUE(p1.has_value());
+    EXPECT_FLOAT_EQ(p1->rx_snr, 7.5f);
+    EXPECT_EQ(p1->rx_rssi, -82);
+
+    auto p2 = db_.find_by_packet_id(2222);
+    ASSERT_TRUE(p2.has_value());
+    EXPECT_EQ(p2->relay_node, 0x30u);
+    EXPECT_EQ(p2->hop_start, 3u);
+    EXPECT_EQ(p2->hop_limit, 1u);
+}
+

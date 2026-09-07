@@ -758,12 +758,55 @@
         ackBadge = `<span style="font-size:0.65rem; color:${color}; margin-left:4px;">[${m.ack_state}]</span>`;
       }
 
+      let sigBadge = '';
+      if (!isOut) {
+        const hopStart = m.hop_start || 0;
+        const hopLimit = m.hop_limit || 0;
+        const hops = m.hops !== undefined ? m.hops : ((hopStart > hopLimit) ? (hopStart - hopLimit) : 0);
+        const snr = m.rx_snr !== undefined ? m.rx_snr : 0;
+        const rssi = m.rx_rssi !== undefined ? m.rx_rssi : 0;
+        const relay = m.relay_node || 0;
+
+        if (hops === 0) {
+          if (snr !== 0 || rssi !== 0 || hopStart > 0) {
+            let parts = ['0-hop'];
+            if (snr !== 0) parts.push(`${Number(snr).toFixed(1)}dB`);
+            if (rssi !== 0) parts.push(`${rssi}dBm`);
+            sigBadge = `<span class="msg-sig-badge sig-direct" title="Direct reception (0 hops)">${escapeHtml(parts.join(' '))}</span>`;
+          }
+        } else {
+          let parts = [`${hops} ${hops === 1 ? 'hop' : 'hops'}`];
+          if (relay) {
+            let relayName = '';
+            const rNode = state.nodes.get(relay);
+            if (rNode) {
+              relayName = rNode.short_name || rNode.long_name || ('!' + rNode.node_num.toString(16));
+            } else if (relay <= 0xFF) {
+              for (const [nNum, nObj] of state.nodes.entries()) {
+                if ((nNum & 0xFF) === relay) {
+                  relayName = nObj.short_name || nObj.long_name || ('!' + nNum.toString(16));
+                  break;
+                }
+              }
+              if (!relayName) relayName = `!*${relay.toString(16).padStart(2, '0')}`;
+            } else {
+              relayName = '!' + relay.toString(16).padStart(8, '0');
+            }
+            parts.push(`via ${relayName}`);
+          }
+          if (snr !== 0) parts.push(`${Number(snr).toFixed(1)}dB`);
+          if (rssi !== 0) parts.push(`${rssi}dBm`);
+          sigBadge = `<span class="msg-sig-badge sig-relayed" title="Multi-hop relayed message">${escapeHtml(parts.join(' '))}</span>`;
+        }
+      }
+
       return `
         <div class="chat-message-row ${isOut ? 'outgoing' : 'incoming'}">
           <div class="chat-message-meta">
             <span class="chat-sender-nick">${escapeHtml(senderName)}</span>
             <span>${timeStr}</span>
             ${ackBadge}
+            ${sigBadge}
           </div>
           <div class="chat-message-bubble">
             ${escapeHtml(m.text)}

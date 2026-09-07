@@ -293,6 +293,7 @@ std::optional<MeshEvent> decode_packet(
         ev.rx_rssi = pkt.rx_rssi();
         ev.hop_start = pkt.hop_start();
         ev.hop_limit = pkt.hop_limit();
+        ev.relay_node = pkt.relay_node();
         ev.broadcast = (pkt.to() == kBroadcastNodeNum || pkt.to() == 0);
         ev.want_ack = pkt.want_ack();
         if (d.portnum() == PortNum::ALERT_APP) {

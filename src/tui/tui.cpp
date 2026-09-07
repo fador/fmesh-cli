@@ -1657,7 +1657,8 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             const NodeDb* db = service_.db_for(e.device);
             wm_.append_text(e.device, e.from_node, e.to_node, e.channel_idx,
                             e.broadcast, e.text, e.rx_time, db,
-                            e.rx_snr, e.hop_start, e.hop_limit);
+                            e.rx_snr, e.hop_start, e.hop_limit,
+                            e.rx_rssi, e.relay_node);
         } else if constexpr (std::is_same_v<T, EvAckReceived>) {
             std::string ack_text = "*** ACK " + std::to_string(e.packet_id) +
                 (e.success ? " OK" : " FAIL: " + e.error_reason);

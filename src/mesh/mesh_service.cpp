@@ -766,6 +766,11 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
                        std::chrono::duration_cast<std::chrono::seconds>(
                            std::chrono::system_clock::now().time_since_epoch()).count();
                 dup.packet_id = e.packet_id;
+                dup.rx_snr = e.rx_snr;
+                dup.rx_rssi = e.rx_rssi;
+                dup.hop_start = e.hop_start;
+                dup.hop_limit = e.hop_limit;
+                dup.relay_node = e.relay_node;
                 db_.insert_message(dup);
                 return;
             }
@@ -792,6 +797,11 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
                    std::chrono::duration_cast<std::chrono::seconds>(
                        std::chrono::system_clock::now().time_since_epoch()).count();
             m.packet_id = e.packet_id;
+            m.rx_snr = e.rx_snr;
+            m.rx_rssi = e.rx_rssi;
+            m.hop_start = e.hop_start;
+            m.hop_limit = e.hop_limit;
+            m.relay_node = e.relay_node;
             m.rowid = db_.insert_message(m);
             if (sync_manager_) sync_manager_->push_message(m);
         } else if constexpr (std::is_same_v<T, EvAckReceived>) {

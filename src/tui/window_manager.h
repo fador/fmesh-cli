@@ -46,7 +46,8 @@ public:
     void append_text(const std::string& device, uint32_t from_node,
                      uint32_t to_node, uint32_t channel_idx, bool broadcast,
                      const std::string& text, uint32_t ts, const NodeDb* db,
-                     float rx_snr = 0, uint32_t hop_start = 0, uint32_t hop_limit = 0);
+                     float rx_snr = 0, uint32_t hop_start = 0, uint32_t hop_limit = 0,
+                     int32_t rx_rssi = 0, uint32_t relay_node = 0);
 
     // Append a status/info/meta line to the status window.
     void append_status(const std::string& text, int color_pair = 0);

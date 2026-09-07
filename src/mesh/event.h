@@ -66,6 +66,7 @@ struct EvTextReceived {
     int32_t rx_rssi = 0;
     uint32_t hop_start = 0;
     uint32_t hop_limit = 0;
+    uint32_t relay_node = 0;
     bool broadcast = false;
     bool want_ack = false;
     bool duplicate = false;

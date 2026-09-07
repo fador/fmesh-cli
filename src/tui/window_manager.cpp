@@ -246,11 +246,77 @@ int WindowManager::ensure_nodelist(const std::string& device) {
     return add_window(std::move(w));
 }
 
+static std::string format_message_signal(const std::string& direction,
+                                        uint32_t hop_start, uint32_t hop_limit,
+                                        float rx_snr, int32_t rx_rssi,
+                                        uint32_t relay_node, const NodeDb* db) {
+    if (direction == "out") return "";
+
+    uint32_t hops = (hop_start > hop_limit) ? (hop_start - hop_limit) : 0;
+    if (hops == 0) {
+        if (rx_snr == 0.0f && rx_rssi == 0 && hop_start == 0) {
+            return "";
+        }
+        std::string sig = " [0-hop";
+        if (rx_snr != 0.0f) {
+            char snrbuf[16];
+            std::snprintf(snrbuf, sizeof(snrbuf), " %.1fdB", rx_snr);
+            sig += snrbuf;
+        }
+        if (rx_rssi != 0) {
+            sig += " " + std::to_string(rx_rssi) + "dBm";
+        }
+        sig += "]";
+        return sig;
+    } else {
+        std::string sig = " [hops=" + std::to_string(hops);
+        if (relay_node != 0) {
+            std::string relay_name;
+            if (db) {
+                auto n = db->get(relay_node);
+                if (!n && relay_node <= 0xFF) {
+                    for (const auto& node : db->all()) {
+                        if ((node.node_num & 0xFF) == relay_node) {
+                            n = node;
+                            break;
+                        }
+                    }
+                }
+                if (n) {
+                    relay_name = n->short_name.empty() ? n->long_name : n->short_name;
+                    if (relay_name.empty()) relay_name = node_num_to_id(n->node_num);
+                }
+            }
+            if (relay_name.empty()) {
+                char rbuf[16];
+                if (relay_node <= 0xFF) {
+                    std::snprintf(rbuf, sizeof(rbuf), "!*%02x", relay_node);
+                } else {
+                    std::snprintf(rbuf, sizeof(rbuf), "!%08x", relay_node);
+                }
+                relay_name = rbuf;
+            }
+            sig += " via " + relay_name;
+        }
+        if (rx_snr != 0.0f) {
+            char snrbuf[16];
+            std::snprintf(snrbuf, sizeof(snrbuf), " %.1fdB", rx_snr);
+            sig += snrbuf;
+        }
+        if (rx_rssi != 0) {
+            sig += " " + std::to_string(rx_rssi) + "dBm";
+        }
+        sig += "]";
+        return sig;
+    }
+}
+
 void WindowManager::append_text(const std::string& device, uint32_t from_node,
                                 uint32_t to_node, uint32_t channel_idx,
                                 bool broadcast, const std::string& text,
                                 uint32_t ts, const NodeDb* db,
-                                float rx_snr, uint32_t hop_start, uint32_t hop_limit) {
+                                float rx_snr, uint32_t hop_start, uint32_t hop_limit,
+                                int32_t rx_rssi, uint32_t relay_node) {
     int idx;
     std::string sender_nick = short_nick(db, from_node);
     if (broadcast) {
@@ -277,20 +343,7 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
     }
     if (mention) std::fputc('\a', stdout);
 
-    // Build signal quality suffix.
-    std::string sig;
-    uint32_t hops = (hop_start > hop_limit) ? hop_start - hop_limit : 0;
-    if (hops > 0 || rx_snr != 0) {
-        sig = " [";
-        if (hops > 0) sig += "hops=" + std::to_string(hops);
-        if (hops > 0 && rx_snr != 0) sig += " ";
-        if (rx_snr != 0) {
-            char snrbuf[16];
-            std::snprintf(snrbuf, sizeof(snrbuf), "%.1fdB", rx_snr);
-            sig += snrbuf;
-        }
-        sig += "]";
-    }
+    std::string sig = format_message_signal("in", hop_start, hop_limit, rx_snr, rx_rssi, relay_node, db);
 
     Line line;
     bool is_action = (text.size() > 2 && text[0] == '*' && text[1] == ' ');
@@ -490,8 +543,10 @@ void WindowManager::load_history(int window_idx) {
             nick = short_nick(db, m.from_node);
         }
 
+        std::string sig = format_message_signal(m.direction, m.hop_start, m.hop_limit,
+                                                m.rx_snr, m.rx_rssi, m.relay_node, db);
         Line line;
-        line.text = "[" + fmt_time(static_cast<uint32_t>(m.ts)) + "] <" + nick + "> " + m.text;
+        line.text = "[" + fmt_time(static_cast<uint32_t>(m.ts)) + "] <" + nick + "> " + m.text + sig;
         bool is_dm = (t.kind == "dm");
         bool mention = false;
         if (db) {

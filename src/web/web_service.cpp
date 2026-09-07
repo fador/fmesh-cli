@@ -69,6 +69,7 @@ nlohmann::json node_to_json(const Node& n) {
 }
 
 nlohmann::json message_to_json(const StoredMessage& m) {
+    uint32_t hops = (m.hop_start > m.hop_limit) ? (m.hop_start - m.hop_limit) : 0;
     return {
         {"rowid", m.rowid},
         {"device", m.device},
@@ -81,7 +82,13 @@ nlohmann::json message_to_json(const StoredMessage& m) {
         {"text", m.text},
         {"ts", m.ts},
         {"packet_id", m.packet_id},
-        {"ack_state", m.ack_state}
+        {"ack_state", m.ack_state},
+        {"rx_snr", m.rx_snr},
+        {"rx_rssi", m.rx_rssi},
+        {"hop_start", m.hop_start},
+        {"hop_limit", m.hop_limit},
+        {"hops", hops},
+        {"relay_node", m.relay_node}
     };
 }
 
@@ -761,6 +768,7 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
             record_and_broadcast_activity(act);
         }
         else if constexpr (std::is_same_v<T, EvTextReceived>) {
+            uint32_t hops = (e.hop_start > e.hop_limit) ? (e.hop_start - e.hop_limit) : 0;
             nlohmann::json data = {
                 {"type", "message_received"},
                 {"device", e.device},
@@ -772,6 +780,10 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
                 {"packet_id", e.packet_id},
                 {"rx_snr", e.rx_snr},
                 {"rx_rssi", e.rx_rssi},
+                {"hop_start", e.hop_start},
+                {"hop_limit", e.hop_limit},
+                {"hops", hops},
+                {"relay_node", e.relay_node},
                 {"broadcast", e.broadcast}
             };
             server_.broadcast_sse("message_received", data.dump());

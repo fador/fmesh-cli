@@ -161,6 +161,11 @@ void DbSyncManager::handle_request(const std::string& device, const std::string&
         msg["ts"] = m.ts;
         msg["packet_id"] = m.packet_id;
         msg["ack_state"] = m.ack_state;
+        msg["rx_snr"] = m.rx_snr;
+        msg["rx_rssi"] = m.rx_rssi;
+        msg["hop_start"] = m.hop_start;
+        msg["hop_limit"] = m.hop_limit;
+        msg["relay_node"] = m.relay_node;
         m_arr.push_back(msg);
     }
     resp["messages"] = m_arr;
@@ -203,6 +208,11 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             m.ts = msg.value("ts", (uint64_t)0);
             m.packet_id = pkt;
             m.ack_state = msg.value("ack_state", "");
+            m.rx_snr = msg.value("rx_snr", 0.0f);
+            m.rx_rssi = msg.value("rx_rssi", (int32_t)0);
+            m.hop_start = msg.value("hop_start", (uint32_t)0);
+            m.hop_limit = msg.value("hop_limit", (uint32_t)0);
+            m.relay_node = msg.value("relay_node", (uint32_t)0);
 
             db_.insert_message(m);
             push_message(m); // Forward to other connected mesh peers
@@ -215,6 +225,11 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             ev.text = m.text;
             ev.rx_time = m.ts;
             ev.packet_id = m.packet_id;
+            ev.rx_snr = m.rx_snr;
+            ev.rx_rssi = m.rx_rssi;
+            ev.hop_start = m.hop_start;
+            ev.hop_limit = m.hop_limit;
+            ev.relay_node = m.relay_node;
             ev.broadcast = (m.window_kind == "channel");
             mesh_.dispatch_to_ui(ev);
         }
