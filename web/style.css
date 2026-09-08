@@ -1650,3 +1650,775 @@ body {
   height: 100%;
   padding: 2rem;
 }
+
+/* ==========================================================================
+   Mobile-Responsive Elements (FABs, Backdrops, Back Buttons)
+   ========================================================================== */
+
+.map-mobile-fabs {
+  display: none;
+}
+
+.map-backdrop {
+  display: none;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 1050;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.map-backdrop.visible {
+  display: block;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.panel-header-actions, .packet-hud-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-close-panel, .btn-close-hud {
+  display: none;
+  font-size: 1.35rem;
+  line-height: 1;
+  padding: 2px 6px;
+}
+
+.btn-chat-back {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--accent-cyan);
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.35rem 0.65rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  margin-right: 0.5rem;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.btn-chat-back svg {
+  width: 16px;
+  height: 16px;
+}
+
+.btn-chat-back:hover, .btn-chat-back:active {
+  background: var(--bg-hover);
+  border-color: var(--accent-cyan);
+}
+
+/* ==========================================================================
+   Tablet Breakpoint (max-width: 1024px)
+   ========================================================================== */
+@media (max-width: 1024px) {
+  .nav-tab {
+    padding: 0 0.6rem;
+    font-size: 0.8rem;
+    gap: 0.35rem;
+  }
+
+  .nav-tab svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .diagnostics-layout {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+    overflow-y: auto;
+  }
+
+  .nodes-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+}
+
+/* ==========================================================================
+   Mobile Phone Breakpoint (max-width: 768px)
+   ========================================================================== */
+@media (max-width: 768px) {
+  :root {
+    --mobile-nav-height: 54px;
+    --mobile-bottom-bar-height: 58px;
+  }
+
+  body {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+
+  #app {
+    height: 100vh;
+    height: 100dvh;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* 1. Header & Top Navbar on Mobile */
+  .navbar {
+    height: var(--mobile-nav-height);
+    padding: 0 0.85rem;
+    position: relative;
+    z-index: 1000;
+  }
+
+  .brand-logo {
+    width: 28px;
+    height: 28px;
+  }
+
+  .brand-text h1 {
+    font-size: 1rem;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .nav-controls {
+    gap: 0.5rem;
+  }
+
+  .device-selector-wrapper label {
+    display: none;
+  }
+
+  .device-select {
+    max-width: 130px;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.78rem;
+    border-radius: var(--radius-sm);
+  }
+
+  .live-indicator {
+    padding: 3px 6px;
+    font-size: 0.7rem;
+    gap: 0.3rem;
+  }
+
+  .live-text {
+    font-size: 0.65rem;
+  }
+
+  /* 2. Bottom Fixed Navigation Bar on Mobile */
+  .nav-tabs {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: calc(var(--mobile-bottom-bar-height) + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: rgba(17, 24, 39, 0.97);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: none;
+    z-index: 1200;
+    display: flex;
+    justify-content: space-around;
+    align-items: stretch;
+    gap: 0;
+  }
+
+  .nav-tab {
+    flex: 1;
+    height: 100%;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 4px 2px;
+    gap: 2px;
+    font-size: 0.68rem;
+    font-weight: 500;
+    border-bottom: none;
+    border-top: 2px solid transparent;
+    position: relative;
+    color: var(--text-secondary);
+  }
+
+  .nav-tab svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .nav-tab.active {
+    border-top-color: var(--accent-cyan);
+    background: rgba(6, 182, 212, 0.08);
+    color: var(--accent-cyan);
+  }
+
+  .nav-tab .badge {
+    position: absolute;
+    top: 3px;
+    right: calc(50% - 18px);
+    font-size: 0.6rem;
+    padding: 1px 4px;
+    line-height: 1.1;
+  }
+
+  /* 3. Main Content Container */
+  .main-content {
+    height: calc(100% - var(--mobile-nav-height) - var(--mobile-bottom-bar-height) - env(safe-area-inset-bottom, 0px));
+    margin-bottom: calc(var(--mobile-bottom-bar-height) + env(safe-area-inset-bottom, 0px));
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tab-pane {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* 4. Map View on Mobile */
+  .map-container-layout {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .map-mobile-fabs {
+    display: flex;
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 950;
+    gap: 0.5rem;
+  }
+
+  .map-fab {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: rgba(17, 24, 39, 0.92);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    padding: 0.45rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    transition: all 0.2s;
+  }
+
+  .map-fab svg {
+    width: 15px;
+    height: 15px;
+    color: var(--accent-cyan);
+  }
+
+  .map-fab:active {
+    background: var(--bg-hover);
+    border-color: var(--accent-cyan);
+  }
+
+  .fab-pulse-dot {
+    width: 7px;
+    height: 7px;
+    background-color: var(--accent-emerald);
+    border-radius: 50%;
+    display: inline-block;
+    animation: pulse-glow 2s infinite;
+  }
+
+  /* Floating Map Panel as Bottom Sheet on Mobile */
+  .map-floating-panel {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 75vh;
+    border-radius: 16px 16px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    z-index: 1100;
+    transform: translateY(110%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow-y: auto;
+    padding: 1.25rem;
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.7);
+  }
+
+  .map-floating-panel.open {
+    transform: translateY(0);
+  }
+
+  .btn-close-panel {
+    display: block;
+  }
+
+  /* Packet Activity HUD as Bottom Sheet on Mobile */
+  .packet-activity-hud {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 75vh;
+    border-radius: 16px 16px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    z-index: 1100;
+    transform: translateY(110%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.7);
+  }
+
+  .packet-activity-hud.open {
+    transform: translateY(0);
+  }
+
+  .packet-hud-list {
+    max-height: 45vh;
+  }
+
+  .btn-close-hud {
+    display: block;
+  }
+
+  /* Node Drawer as Bottom Sheet on Mobile */
+  .node-drawer {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-height: 75vh;
+    border-radius: 16px 16px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    z-index: 1150;
+    transform: translateY(0);
+    padding: 1.25rem;
+    padding-bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 25px rgba(0, 0, 0, 0.8);
+  }
+
+  .node-drawer.collapsed {
+    transform: translateY(110%);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* 5. Messages (Chat) View on Mobile (Master-Detail) */
+  .chat-container {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* State 1: Channels & DMs list takes 100% width */
+  .chat-sidebar {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 10;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transform: translateX(0);
+    border-right: none;
+    padding: 1rem;
+    padding-bottom: 2rem;
+  }
+
+  /* State 2: Active Chat main window takes 100% width */
+  .chat-main {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    right: 0;
+    z-index: 20;
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transform: translateX(100%);
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-base);
+  }
+
+  /* When .chat-active is on .chat-container: */
+  .chat-container.chat-active .chat-sidebar {
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+
+  .chat-container.chat-active .chat-main {
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .btn-chat-back {
+    display: inline-flex;
+  }
+
+  .chat-header {
+    padding: 0.65rem 0.85rem;
+    gap: 0.4rem;
+  }
+
+  .chat-title-info h2 {
+    font-size: 1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chat-subtitle {
+    font-size: 0.72rem;
+  }
+
+  .chat-messages {
+    padding: 0.85rem;
+    gap: 0.75rem;
+  }
+
+  .chat-message-row {
+    max-width: 90%;
+  }
+
+  .chat-message-bubble {
+    font-size: 0.85rem;
+    padding: 0.55rem 0.85rem;
+  }
+
+  .chat-composer {
+    padding: 0.65rem 0.85rem;
+    gap: 0.5rem;
+  }
+
+  .chat-composer input {
+    font-size: 0.85rem;
+    padding: 0.5rem 0.75rem;
+    min-height: 40px;
+  }
+
+  .chat-composer .btn {
+    padding: 0.5rem 0.85rem;
+    font-size: 0.85rem;
+    min-height: 40px;
+  }
+
+  /* 6. Nodes Explorer View on Mobile */
+  #tab-nodes {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .view-header {
+    padding: 0.75rem 0.85rem;
+    gap: 0.65rem;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-bar {
+    max-width: 100%;
+    width: 100%;
+    min-height: 40px;
+  }
+
+  .filter-group {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+
+  .filter-group::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-chip {
+    white-space: nowrap;
+    flex-shrink: 0;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.75rem;
+    min-height: 34px;
+  }
+
+  .sort-select-wrapper {
+    width: 100%;
+    justify-content: flex-end;
+    font-size: 0.8rem;
+  }
+
+  .sort-select-wrapper select {
+    min-height: 34px;
+    font-size: 0.8rem;
+  }
+
+  .nodes-grid {
+    padding: 0.85rem;
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+    height: auto;
+    overflow-y: visible;
+  }
+
+  .node-card {
+    padding: 1rem;
+  }
+
+  .node-card-actions {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .node-card-actions .btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 38px;
+  }
+
+  /* 7. Telemetry Dashboard on Mobile */
+  #tab-telemetry {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .telemetry-dashboard {
+    padding: 0.85rem;
+    height: auto;
+  }
+
+  .dashboard-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .dashboard-banner h2 {
+    font-size: 1.1rem;
+  }
+
+  .telemetry-node-picker {
+    width: 100%;
+  }
+
+  .telemetry-node-picker select {
+    flex: 1;
+    min-height: 38px;
+    font-size: 0.85rem;
+  }
+
+  .metrics-cards-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+    margin-bottom: 1rem;
+  }
+
+  .metric-kpi-card {
+    padding: 0.75rem;
+  }
+
+  .kpi-title {
+    font-size: 0.7rem;
+  }
+
+  .kpi-value {
+    font-size: 1.25rem;
+  }
+
+  .charts-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .chart-card {
+    padding: 0.85rem;
+  }
+
+  .chart-wrapper {
+    height: 220px;
+  }
+
+  /* 8. Diagnostics & Traceroute on Mobile */
+  #tab-diagnostics {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .diagnostics-layout {
+    grid-template-columns: 1fr;
+    padding: 0.85rem;
+    gap: 1rem;
+    height: auto;
+    overflow-y: visible;
+  }
+
+  .diag-card {
+    padding: 1rem;
+  }
+
+  .diag-form-row {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .diag-form-row select {
+    min-height: 40px;
+    font-size: 0.85rem;
+  }
+
+  .diag-form-row button {
+    min-height: 40px;
+    justify-content: center;
+  }
+
+  .traceroute-result {
+    min-height: 160px;
+  }
+
+  .raw-packet-stream {
+    min-height: 200px;
+  }
+
+  /* 9. Config View on Mobile */
+  #tab-config {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .config-layout {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .config-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+    padding: 0.75rem 0.85rem;
+  }
+
+  .config-devices-list {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 0.4rem;
+    white-space: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .config-devices-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .config-device-item {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+
+  .config-editor-main {
+    padding: 0.85rem;
+    overflow-y: visible;
+  }
+
+  .config-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.65rem;
+  }
+
+  .config-header h2 {
+    font-size: 1.1rem;
+  }
+
+  .config-filter {
+    width: 100%;
+  }
+
+  .config-filter input {
+    width: 100%;
+    min-height: 38px;
+  }
+
+  .config-table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+
+  .config-table {
+    min-width: 480px;
+  }
+
+  .config-table th, .config-table td {
+    padding: 0.55rem 0.75rem;
+    font-size: 0.8rem;
+  }
+}
+
+/* ==========================================================================
+   Small Mobile Phone Breakpoint (max-width: 480px)
+   ========================================================================== */
+@media (max-width: 480px) {
+  .nav-tab {
+    font-size: 0.62rem;
+  }
+
+  .nav-tab svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .metrics-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .node-metrics-bar {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.25rem;
+    padding: 0.45rem;
+  }
+
+  .node-metric-val {
+    font-size: 0.8rem;
+  }
+}
+

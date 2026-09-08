@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>fmesh-cli | Mesh Network Dashboard</title>
   <meta name="description" content="Real-time Web Dashboard and OpenStreetMap visualization for Meshtastic networks via fmesh-cli">
 
@@ -90,13 +90,32 @@
           <!-- The Leaflet OSM Map -->
           <div id="map" class="osm-map"></div>
 
+          <!-- Mobile Floating Action Buttons for Map Controls -->
+          <div class="map-mobile-fabs" id="map-mobile-fabs">
+            <button id="btn-toggle-map-options" class="map-fab" title="Map Layers &amp; Options">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+              <span>Layers</span>
+            </button>
+            <button id="btn-toggle-packet-hud" class="map-fab" title="Live Packet Activity HUD">
+              <span class="fab-pulse-dot"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+              <span>Packets</span>
+            </button>
+          </div>
+
+          <!-- Backdrop overlay for mobile drawer/panels -->
+          <div id="map-backdrop" class="map-backdrop"></div>
+
           <!-- Floating Map Controls & Filters -->
-          <div class="map-floating-panel">
+          <div id="map-floating-panel" class="map-floating-panel">
             <div class="panel-header">
               <span class="panel-title">Map Overlay Options</span>
-              <button id="btn-recenter-map" class="btn-icon" title="Recenter to All Nodes">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
-              </button>
+              <div class="panel-header-actions">
+                <button id="btn-recenter-map" class="btn-icon" title="Recenter to All Nodes">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+                </button>
+                <button id="btn-close-map-options" class="btn-icon btn-close-panel" title="Close Panel">&times;</button>
+              </div>
             </div>
             <div class="panel-body">
               <label class="toggle-control">
@@ -146,7 +165,10 @@
                 <span class="packet-hud-title">Live RF Packet Traffic</span>
                 <span class="packet-hud-count" id="packet-hud-count">0 pkts</span>
               </div>
-              <button id="btn-clear-packet-hud" class="btn-clear-hud" title="Clear HUD list">Clear</button>
+              <div class="packet-hud-actions">
+                <button id="btn-clear-packet-hud" class="btn-clear-hud" title="Clear HUD list">Clear</button>
+                <button id="btn-close-packet-hud" class="btn-icon btn-close-hud" title="Close HUD">&times;</button>
+              </div>
             </div>
             <div class="packet-hud-list" id="packet-hud-list">
               <div class="packet-hud-empty">Listening for live packet transmissions...</div>
@@ -217,6 +239,10 @@
           <!-- Chat Window -->
           <div class="chat-main">
             <div class="chat-header">
+              <button id="btn-mobile-chat-back" class="btn-chat-back" title="Back to Channels and DMs">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
+                <span>Back</span>
+              </button>
               <div class="chat-title-info">
                 <h2 id="chat-title">#Primary (Channel 0)</h2>
                 <span id="chat-subtitle" class="chat-subtitle">Broadcast channel</span>

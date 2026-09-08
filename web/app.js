@@ -48,6 +48,12 @@
     // Map
     mapContainer: document.getElementById('map'),
     btnRecenterMap: document.getElementById('btn-recenter-map'),
+    mapFloatingPanel: document.getElementById('map-floating-panel'),
+    btnToggleMapOptions: document.getElementById('btn-toggle-map-options'),
+    btnCloseMapOptions: document.getElementById('btn-close-map-options'),
+    btnTogglePacketHud: document.getElementById('btn-toggle-packet-hud'),
+    btnClosePacketHud: document.getElementById('btn-close-packet-hud'),
+    mapBackdrop: document.getElementById('map-backdrop'),
     layerToggleLinks: document.getElementById('layer-toggle-links'),
     layerTogglePacketAnim: document.getElementById('layer-toggle-packet-anim'),
     layerToggleTrails: document.getElementById('layer-toggle-trails'),
@@ -68,6 +74,8 @@
     nodesGrid: document.getElementById('nodes-grid'),
 
     // Messages
+    chatContainer: document.querySelector('.chat-container'),
+    btnMobileChatBack: document.getElementById('btn-mobile-chat-back'),
     channelList: document.getElementById('channel-list'),
     dmList: document.getElementById('dm-list'),
     chatTitle: document.getElementById('chat-title'),
@@ -152,6 +160,9 @@
       if (targetTab === 'map' && map) {
         setTimeout(() => map.invalidateSize(), 200);
       }
+      if (el.mapFloatingPanel) el.mapFloatingPanel.classList.remove('open');
+      if (el.packetActivityHud) el.packetActivityHud.classList.remove('open');
+      if (el.mapBackdrop) el.mapBackdrop.classList.remove('visible');
       if (targetTab === 'messages') {
         state.unreadCount = 0;
         if (el.unreadCountBadge) el.unreadCountBadge.style.display = 'none';
@@ -452,6 +463,9 @@
   function selectNodeForMap(node) {
     state.selectedNodeNumForMap = node.node_num;
     el.mapNodeDrawer.classList.remove('collapsed');
+    if (el.mapBackdrop && window.innerWidth <= 768) {
+      el.mapBackdrop.classList.add('visible');
+    }
 
     const battery = node.battery_level != null ? `${node.battery_level}%` : 'N/A';
     const voltage = node.voltage != null ? `${node.voltage.toFixed(2)}V` : 'N/A';
@@ -1473,7 +1487,53 @@
 
     el.btnCloseDrawer?.addEventListener('click', () => {
       el.mapNodeDrawer.classList.add('collapsed');
+      if (el.mapBackdrop) el.mapBackdrop.classList.remove('visible');
       state.selectedNodeNumForMap = null;
+    });
+
+    // Mobile Chat Back Button
+    el.btnMobileChatBack?.addEventListener('click', () => {
+      if (el.chatContainer) {
+        el.chatContainer.classList.remove('chat-active');
+      }
+    });
+
+    // Mobile Map Controls Toggles
+    el.btnToggleMapOptions?.addEventListener('click', () => {
+      const isOpen = el.mapFloatingPanel?.classList.toggle('open');
+      if (isOpen) {
+        el.packetActivityHud?.classList.remove('open');
+        el.mapBackdrop?.classList.add('visible');
+      } else {
+        el.mapBackdrop?.classList.remove('visible');
+      }
+    });
+
+    el.btnTogglePacketHud?.addEventListener('click', () => {
+      const isOpen = el.packetActivityHud?.classList.toggle('open');
+      if (isOpen) {
+        el.mapFloatingPanel?.classList.remove('open');
+        el.mapBackdrop?.classList.add('visible');
+      } else {
+        el.mapBackdrop?.classList.remove('visible');
+      }
+    });
+
+    el.btnCloseMapOptions?.addEventListener('click', () => {
+      el.mapFloatingPanel?.classList.remove('open');
+      el.mapBackdrop?.classList.remove('visible');
+    });
+
+    el.btnClosePacketHud?.addEventListener('click', () => {
+      el.packetActivityHud?.classList.remove('open');
+      el.mapBackdrop?.classList.remove('visible');
+    });
+
+    el.mapBackdrop?.addEventListener('click', () => {
+      el.mapFloatingPanel?.classList.remove('open');
+      el.packetActivityHud?.classList.remove('open');
+      el.mapNodeDrawer?.classList.add('collapsed');
+      el.mapBackdrop?.classList.remove('visible');
     });
 
     // Nodes search & sort
@@ -1923,6 +1983,9 @@
       el.chatSubtitle.textContent = `Direct Message with node ${nodeNum}`;
       renderChannelList();
       renderDmList();
+      if (el.chatContainer) {
+        el.chatContainer.classList.add('chat-active');
+      }
       document.querySelector('.nav-tab[data-tab="messages"]').click();
       loadMessages();
     },
@@ -1933,6 +1996,9 @@
       el.chatSubtitle.textContent = kind === 'channel' ? 'Broadcast channel' : `Direct Message with node ${target}`;
       renderChannelList();
       renderDmList();
+      if (el.chatContainer) {
+        el.chatContainer.classList.add('chat-active');
+      }
       loadMessages();
     },
 
