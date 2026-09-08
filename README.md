@@ -17,8 +17,12 @@ An irssi-style terminal chat client for [Meshtastic](https://meshtastic.org) dev
 - **Traceroute**: `/traceroute` (aliases: `/trace`, `/tr`) traces mesh routes and hop counts to remote nodes
 - **Remote Config Management**: dynamically view and alter device configurations (`/config [key] [value]`, e.g. `lora.tx_power`, `display.screen_on_secs`) across local and virtual nodes using protobuf reflection
 - **Mesh Synchronization**: multi-client star (hub-and-spoke) and multi-hop daisy chain topology synchronization with automatic SQLite replication, message propagation, and packet deduplication
+- **Global & Per-Node Statistics**: interactive analytics dashboard with packet counts, dynamic activity timelines, packet type breakdowns, top talkers, and per-node communication tables across 1h, 6h, 1d, 7d, and all-time ranges
+- **Long-Term Telemetry History**: logs and graphs historical environmental and hardware metrics (temperature, humidity, barometric pressure, battery level/voltage, channel airtime) in SQLite and browser charts
+- **Co-Located Node Dispersal**: automatically offsets map pins for nodes sharing identical GPS coordinates so all overlapping nodes remain visible and clickable
+- **Smart RF Traffic Filtering**: filters out local device keepalives and internal loops from live packet monitors to keep RF traffic views clean and relevant
 - **Map Tracing & Coordinate Telemetry**: transparently decodes and logs `POSITION_APP` coordinate telemetry into SQLite to build historical trails
-- **Web Dashboard & OpenStreetMap Visualization**: real-time web interface (`--web`, default port 8080) featuring OpenStreetMap node overlays, RF link quality visualization, GPS breadcrumb tracks, live messaging, telemetry charts, and diagnostics
+- **Web Dashboard & OpenStreetMap Visualization**: real-time web interface (`--web`, default port 8080) featuring OpenStreetMap node overlays, RF link quality visualization, GPS breadcrumb tracks, live messaging, telemetry charts, global statistics, and diagnostics
 - **Multi-device support**: connect to multiple radios simultaneously via `--device` flag or `/connect`
 - **Active device cycling**: `Ctrl+X` or `/device` switches the active device for context-sensitive commands
 - **Window Management**: `/close` closes the current window and switches back to the previous active window
@@ -201,6 +205,18 @@ The input line shows a context-sensitive prompt so it's always clear where your 
 - **Zstandard Compression**: JSON synchronization payloads (database sync, node lists, telemetry) are adaptively compressed using Zstandard (`0xD1` framing marker), providing >60% reduction in bandwidth consumption with fallback to uncompressed JSON (`0xD0`) and memory-bomb protection.
 - **Topologies Supported**: Tested and verified across both multi-client star networks (hub-and-spoke) and multi-hop daisy chains.
 
+## Web Dashboard & Visualization
+
+When started with `--web` (default port `8080`), `fmesh-cli` serves a responsive single-page web application featuring live Server-Sent Events (SSE) updates:
+
+- **Map Overlay**: Live OpenStreetMap view displaying nodes, signal links, GPS historical breadcrumb trails, animated transmission beams, and automatic dispersal of co-located nodes sharing identical coordinates.
+- **Nodes Directory**: Searchable card grid of all discovered mesh nodes with battery percentage, SNR quality, role badges, and quick direct message / map navigation shortcuts.
+- **Messages**: Browser-based messaging interface for broadcast channel communications (`#Primary`) and private direct messages.
+- **Telemetry**: Historical environmental sensor trends (temperature, humidity, barometric pressure) and device metrics (battery level/voltage, channel airtime utilization) backed by persistent SQLite storage.
+- **Statistics**: Comprehensive packet telemetry dashboard with dynamic activity timelines, port distributions, top talkers, and per-node metrics across selectable time ranges (**1h**, **6h**, **1d**, **7d**, and **All Time**).
+- **Diagnostics & Traceroute**: Run on-demand traceroutes over the mesh to map multi-hop repeater routes and monitor raw incoming FromRadio packet streams.
+- **Radio Config**: Inspect and modify radio settings (e.g. transmit power, display timeouts) directly from your browser.
+
 ## Architecture & Wire Protocol
 
 ```
@@ -250,7 +266,7 @@ When connecting directly to Meshtastic hardware via BLE:
 ## Testing
 
 ```sh
-# Run the complete test suite (204 unit & integration tests)
+# Run the complete test suite (230 unit & integration tests)
 ./build/fmesh-cli-tests
 # (On Windows: .\build\Release\fmesh-cli-tests.exe)
 
