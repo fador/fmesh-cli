@@ -1280,26 +1280,167 @@ body {
 
 .dashboard-banner {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 1rem;
   margin-bottom: 1.5rem;
 }
 
-.telemetry-node-picker {
+.dashboard-title-group h2 {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.dashboard-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.telemetry-node-picker-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.telemetry-search-sort-bar {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.telemetry-search-bar {
+  flex: 1;
+  min-width: 240px;
+  max-width: none;
+  position: relative;
+}
+
+.btn-clear-search {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.btn-clear-search:hover {
+  color: var(--accent-cyan);
+}
+
+.telemetry-sort-wrapper {
+  flex-shrink: 0;
+}
+
+.telemetry-filter-chips {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.telemetry-filter-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.telemetry-selector-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border-subtle);
   font-size: 0.85rem;
   color: var(--text-secondary);
 }
 
-.telemetry-node-picker select {
-  background: var(--bg-surface);
+.telemetry-select-stepper {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 260px;
+}
+
+.telemetry-node-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-input);
   border: 1px solid var(--border-subtle);
   color: var(--text-primary);
-  padding: 0.4rem 0.8rem;
+  padding: 0.45rem 0.75rem;
   border-radius: var(--radius-md);
   font-family: inherit;
+  font-size: 0.85rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.telemetry-node-select:focus {
+  border-color: var(--border-active);
+}
+
+.telemetry-node-select optgroup {
+  background: var(--bg-surface);
+  color: var(--accent-cyan);
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.telemetry-node-select option {
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-weight: normal;
+  padding: 4px 6px;
+}
+
+.btn-stepper {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: var(--radius-md);
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+
+.btn-stepper:hover {
+  background: var(--bg-hover);
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+}
+
+.btn-stepper svg {
+  width: 16px;
+  height: 16px;
+}
+
+.telemetry-nodes-count-hint {
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+  background: rgba(6, 182, 212, 0.1);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  white-space: nowrap;
 }
 
 .metrics-cards-grid {
@@ -2226,7 +2367,7 @@ body {
 
   .dashboard-banner {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 0.75rem;
     margin-bottom: 1rem;
   }
@@ -2235,14 +2376,40 @@ body {
     font-size: 1.1rem;
   }
 
-  .telemetry-node-picker {
-    width: 100%;
+  .telemetry-node-picker-card {
+    padding: 0.75rem;
+    gap: 0.65rem;
   }
 
-  .telemetry-node-picker select {
-    flex: 1;
-    min-height: 38px;
-    font-size: 0.85rem;
+  .telemetry-search-sort-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .telemetry-search-bar {
+    min-width: 100%;
+  }
+
+  .telemetry-sort-wrapper {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .telemetry-selector-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .telemetry-select-stepper {
+    width: 100%;
+    min-width: 100%;
+  }
+
+  .telemetry-node-select {
+    min-height: 40px;
+    font-size: 0.8rem;
   }
 
   .metrics-cards-grid {

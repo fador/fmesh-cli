@@ -16,6 +16,10 @@
     unreadCount: 0,
     selectedNodeNumForMap: null,
     selectedNodeNumForTelemetry: null,
+    telemetrySearchQuery: '',
+    telemetryFilter: 'all',
+    telemetrySort: 'last_heard',
+    filteredTelemetryNodes: [],
     historyHours: 24,
     showLinks: true,
     showPacketAnim: true,
@@ -87,6 +91,13 @@
 
     // Telemetry
     telemetryNodeSelect: document.getElementById('telemetry-node-select'),
+    telemetryNodeSearch: document.getElementById('telemetry-node-search'),
+    btnTelemetrySearchClear: document.getElementById('btn-telemetry-search-clear'),
+    telemetryNodeSort: document.getElementById('telemetry-node-sort'),
+    telemetryFilterChips: document.getElementById('telemetry-filter-chips'),
+    btnPrevTelemetryNode: document.getElementById('btn-prev-telemetry-node'),
+    btnNextTelemetryNode: document.getElementById('btn-next-telemetry-node'),
+    telemetryNodesCountHint: document.getElementById('telemetry-nodes-count-hint'),
     metricsSummaryCards: document.getElementById('metrics-summary-cards'),
     overlayBattery: document.getElementById('overlay-battery'),
     overlayEnvironment: document.getElementById('overlay-environment'),
@@ -172,6 +183,7 @@
         scrollToChatBottom();
       }
       if (targetTab === 'telemetry') {
+        renderTelemetryNodePicker();
         updateTelemetryView();
       }
       if (targetTab === 'diagnostics') {
@@ -1005,17 +1017,21 @@
       });
     }
 
+    renderTelemetryNodePicker();
     updateTelemetryView();
   }
 
-  function updateTelemetryView() {
-    let targetNode = null;
-    if (state.selectedNodeNumForTelemetry) {
+  function updateTelemetryView(overrideNode) {
+    let targetNode = overrideNode !== undefined ? overrideNode : null;
+    if (targetNode === null && state.selectedNodeNumForTelemetry) {
       targetNode = state.nodes.get(state.selectedNodeNumForTelemetry);
     }
-    if (!targetNode && state.nodes.size > 0) {
-      targetNode = Array.from(state.nodes.values())[0];
-      state.selectedNodeNumForTelemetry = targetNode.node_num;
+    if (!targetNode && state.nodes.size > 0 && overrideNode === undefined) {
+      const first = (state.filteredTelemetryNodes && state.filteredTelemetryNodes.length > 0)
+        ? state.filteredTelemetryNodes[0]
+        : Array.from(state.nodes.values())[0];
+      targetNode = first;
+      state.selectedNodeNumForTelemetry = targetNode ? targetNode.node_num : null;
     }
 
     if (el.telemetryNodeSelect && targetNode) {
@@ -1024,6 +1040,139 @@
 
     updateTelemetrySummaryCards(targetNode);
     updateTelemetryCharts(targetNode);
+  }
+
+  function renderTelemetryNodePicker() {
+    const query = (state.telemetrySearchQuery || '').toLowerCase().trim();
+    const filter = state.telemetryFilter || 'all';
+    const sortKey = state.telemetrySort || 'last_heard';
+    const now = Math.floor(Date.now() / 1000);
+
+    let list = Array.from(state.nodes.values());
+
+    // 1. Text Search Filter (name, short name, node_id, hardware model, role)
+    if (query) {
+      list = list.filter(n =>
+        (n.long_name && n.long_name.toLowerCase().includes(query)) ||
+        (n.short_name && n.short_name.toLowerCase().includes(query)) ||
+        (n.node_id && n.node_id.toLowerCase().includes(query)) ||
+        (n.hw_model && n.hw_model.toLowerCase().includes(query)) ||
+        (n.role && n.role.toLowerCase().includes(query))
+      );
+    }
+
+    // 2. Organization / Category Filter
+    if (filter === 'has_telemetry') {
+      list = list.filter(n => {
+        const hasProps = n.battery_level != null || n.voltage != null || n.temperature != null ||
+                         n.relative_humidity != null || n.barometric_pressure != null ||
+                         n.channel_util != null || n.air_util_tx != null;
+        const hasHistory = state.telemetryHistory.has(n.node_num) && state.telemetryHistory.get(n.node_num).length > 0;
+        return hasProps || hasHistory;
+      });
+    } else if (filter === 'recent') {
+      list = list.filter(n => (now - (n.last_heard || 0)) < 3600);
+    } else if (filter === 'favorites') {
+      list = list.filter(n => n.is_favorite);
+    } else if (filter === 'routers') {
+      list = list.filter(n => n.role && (n.role.includes('ROUTER') || n.role.includes('REPEATER')));
+    }
+
+    // 3. Sort Order
+    list.sort((a, b) => {
+      if (sortKey === 'name') {
+        const nameA = a.long_name || a.short_name || '';
+        const nameB = b.long_name || b.short_name || '';
+        return nameA.localeCompare(nameB);
+      }
+      if (sortKey === 'battery') {
+        return (b.battery_level != null ? b.battery_level : -1) - (a.battery_level != null ? a.battery_level : -1);
+      }
+      if (sortKey === 'hops') {
+        return (a.hops_away != null ? a.hops_away : 99) - (b.hops_away != null ? b.hops_away : 99);
+      }
+      if (sortKey === 'snr') {
+        return (b.snr != null ? b.snr : -99) - (a.snr != null ? a.snr : -99);
+      }
+      return (b.last_heard || 0) - (a.last_heard || 0);
+    });
+
+    state.filteredTelemetryNodes = list;
+
+    // Update count hint
+    if (el.telemetryNodesCountHint) {
+      const total = state.nodes.size;
+      el.telemetryNodesCountHint.textContent = `${list.length} of ${total} nodes`;
+    }
+
+    // Clear button toggle
+    if (el.btnTelemetrySearchClear) {
+      el.btnTelemetrySearchClear.style.display = query ? 'block' : 'none';
+    }
+
+    if (!el.telemetryNodeSelect) return;
+
+    if (list.length === 0) {
+      el.telemetryNodeSelect.innerHTML = '<option value="">No matching nodes found</option>';
+      state.selectedNodeNumForTelemetry = null;
+      updateTelemetryView(null);
+      return;
+    }
+
+    function buildOption(n) {
+      const isMe = state.myNodeNum && n.node_num === state.myNodeNum;
+      const name = n.long_name || n.short_name || n.node_id;
+      const parts = [];
+      if (isMe) parts.push('★ ME');
+      parts.push(name);
+      parts.push(`(${n.node_id})`);
+      if (n.battery_level != null) parts.push(`🔋${n.battery_level}%`);
+      if (n.temperature != null) parts.push(`🌡️${n.temperature.toFixed(1)}°C`);
+      if (n.hops_away != null) parts.push(n.hops_away === 0 ? '0-hop' : `${n.hops_away}h`);
+      return `<option value="${n.node_num}">${escapeHtml(parts.join(' '))}</option>`;
+    }
+
+    const myNode = list.find(n => state.myNodeNum && n.node_num === state.myNodeNum);
+    const telemetryNodes = list.filter(n => n !== myNode && (
+      n.battery_level != null || n.temperature != null || n.voltage != null ||
+      (state.telemetryHistory.has(n.node_num) && state.telemetryHistory.get(n.node_num).length > 0)
+    ));
+    const otherNodes = list.filter(n => n !== myNode && !telemetryNodes.includes(n));
+
+    let html = '';
+    if (myNode) {
+      html += `<optgroup label="Connected Device">${buildOption(myNode)}</optgroup>`;
+    }
+    if (telemetryNodes.length > 0) {
+      html += `<optgroup label="Nodes With Telemetry (${telemetryNodes.length})">${telemetryNodes.map(buildOption).join('')}</optgroup>`;
+    }
+    if (otherNodes.length > 0) {
+      html += `<optgroup label="Other Mesh Nodes (${otherNodes.length})">${otherNodes.map(buildOption).join('')}</optgroup>`;
+    }
+
+    el.telemetryNodeSelect.innerHTML = html;
+
+    const hasCurrent = list.some(n => n.node_num === state.selectedNodeNumForTelemetry);
+    if (!hasCurrent) {
+      state.selectedNodeNumForTelemetry = list[0].node_num;
+    }
+    el.telemetryNodeSelect.value = state.selectedNodeNumForTelemetry;
+    updateTelemetryView();
+  }
+
+  function stepTelemetryNode(direction) {
+    const list = state.filteredTelemetryNodes;
+    if (!list || list.length === 0) return;
+    const curIdx = list.findIndex(n => n.node_num === state.selectedNodeNumForTelemetry);
+    let nextIdx = 0;
+    if (curIdx >= 0) {
+      nextIdx = (curIdx + direction + list.length) % list.length;
+    }
+    state.selectedNodeNumForTelemetry = list[nextIdx].node_num;
+    if (el.telemetryNodeSelect) {
+      el.telemetryNodeSelect.value = state.selectedNodeNumForTelemetry;
+    }
+    updateTelemetryView();
   }
 
   function updateTelemetrySummaryCards(targetNode) {
@@ -1390,16 +1539,12 @@
   }
 
   function updateNodePickers() {
+    renderTelemetryNodePicker();
+
     const options = Array.from(state.nodes.values()).map(n => `
       <option value="${n.node_num}">${escapeHtml(n.long_name || n.short_name)} (${n.node_id})</option>
     `).join('');
 
-    if (el.telemetryNodeSelect) {
-      el.telemetryNodeSelect.innerHTML = options;
-      if (state.selectedNodeNumForTelemetry) {
-        el.telemetryNodeSelect.value = state.selectedNodeNumForTelemetry;
-      }
-    }
     if (el.tracerouteTargetSelect) el.tracerouteTargetSelect.innerHTML = options;
   }
 
@@ -1423,10 +1568,46 @@
       await fetchRawPackets();
     });
 
-    // Telemetry node select
+    // Telemetry node select, search, sort, filters, stepper
     el.telemetryNodeSelect?.addEventListener('change', () => {
-      state.selectedNodeNumForTelemetry = parseInt(el.telemetryNodeSelect.value, 10);
-      updateTelemetryView();
+      const val = parseInt(el.telemetryNodeSelect.value, 10);
+      if (!isNaN(val)) {
+        state.selectedNodeNumForTelemetry = val;
+        updateTelemetryView();
+      }
+    });
+
+    el.telemetryNodeSearch?.addEventListener('input', () => {
+      state.telemetrySearchQuery = el.telemetryNodeSearch.value;
+      renderTelemetryNodePicker();
+    });
+
+    el.btnTelemetrySearchClear?.addEventListener('click', () => {
+      state.telemetrySearchQuery = '';
+      if (el.telemetryNodeSearch) el.telemetryNodeSearch.value = '';
+      renderTelemetryNodePicker();
+    });
+
+    el.telemetryNodeSort?.addEventListener('change', () => {
+      state.telemetrySort = el.telemetryNodeSort.value;
+      renderTelemetryNodePicker();
+    });
+
+    document.querySelectorAll('#telemetry-filter-chips .filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('#telemetry-filter-chips .filter-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        state.telemetryFilter = chip.dataset.tfilter || 'all';
+        renderTelemetryNodePicker();
+      });
+    });
+
+    el.btnPrevTelemetryNode?.addEventListener('click', () => {
+      stepTelemetryNode(-1);
+    });
+
+    el.btnNextTelemetryNode?.addEventListener('click', () => {
+      stepTelemetryNode(1);
     });
 
 
@@ -2027,9 +2208,14 @@
 
     inspectTelemetry: function(nodeNum) {
       state.selectedNodeNumForTelemetry = nodeNum;
+      state.telemetrySearchQuery = '';
+      if (el.telemetryNodeSearch) el.telemetryNodeSearch.value = '';
+      state.telemetryFilter = 'all';
+      document.querySelectorAll('#telemetry-filter-chips .filter-chip').forEach(c => {
+        c.classList.toggle('active', c.dataset.tfilter === 'all');
+      });
       document.querySelector('.nav-tab[data-tab="telemetry"]').click();
-      if (el.telemetryNodeSelect) el.telemetryNodeSelect.value = nodeNum;
-      updateTelemetryView();
+      renderTelemetryNodePicker();
     },
 
 

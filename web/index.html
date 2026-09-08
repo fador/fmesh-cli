@@ -271,10 +271,52 @@
       <section id="tab-telemetry" class="tab-pane">
         <div class="telemetry-dashboard">
           <div class="dashboard-banner">
-            <h2>Environmental & Hardware Telemetry</h2>
-            <div class="telemetry-node-picker">
-              <label for="telemetry-node-select">Inspect Node:</label>
-              <select id="telemetry-node-select"></select>
+            <div class="dashboard-title-group">
+              <h2>Environmental &amp; Hardware Telemetry</h2>
+              <span class="dashboard-subtitle">Sensor telemetry history, battery status, and channel metrics</span>
+            </div>
+
+            <!-- Telemetry Node Search, Filter & Organizer Toolbar -->
+            <div class="telemetry-node-picker-card">
+              <div class="telemetry-search-sort-bar">
+                <div class="search-bar telemetry-search-bar">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                  <input type="text" id="telemetry-node-search" placeholder="Search node name, ID, hardware, or role...">
+                  <button id="btn-telemetry-search-clear" class="btn-clear-search" style="display:none;" title="Clear search">&times;</button>
+                </div>
+                <div class="sort-select-wrapper telemetry-sort-wrapper">
+                  <label for="telemetry-node-sort">Sort:</label>
+                  <select id="telemetry-node-sort">
+                    <option value="last_heard">Last Heard</option>
+                    <option value="name">Name (A-Z)</option>
+                    <option value="battery">Battery %</option>
+                    <option value="hops">Hops Away</option>
+                    <option value="snr">SNR Quality</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="filter-group telemetry-filter-chips" id="telemetry-filter-chips">
+                <button class="filter-chip active" data-tfilter="all">All Nodes</button>
+                <button class="filter-chip" data-tfilter="has_telemetry">Has Telemetry</button>
+                <button class="filter-chip" data-tfilter="recent">Active &lt; 1h</button>
+                <button class="filter-chip" data-tfilter="favorites">Favorites</button>
+                <button class="filter-chip" data-tfilter="routers">Routers / Gateways</button>
+              </div>
+
+              <div class="telemetry-selector-row">
+                <label for="telemetry-node-select">Inspect Node:</label>
+                <div class="telemetry-select-stepper">
+                  <button id="btn-prev-telemetry-node" class="btn-stepper" title="Previous Node">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                  </button>
+                  <select id="telemetry-node-select" class="telemetry-node-select"></select>
+                  <button id="btn-next-telemetry-node" class="btn-stepper" title="Next Node">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                  </button>
+                </div>
+                <span class="telemetry-nodes-count-hint" id="telemetry-nodes-count-hint">0 nodes</span>
+              </div>
             </div>
           </div>
 
