@@ -38,6 +38,10 @@
     packetCount: 0,
     telemetryHistory: new Map(), // node_num -> Array<{ts, battery_level, voltage, temperature, relative_humidity, barometric_pressure, channel_util, air_util_tx}>
     telemetryLoadedNodes: new Set(), // Set<node_num> that have been fetched from /api/telemetry
+    statsRange: '1d',
+    statsNodeFilter: 0,
+    statsSearchQuery: '',
+    statsData: null,
     eventSource: null
   };
 
@@ -117,7 +121,27 @@
     configDevicesList: document.getElementById('config-devices-list'),
     configDeviceTitle: document.getElementById('config-device-title'),
     configSearch: document.getElementById('config-search'),
-    configTableBody: document.getElementById('config-table-body')
+    configTableBody: document.getElementById('config-table-body'),
+
+    // Statistics
+    statsRangeChips: document.getElementById('stats-range-chips'),
+    statsNodeSelect: document.getElementById('stats-node-select'),
+    btnRefreshStats: document.getElementById('btn-refresh-stats'),
+    statsTotalPackets: document.getElementById('stats-total-packets'),
+    statsCastRatio: document.getElementById('stats-cast-ratio'),
+    statsActiveNodes: document.getElementById('stats-active-nodes'),
+    statsMsgCount: document.getElementById('stats-msg-count'),
+    statsTelemetryCount: document.getElementById('stats-telemetry-count'),
+    statsPosCount: document.getElementById('stats-pos-count'),
+    statsAvgSnr: document.getElementById('stats-avg-snr'),
+    statsTimelineResolution: document.getElementById('stats-timeline-resolution'),
+    statsTableBody: document.getElementById('stats-table-body'),
+    statsTableCount: document.getElementById('stats-table-count'),
+    statsTableSearch: document.getElementById('stats-table-search'),
+    btnStatsSearchClear: document.getElementById('btn-stats-search-clear'),
+    overlayStatsTimeline: document.getElementById('overlay-stats-timeline'),
+    overlayStatsDoughnut: document.getElementById('overlay-stats-doughnut'),
+    overlayStatsNodes: document.getElementById('overlay-stats-nodes')
   };
 
   // --- Leaflet Map Instance ---
@@ -150,6 +174,7 @@
     await fetchRecentPackets();
     await fetchRawPackets();
     initTelemetryCharts();
+    initStatsCharts();
     initSSE();
   }
 
@@ -189,6 +214,10 @@
       }
       if (targetTab === 'diagnostics') {
         fetchRawPackets();
+      }
+      if (targetTab === 'stats') {
+        updateNodePickers();
+        fetchAndRenderStats();
       }
       if (targetTab === 'config') {
         loadConfig();
@@ -1703,6 +1732,16 @@
     `).join('');
 
     if (el.tracerouteTargetSelect) el.tracerouteTargetSelect.innerHTML = options;
+
+    if (el.statsNodeSelect) {
+      const cur = state.statsNodeFilter || 0;
+      el.statsNodeSelect.innerHTML = `<option value="0">All Nodes (Global Mesh)</option>` +
+        Array.from(state.nodes.values()).map(n => `
+          <option value="${n.node_num}" ${n.node_num === cur ? 'selected' : ''}>
+            ${escapeHtml(n.long_name || n.short_name)} (${n.node_id})
+          </option>
+        `).join('');
+    }
   }
 
   // ==========================================================================
@@ -1765,6 +1804,40 @@
 
     el.btnNextTelemetryNode?.addEventListener('click', () => {
       stepTelemetryNode(1);
+    });
+
+    // Statistics Range, Filter & Search Listeners
+    document.querySelectorAll('#stats-range-chips .filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        document.querySelectorAll('#stats-range-chips .filter-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        state.statsRange = chip.dataset.range || '1d';
+        fetchAndRenderStats();
+      });
+    });
+
+    el.statsNodeSelect?.addEventListener('change', () => {
+      state.statsNodeFilter = parseInt(el.statsNodeSelect.value, 10) || 0;
+      fetchAndRenderStats();
+    });
+
+    el.btnRefreshStats?.addEventListener('click', () => {
+      fetchAndRenderStats();
+    });
+
+    el.statsTableSearch?.addEventListener('input', () => {
+      state.statsSearchQuery = el.statsTableSearch.value;
+      if (el.btnStatsSearchClear) {
+        el.btnStatsSearchClear.style.display = state.statsSearchQuery ? 'block' : 'none';
+      }
+      renderStatsTable();
+    });
+
+    el.btnStatsSearchClear?.addEventListener('click', () => {
+      state.statsSearchQuery = '';
+      if (el.statsTableSearch) el.statsTableSearch.value = '';
+      el.btnStatsSearchClear.style.display = 'none';
+      renderStatsTable();
     });
 
 
@@ -2404,8 +2477,319 @@
       loadConfig();
     },
 
-    saveConfigKey: saveConfigKey
+    saveConfigKey: saveConfigKey,
+
+    filterStatsByNode: function(nodeNum) {
+      state.statsNodeFilter = nodeNum;
+      if (el.statsNodeSelect) el.statsNodeSelect.value = nodeNum;
+      const statsTab = document.querySelector('.nav-tab[data-tab="stats"]');
+      if (statsTab && !statsTab.classList.contains('active')) {
+        statsTab.click();
+      } else {
+        fetchAndRenderStats();
+      }
+    },
+
+    clearStatsNodeFilter: function() {
+      state.statsNodeFilter = 0;
+      if (el.statsNodeSelect) el.statsNodeSelect.value = 0;
+      fetchAndRenderStats();
+    }
   };
+
+  // ==========================================================================
+  // Statistics Dashboard & Charts
+  // ==========================================================================
+  function initStatsCharts() {
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: {
+        legend: {
+          labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 } }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#64748b', font: { family: 'Inter', size: 10 } },
+          grid: { color: 'rgba(255, 255, 255, 0.05)' }
+        },
+        y: {
+          ticks: { color: '#64748b', font: { family: 'Inter', size: 10 } },
+          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          beginAtZero: true
+        }
+      }
+    };
+
+    // 1. Timeline Chart (Stacked Bar)
+    const ctxTimeline = document.getElementById('chart-stats-timeline')?.getContext('2d');
+    if (ctxTimeline) {
+      state.charts.statsTimeline = new Chart(ctxTimeline, {
+        type: 'bar',
+        data: {
+          labels: [],
+          datasets: [
+            { label: 'Messages', data: [], backgroundColor: '#0ea5e9' },
+            { label: 'Telemetry', data: [], backgroundColor: '#f59e0b' },
+            { label: 'Positions', data: [], backgroundColor: '#8b5cf6' },
+            { label: 'Other/ACKs', data: [], backgroundColor: '#06b6d4' }
+          ]
+        },
+        options: {
+          ...chartOptions,
+          scales: {
+            x: { ...chartOptions.scales.x, stacked: true },
+            y: { ...chartOptions.scales.y, stacked: true }
+          }
+        }
+      });
+    }
+
+    // 2. Port Distribution Doughnut Chart
+    const ctxDoughnut = document.getElementById('chart-stats-doughnut')?.getContext('2d');
+    if (ctxDoughnut) {
+      state.charts.statsDoughnut = new Chart(ctxDoughnut, {
+        type: 'doughnut',
+        data: {
+          labels: [],
+          datasets: [{
+            data: [],
+            backgroundColor: [
+              '#0ea5e9', // text
+              '#f59e0b', // telemetry
+              '#8b5cf6', // position
+              '#10b981', // routing/ack
+              '#ec4899', // traceroute
+              '#3b82f6', // nodeinfo
+              '#64748b'  // other
+            ],
+            borderColor: '#111827',
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '65%',
+          plugins: {
+            legend: {
+              position: 'right',
+              labels: { color: '#94a3b8', font: { family: 'Inter', size: 11 }, boxWidth: 12 }
+            }
+          }
+        }
+      });
+    }
+
+    // 3. Top Talkers Horizontal Bar Chart
+    const ctxNodes = document.getElementById('chart-stats-nodes')?.getContext('2d');
+    if (ctxNodes) {
+      state.charts.statsNodes = new Chart(ctxNodes, {
+        type: 'bar',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Packets Transmitted',
+            data: [],
+            backgroundColor: '#06b6d4',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          ...chartOptions,
+          indexAxis: 'y',
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
+    }
+  }
+
+  async function fetchAndRenderStats() {
+    const range = state.statsRange || '1d';
+    const nodeFilter = state.statsNodeFilter || 0;
+    const url = `/api/stats?range=${encodeURIComponent(range)}${nodeFilter ? `&node=${nodeFilter}` : ''}`;
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      state.statsData = data;
+
+      // 1. KPI Cards
+      const m = data.metrics || {};
+      if (el.statsTotalPackets) el.statsTotalPackets.textContent = (m.total_packets || 0).toLocaleString();
+      if (el.statsCastRatio) {
+        const b = (m.broadcast_count || 0).toLocaleString();
+        const u = (m.unicast_count || 0).toLocaleString();
+        el.statsCastRatio.textContent = `${b} broadcast / ${u} unicast`;
+      }
+      if (el.statsActiveNodes) el.statsActiveNodes.textContent = (m.active_nodes || 0).toLocaleString();
+      if (el.statsMsgCount) el.statsMsgCount.textContent = (m.msg_count || 0).toLocaleString();
+      if (el.statsTelemetryCount) el.statsTelemetryCount.textContent = (m.telemetry_count || 0).toLocaleString();
+      if (el.statsPosCount) el.statsPosCount.textContent = (m.position_count || 0).toLocaleString();
+      if (el.statsAvgSnr) {
+        el.statsAvgSnr.textContent = (m.avg_snr != null && m.avg_snr !== 0) ? `${m.avg_snr.toFixed(1)} dB` : '-- dB';
+      }
+
+      // Resolution badge
+      if (el.statsTimelineResolution) {
+        let resText = '30m buckets';
+        if (range === '1h') resText = '2m buckets';
+        else if (range === '6h') resText = '10m buckets';
+        else if (range === '1d') resText = '30m buckets';
+        else if (range === '7d') resText = '2h buckets';
+        else if (range === 'all') resText = '1d buckets';
+        el.statsTimelineResolution.textContent = resText;
+      }
+
+      // 2. Timeline Chart
+      const timeline = data.timeline || [];
+      if (state.charts.statsTimeline) {
+        if (timeline.length === 0) {
+          if (el.overlayStatsTimeline) el.overlayStatsTimeline.style.display = 'flex';
+          state.charts.statsTimeline.data.labels = [];
+          state.charts.statsTimeline.data.datasets.forEach(ds => ds.data = []);
+        } else {
+          if (el.overlayStatsTimeline) el.overlayStatsTimeline.style.display = 'none';
+          const labels = timeline.map(b => {
+            const d = new Date(b.ts * 1000);
+            if (range === '1h' || range === '6h' || range === '1d') {
+              return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            } else {
+              return `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+            }
+          });
+          state.charts.statsTimeline.data.labels = labels;
+          state.charts.statsTimeline.data.datasets[0].data = timeline.map(b => b.msg_count);
+          state.charts.statsTimeline.data.datasets[1].data = timeline.map(b => b.telemetry_count);
+          state.charts.statsTimeline.data.datasets[2].data = timeline.map(b => b.pos_count);
+          state.charts.statsTimeline.data.datasets[3].data = timeline.map(b => b.other_count);
+        }
+        state.charts.statsTimeline.update();
+      }
+
+      // 3. Port Distribution Doughnut Chart
+      const ports = data.ports || {};
+      const portEntries = Object.entries(ports).filter(([_, cnt]) => cnt > 0);
+      if (state.charts.statsDoughnut) {
+        if (portEntries.length === 0) {
+          if (el.overlayStatsDoughnut) el.overlayStatsDoughnut.style.display = 'flex';
+          state.charts.statsDoughnut.data.labels = [];
+          state.charts.statsDoughnut.data.datasets[0].data = [];
+        } else {
+          if (el.overlayStatsDoughnut) el.overlayStatsDoughnut.style.display = 'none';
+          const prettyPortName = (p) => {
+            if (p === 'TEXT_MESSAGE_APP') return 'Messages';
+            if (p === 'TELEMETRY_APP') return 'Telemetry';
+            if (p === 'POSITION_APP') return 'Position';
+            if (p === 'ROUTING_APP') return 'ACK/Routing';
+            if (p === 'TRACEROUTE_APP') return 'Traceroute';
+            if (p === 'NODEINFO_APP') return 'NodeInfo';
+            return p;
+          };
+          state.charts.statsDoughnut.data.labels = portEntries.map(([p]) => prettyPortName(p));
+          state.charts.statsDoughnut.data.datasets[0].data = portEntries.map(([_, cnt]) => cnt);
+        }
+        state.charts.statsDoughnut.update();
+      }
+
+      // 4. Top Talkers Bar Chart
+      const nodes = data.nodes || [];
+      const topNodes = [...nodes].slice(0, 8); // Top 8 by packet count
+      if (state.charts.statsNodes) {
+        if (topNodes.length === 0) {
+          if (el.overlayStatsNodes) el.overlayStatsNodes.style.display = 'flex';
+          state.charts.statsNodes.data.labels = [];
+          state.charts.statsNodes.data.datasets[0].data = [];
+        } else {
+          if (el.overlayStatsNodes) el.overlayStatsNodes.style.display = 'none';
+          state.charts.statsNodes.data.labels = topNodes.map(n => n.short_name || n.long_name || n.node_id);
+          state.charts.statsNodes.data.datasets[0].data = topNodes.map(n => n.packet_count);
+        }
+        state.charts.statsNodes.update();
+      }
+
+      // 5. Per-Node Table
+      renderStatsTable();
+
+    } catch (err) {
+      console.error('Error fetching stats:', err);
+    }
+  }
+
+  function renderStatsTable() {
+    if (!el.statsTableBody) return;
+    const nodes = (state.statsData && state.statsData.nodes) || [];
+    const q = (state.statsSearchQuery || '').toLowerCase().trim();
+
+    const filtered = nodes.filter(n => {
+      if (!q) return true;
+      return (n.long_name && n.long_name.toLowerCase().includes(q)) ||
+             (n.short_name && n.short_name.toLowerCase().includes(q)) ||
+             (n.node_id && n.node_id.toLowerCase().includes(q)) ||
+             (n.hw_model && n.hw_model.toLowerCase().includes(q)) ||
+             (n.role && n.role.toLowerCase().includes(q));
+    });
+
+    if (el.statsTableCount) {
+      el.statsTableCount.textContent = `Showing ${filtered.length} of ${nodes.length} nodes`;
+    }
+
+    if (filtered.length === 0) {
+      el.statsTableBody.innerHTML = `
+        <tr>
+          <td colspan="10" style="text-align:center; padding: 2rem; color: var(--text-muted);">
+            No node traffic recorded matching criteria.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    el.statsTableBody.innerHTML = filtered.map(n => {
+      const isFiltered = state.statsNodeFilter === n.node_num;
+      const myBadge = n.is_local ? '<span class="my-node-badge" style="margin-left:4px;">ME</span>' : '';
+      const name = escapeHtml(n.long_name || n.short_name || n.node_id);
+      const shortBadge = n.short_name ? `<span class="badge" style="background:var(--bg-elevated); border:1px solid var(--border-subtle); color:var(--text-secondary);">${escapeHtml(n.short_name)}</span>` : '';
+      const hwModel = escapeHtml(n.hw_model || 'Unknown HW');
+      const role = escapeHtml(n.role || 'CLIENT');
+      const snrText = (n.avg_snr != null && n.avg_snr !== 0) ? `${n.avg_snr.toFixed(1)} dB` : '--';
+      const lastSeen = formatTimeAgo(n.last_seen);
+
+      return `
+        <tr style="${isFiltered ? 'background: rgba(6, 182, 212, 0.08);' : ''}">
+          <td>
+            <div class="node-identity">
+              <div class="node-name">${name} ${shortBadge} ${myBadge}</div>
+              <span class="node-id-mono">${n.node_id}</span>
+            </div>
+          </td>
+          <td>
+            <div>${hwModel}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">${role}</div>
+          </td>
+          <td class="mono-val" style="color:var(--accent-cyan); font-size:0.95rem;">${n.packet_count.toLocaleString()}</td>
+          <td class="mono-val">${n.msg_count.toLocaleString()}</td>
+          <td class="mono-val">${n.telemetry_count.toLocaleString()}</td>
+          <td class="mono-val">${n.pos_count.toLocaleString()}</td>
+          <td class="mono-val">${n.ack_count.toLocaleString()}</td>
+          <td class="mono-val" style="color:#38bdf8;">${snrText}</td>
+          <td class="time-col">${lastSeen}</td>
+          <td>
+            ${isFiltered ? `
+              <button class="btn btn-sm btn-secondary" onclick="window.meshApp.clearStatsNodeFilter()">Reset</button>
+            ` : `
+              <button class="btn btn-sm btn-primary" onclick="window.meshApp.filterStatsByNode(${n.node_num})">Filter</button>
+            `}
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
 
   // --- Helpers ---
   function escapeHtml(str) {

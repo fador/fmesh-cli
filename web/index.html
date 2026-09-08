@@ -56,6 +56,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
           Telemetry
         </button>
+        <button class="nav-tab" data-tab="stats">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          Statistics
+        </button>
         <button class="nav-tab" data-tab="diagnostics">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
           Diagnostics
@@ -396,6 +400,156 @@
               <!-- Raw FromRadio packets stream here -->
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- 5. STATISTICS VIEW -->
+      <section id="tab-stats" class="tab-pane">
+        <div class="stats-dashboard">
+          <div class="dashboard-banner">
+            <div class="dashboard-title-group">
+              <h2>Mesh Network Statistics</h2>
+              <span class="dashboard-subtitle">Global network traffic, packet distributions, timeline activity, and per-node communications breakdown</span>
+            </div>
+
+            <!-- Stats Range & Node Filter Bar -->
+            <div class="stats-controls-card">
+              <div class="stats-controls-row">
+                <!-- Time Range Filter Chips -->
+                <div class="filter-group stats-range-chips" id="stats-range-chips">
+                  <button class="filter-chip" data-range="1h">Past 1 Hour</button>
+                  <button class="filter-chip" data-range="6h">Past 6 Hours</button>
+                  <button class="filter-chip active" data-range="1d">Past 24 Hours</button>
+                  <button class="filter-chip" data-range="7d">Past 7 Days</button>
+                  <button class="filter-chip" data-range="all">All Time</button>
+                </div>
+
+                <!-- Node Filter & Refresh -->
+                <div class="stats-filter-actions">
+                  <div class="stats-node-filter-wrapper">
+                    <label for="stats-node-select">Scope:</label>
+                    <select id="stats-node-select" class="stats-node-select">
+                      <option value="0">All Nodes (Global Mesh)</option>
+                    </select>
+                  </div>
+                  <button id="btn-refresh-stats" class="btn btn-secondary btn-sm" title="Refresh Statistics">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPI Summary Cards -->
+          <div class="metrics-cards-grid stats-kpi-grid" id="stats-kpi-cards">
+            <div class="metric-kpi-card">
+              <div class="kpi-title">Total Packets</div>
+              <div class="kpi-value" id="stats-total-packets" style="color: var(--accent-cyan);">0</div>
+              <div class="kpi-subtext" id="stats-cast-ratio">0 broadcast / 0 unicast</div>
+            </div>
+            <div class="metric-kpi-card">
+              <div class="kpi-title">Active Transmitters</div>
+              <div class="kpi-value" id="stats-active-nodes" style="color: var(--accent-emerald);">0</div>
+              <div class="kpi-subtext">Transmitting nodes</div>
+            </div>
+            <div class="metric-kpi-card">
+              <div class="kpi-title">Text Messages</div>
+              <div class="kpi-value" id="stats-msg-count" style="color: var(--accent-sky);">0</div>
+              <div class="kpi-subtext">TEXT_MESSAGE_APP</div>
+            </div>
+            <div class="metric-kpi-card">
+              <div class="kpi-title">Telemetry Reports</div>
+              <div class="kpi-value" id="stats-telemetry-count" style="color: var(--accent-amber);">0</div>
+              <div class="kpi-subtext">TELEMETRY_APP</div>
+            </div>
+            <div class="metric-kpi-card">
+              <div class="kpi-title">Position Updates</div>
+              <div class="kpi-value" id="stats-pos-count" style="color: var(--accent-purple);">0</div>
+              <div class="kpi-subtext">POSITION_APP</div>
+            </div>
+            <div class="metric-kpi-card">
+              <div class="kpi-title">Average SNR Quality</div>
+              <div class="kpi-value" id="stats-avg-snr" style="color: #38bdf8;">-- dB</div>
+              <div class="kpi-subtext">Mean signal-to-noise ratio</div>
+            </div>
+          </div>
+
+          <!-- Charts Grid -->
+          <div class="charts-grid stats-charts-grid">
+            <div class="chart-card stats-chart-timeline-card">
+              <div class="card-header-actions">
+                <h3>Traffic Activity Timeline</h3>
+                <span class="card-hint-badge" id="stats-timeline-resolution">Auto Resolution</span>
+              </div>
+              <div class="chart-wrapper">
+                <canvas id="chart-stats-timeline"></canvas>
+                <div class="chart-empty-overlay" id="overlay-stats-timeline" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                  <span>No packet activity recorded in this time range</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="chart-card stats-chart-doughnut-card">
+              <h3>Packet Types Breakdown</h3>
+              <div class="chart-wrapper">
+                <canvas id="chart-stats-doughnut"></canvas>
+                <div class="chart-empty-overlay" id="overlay-stats-doughnut" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><circle cx="12" cy="12" r="10"></circle></svg>
+                  <span>No packet distribution data</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="chart-card stats-chart-nodes-card">
+              <h3>Top Active Transmitters</h3>
+              <div class="chart-wrapper">
+                <canvas id="chart-stats-nodes"></canvas>
+                <div class="chart-empty-overlay" id="overlay-stats-nodes" style="display:none;">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                  <span>No active nodes in this timeframe</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Per-Node Statistics Table Section -->
+          <div class="stats-table-card">
+            <div class="stats-table-header">
+              <div class="stats-table-title-group">
+                <h3>Per-Node Statistics Breakdown</h3>
+                <span class="stats-table-subtitle" id="stats-table-count">Showing 0 nodes</span>
+              </div>
+              <div class="stats-table-search-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input type="text" id="stats-table-search" placeholder="Search node name, ID, or hardware...">
+                <button id="btn-stats-search-clear" class="btn-clear-search" style="display:none;" title="Clear search">&times;</button>
+              </div>
+            </div>
+            <div class="stats-table-wrapper">
+              <table class="stats-table">
+                <thead>
+                  <tr>
+                    <th>Node</th>
+                    <th>Model &amp; Role</th>
+                    <th>Total Packets</th>
+                    <th>Messages</th>
+                    <th>Telemetry</th>
+                    <th>Position</th>
+                    <th>ACKs</th>
+                    <th>Avg SNR</th>
+                    <th>Last Seen</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="stats-table-body">
+                  <!-- Populated dynamically -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
         </div>
       </section>
 

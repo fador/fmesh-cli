@@ -491,4 +491,69 @@ TEST(WebService, ExcludeLocalNodeFromPacketActivity) {
     web.stop();
 }
 
+TEST(WebService, StatsApi) {
+    meshcli::MeshService service;
+    EXPECT_TRUE(service.open_database(":memory:"));
+
+    std::string dev = "test-device";
+    auto rt = std::make_shared<meshcli::DeviceRuntime>();
+    rt->my_node_num = 0x11112222;
+    rt->db = std::make_unique<meshcli::NodeDb>();
+    rt->db->set_my_node_num(0x11112222);
+
+    meshcli::Node remote_node;
+    remote_node.node_num = 0x22223333;
+    remote_node.node_id = "!22223333";
+    remote_node.long_name = "Remote Node Alpha";
+    remote_node.short_name = "ALPH";
+    remote_node.hw_model = "TBEAM";
+    remote_node.role = "ROUTER";
+    rt->db->upsert_node(remote_node);
+
+    {
+        std::lock_guard<std::mutex> lock(service.devices_mu_for_test());
+        service.devices_for_test()[dev] = rt;
+    }
+
+    meshcli::WebService web(service);
+    EXPECT_TRUE(web.start("127.0.0.1", 0, ""));
+    int port = web.bound_port();
+
+    // Broadcast a remote packet activity
+    meshcli::PacketActivity act;
+    act.device = dev;
+    act.from_node = 0x22223333;
+    act.to_node = 0xFFFFFFFF;
+    act.port_name = "TEXT_MESSAGE_APP";
+    act.summary = "Hello world";
+    act.rx_snr = 9.5f;
+    act.broadcast = true;
+    act.ts = static_cast<uint64_t>(std::time(nullptr));
+    web.record_and_broadcast_activity(act);
+
+    // Call GET /api/stats?range=1h
+    std::string get_req = "GET /api/stats?range=1h HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res = http_client_request(port, get_req);
+    EXPECT_NE(res.find("200 OK"), std::string::npos);
+    EXPECT_NE(res.find("\"total_packets\": 1"), std::string::npos);
+    EXPECT_NE(res.find("\"msg_count\": 1"), std::string::npos);
+    EXPECT_NE(res.find("\"TEXT_MESSAGE_APP\": 1"), std::string::npos);
+    EXPECT_NE(res.find("Remote Node Alpha"), std::string::npos);
+
+    // Call with node filter
+    std::string get_req_node = "GET /api/stats?range=all&node=0x22223333 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res_node = http_client_request(port, get_req_node);
+    EXPECT_NE(res_node.find("200 OK"), std::string::npos);
+    EXPECT_NE(res_node.find("\"total_packets\": 1"), std::string::npos);
+
+    // Call with non-matching node filter
+    std::string get_req_nomatch = "GET /api/stats?range=all&node=0x99999999 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res_nomatch = http_client_request(port, get_req_nomatch);
+    EXPECT_NE(res_nomatch.find("200 OK"), std::string::npos);
+    EXPECT_NE(res_nomatch.find("\"total_packets\": 0"), std::string::npos);
+
+    web.stop();
+}
+
+
 

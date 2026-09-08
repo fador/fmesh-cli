@@ -126,6 +126,66 @@ public:
     // Find a stored message by its ToRadio packet_id (for ACK routing).
     [[nodiscard]] std::optional<StoredMessage> find_by_packet_id(uint32_t packet_id);
 
+    // --- packet log & statistics ------------------------------------------
+    struct PacketLogRow {
+        int64_t rowid = 0;
+        std::string device;
+        uint32_t from_node = 0;
+        uint32_t to_node = 0;
+        std::string port_name;
+        uint32_t channel_idx = 0;
+        float rx_snr = 0.0f;
+        int32_t rx_rssi = 0;
+        uint32_t hop_limit = 0;
+        uint32_t hop_start = 0;
+        bool broadcast = false;
+        std::string summary;
+        uint64_t ts = 0;
+    };
+    bool insert_packet_log(const PacketLogRow& row);
+
+    struct GlobalStats {
+        uint64_t total_packets = 0;
+        uint64_t active_nodes = 0;
+        uint64_t msg_count = 0;
+        uint64_t telemetry_count = 0;
+        uint64_t position_count = 0;
+        uint64_t ack_count = 0;
+        uint64_t traceroute_count = 0;
+        uint64_t nodeinfo_count = 0;
+        uint64_t other_count = 0;
+        uint64_t broadcast_count = 0;
+        uint64_t unicast_count = 0;
+        float avg_snr = 0.0f;
+
+        std::map<std::string, uint64_t> port_distribution;
+        std::map<uint32_t, uint64_t> channel_distribution;
+
+        struct TimelineBucket {
+            uint64_t ts = 0;
+            uint64_t count = 0;
+            uint64_t msg_count = 0;
+            uint64_t telemetry_count = 0;
+            uint64_t pos_count = 0;
+            uint64_t other_count = 0;
+        };
+        std::vector<TimelineBucket> timeline;
+
+        struct NodeStat {
+            uint32_t node_num = 0;
+            uint64_t packet_count = 0;
+            uint64_t msg_count = 0;
+            uint64_t telemetry_count = 0;
+            uint64_t pos_count = 0;
+            uint64_t ack_count = 0;
+            float avg_snr = 0.0f;
+            uint64_t last_seen = 0;
+        };
+        std::vector<NodeStat> per_node_stats;
+    };
+
+    GlobalStats get_stats(uint64_t since_ts = 0, uint32_t for_node = 0);
+
     // --- misc -------------------------------------------------------------
     [[nodiscard]] bool ok() const { return db_ != nullptr; }
     // Periodic WAL checkpoint (keep the WAL file size bounded).

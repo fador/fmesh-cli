@@ -181,6 +181,24 @@ void WebService::record_and_broadcast_activity(const PacketActivity& act) {
             recent_packets_.pop_front();
         }
     }
+
+    Database::PacketLogRow row;
+    row.device = act.device;
+    row.from_node = act.from_node;
+    row.to_node = act.to_node;
+    row.port_name = act.port_name;
+    row.channel_idx = act.channel_idx;
+    row.rx_snr = act.rx_snr;
+    row.rx_rssi = act.rx_rssi;
+    row.hop_limit = act.hop_limit;
+    row.hop_start = act.hop_start;
+    row.broadcast = act.broadcast;
+    row.summary = act.summary;
+    row.ts = act.ts != 0 ? act.ts : static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+    mesh_service_.database().insert_packet_log(row);
+
     server_.broadcast_sse("packet_activity", packet_activity_to_json(act).dump());
 }
 
@@ -754,6 +772,126 @@ void WebService::register_routes() {
             arr.push_back(packet_activity_to_json(all[i]));
         }
         return HttpResponse::json(200, arr);
+    });
+
+    // GET /api/stats
+    server_.get("/api/stats", [this](const HttpRequest& req) {
+        std::string range = req.get_query("range", "1d");
+        uint64_t now_ts = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+        uint64_t since_ts = 0;
+        if (range == "1h") {
+            since_ts = (now_ts > 3600) ? (now_ts - 3600) : 0;
+        } else if (range == "6h") {
+            since_ts = (now_ts > 21600) ? (now_ts - 21600) : 0;
+        } else if (range == "1d") {
+            since_ts = (now_ts > 86400) ? (now_ts - 86400) : 0;
+        } else if (range == "7d") {
+            since_ts = (now_ts > 604800) ? (now_ts - 604800) : 0;
+        } else if (range == "all") {
+            since_ts = 0;
+        } else {
+            range = "1d";
+            since_ts = (now_ts > 86400) ? (now_ts - 86400) : 0;
+        }
+
+        uint32_t filter_node = 0;
+        std::string node_param = req.get_query("node", req.get_query("node_num", ""));
+        if (!node_param.empty()) {
+            try {
+                if (node_param.front() == '!') {
+                    filter_node = static_cast<uint32_t>(std::stoul(node_param.substr(1), nullptr, 16));
+                } else if (node_param.rfind("0x", 0) == 0 || node_param.rfind("0X", 0) == 0) {
+                    filter_node = static_cast<uint32_t>(std::stoul(node_param, nullptr, 16));
+                } else {
+                    filter_node = static_cast<uint32_t>(std::stoul(node_param, nullptr, 10));
+                }
+            } catch (...) {}
+        }
+
+        auto stats = mesh_service_.database().get_stats(since_ts, filter_node);
+
+        nlohmann::json j;
+        j["range"] = range;
+        j["since_ts"] = since_ts;
+        j["node_filter"] = filter_node;
+        j["metrics"] = {
+            {"total_packets", stats.total_packets},
+            {"active_nodes", stats.active_nodes},
+            {"msg_count", stats.msg_count},
+            {"telemetry_count", stats.telemetry_count},
+            {"position_count", stats.position_count},
+            {"ack_count", stats.ack_count},
+            {"traceroute_count", stats.traceroute_count},
+            {"nodeinfo_count", stats.nodeinfo_count},
+            {"other_count", stats.other_count},
+            {"broadcast_count", stats.broadcast_count},
+            {"unicast_count", stats.unicast_count},
+            {"avg_snr", stats.avg_snr}
+        };
+
+        nlohmann::json ports_j = nlohmann::json::object();
+        for (const auto& [k, v] : stats.port_distribution) {
+            ports_j[k] = v;
+        }
+        j["ports"] = ports_j;
+
+        nlohmann::json chan_j = nlohmann::json::object();
+        for (const auto& [k, v] : stats.channel_distribution) {
+            chan_j[std::to_string(k)] = v;
+        }
+        j["channels"] = chan_j;
+
+        nlohmann::json timeline_arr = nlohmann::json::array();
+        for (const auto& b : stats.timeline) {
+            timeline_arr.push_back({
+                {"ts", b.ts},
+                {"count", b.count},
+                {"msg_count", b.msg_count},
+                {"telemetry_count", b.telemetry_count},
+                {"pos_count", b.pos_count},
+                {"other_count", b.other_count}
+            });
+        }
+        j["timeline"] = timeline_arr;
+
+        nlohmann::json nodes_arr = nlohmann::json::array();
+        for (const auto& ns : stats.per_node_stats) {
+            auto opt_n = mesh_service_.find_node(ns.node_num);
+            std::string nid = node_num_to_id(ns.node_num);
+            std::string long_name = nid;
+            std::string short_name = "";
+            std::string hw_model = "";
+            std::string role = "";
+            if (opt_n) {
+                if (!opt_n->node_id.empty()) nid = opt_n->node_id;
+                if (!opt_n->long_name.empty()) long_name = opt_n->long_name;
+                short_name = opt_n->short_name;
+                hw_model = opt_n->hw_model;
+                role = opt_n->role;
+            }
+            bool is_local = mesh_service_.is_my_node(ns.node_num);
+
+            nodes_arr.push_back({
+                {"node_num", ns.node_num},
+                {"node_id", nid},
+                {"long_name", long_name},
+                {"short_name", short_name},
+                {"hw_model", hw_model},
+                {"role", role},
+                {"is_local", is_local},
+                {"packet_count", ns.packet_count},
+                {"msg_count", ns.msg_count},
+                {"telemetry_count", ns.telemetry_count},
+                {"pos_count", ns.pos_count},
+                {"ack_count", ns.ack_count},
+                {"avg_snr", ns.avg_snr},
+                {"last_seen", ns.last_seen}
+            });
+        }
+        j["nodes"] = nodes_arr;
+
+        return HttpResponse::json(200, j);
     });
 }
 

@@ -217,6 +217,40 @@ bool Database::open(const std::string& path) {
     sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts ON telemetry_history(node_num, ts);", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_history(ts);", nullptr, nullptr, nullptr);
 
+    // Migration: ensure packet_log exists
+    sqlite3_exec(db_, "CREATE TABLE IF NOT EXISTS packet_log("
+                       "rowid INTEGER PRIMARY KEY AUTOINCREMENT,"
+                       "device TEXT NOT NULL,"
+                       "from_node INTEGER NOT NULL,"
+                       "to_node INTEGER NOT NULL,"
+                       "port_name TEXT NOT NULL,"
+                       "channel_idx INTEGER DEFAULT 0,"
+                       "rx_snr REAL,"
+                       "rx_rssi INTEGER,"
+                       "hop_limit INTEGER,"
+                       "hop_start INTEGER,"
+                       "broadcast INTEGER DEFAULT 0,"
+                       "summary TEXT,"
+                       "ts INTEGER NOT NULL);", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_packet_log_ts ON packet_log(ts);", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_packet_log_from_node_ts ON packet_log(from_node, ts);", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_packet_log_port_ts ON packet_log(port_name, ts);", nullptr, nullptr, nullptr);
+
+    // Initial backfill if packet_log is empty but history tables contain data
+    sqlite3_stmt* check_st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT COUNT(*) FROM packet_log;", -1, &check_st, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(check_st) == SQLITE_ROW && sqlite3_column_int64(check_st, 0) == 0) {
+            sqlite3_exec(db_, "INSERT INTO packet_log(device, from_node, to_node, port_name, channel_idx, rx_snr, rx_rssi, hop_start, hop_limit, broadcast, summary, ts) "
+                              "SELECT device, from_node, to_node, 'TEXT_MESSAGE_APP', channel_idx, rx_snr, rx_rssi, hop_start, hop_limit, "
+                              "CASE WHEN to_node = 4294967295 THEN 1 ELSE 0 END, text, ts FROM messages WHERE from_node IS NOT NULL AND from_node != 0;", nullptr, nullptr, nullptr);
+            sqlite3_exec(db_, "INSERT INTO packet_log(device, from_node, to_node, port_name, channel_idx, rx_snr, rx_rssi, hop_start, hop_limit, broadcast, summary, ts) "
+                              "SELECT device, node_num, 4294967295, 'TELEMETRY_APP', 0, snr, 0, 0, 0, 1, 'Telemetry Update', ts FROM telemetry_history WHERE node_num != 0;", nullptr, nullptr, nullptr);
+            sqlite3_exec(db_, "INSERT INTO packet_log(device, from_node, to_node, port_name, channel_idx, rx_snr, rx_rssi, hop_start, hop_limit, broadcast, summary, ts) "
+                              "SELECT device, node_num, 4294967295, 'POSITION_APP', 0, 0, 0, 0, 0, 1, 'GPS Position', ts FROM location_history WHERE node_num != 0;", nullptr, nullptr, nullptr);
+        }
+        sqlite3_finalize(check_st);
+    }
+
     LOG_INFO() << "db opened: " << path;
     return true;
 }
@@ -923,6 +957,170 @@ std::vector<Database::TelemetryRow> Database::get_recent_telemetry(uint64_t sinc
     }
     sqlite3_finalize(st);
     return out;
+}
+
+bool Database::insert_packet_log(const PacketLogRow& row) {
+    if (!db_) return false;
+    const char* sql = "INSERT INTO packet_log(device, from_node, to_node, port_name, channel_idx, rx_snr, rx_rssi, hop_limit, hop_start, broadcast, summary, ts) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?);";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, row.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, row.from_node);
+    sqlite3_bind_int64(st, 3, row.to_node);
+    sqlite3_bind_text(st, 4, row.port_name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 5, row.channel_idx);
+    sqlite3_bind_double(st, 6, row.rx_snr);
+    sqlite3_bind_int(st, 7, row.rx_rssi);
+    sqlite3_bind_int64(st, 8, row.hop_limit);
+    sqlite3_bind_int64(st, 9, row.hop_start);
+    sqlite3_bind_int(st, 10, row.broadcast ? 1 : 0);
+    sqlite3_bind_text(st, 11, row.summary.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 12, row.ts);
+
+    bool ok = (sqlite3_step(st) == SQLITE_DONE);
+    sqlite3_finalize(st);
+    if (ok) maybe_checkpoint();
+    return ok;
+}
+
+Database::GlobalStats Database::get_stats(uint64_t since_ts, uint32_t for_node) {
+    GlobalStats res;
+    if (!db_) return res;
+
+    // 1. Overall aggregations
+    std::string q1 = "SELECT COUNT(*), COUNT(DISTINCT from_node), "
+                     "SUM(CASE WHEN broadcast != 0 THEN 1 ELSE 0 END), "
+                     "SUM(CASE WHEN broadcast = 0 THEN 1 ELSE 0 END), "
+                     "AVG(CASE WHEN rx_snr != 0 THEN rx_snr ELSE NULL END) "
+                     "FROM packet_log WHERE ts >= ? ";
+    if (for_node != 0) q1 += "AND from_node = ? ";
+
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, q1.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, since_ts);
+        if (for_node != 0) sqlite3_bind_int64(st, 2, for_node);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            res.total_packets = static_cast<uint64_t>(sqlite3_column_int64(st, 0));
+            res.active_nodes = static_cast<uint64_t>(sqlite3_column_int64(st, 1));
+            res.broadcast_count = static_cast<uint64_t>(sqlite3_column_int64(st, 2));
+            res.unicast_count = static_cast<uint64_t>(sqlite3_column_int64(st, 3));
+            if (sqlite3_column_type(st, 4) != SQLITE_NULL) {
+                res.avg_snr = static_cast<float>(sqlite3_column_double(st, 4));
+            }
+        }
+        sqlite3_finalize(st);
+    }
+
+    // 2. Port distribution
+    std::string q2 = "SELECT port_name, COUNT(*) FROM packet_log WHERE ts >= ? ";
+    if (for_node != 0) q2 += "AND from_node = ? ";
+    q2 += "GROUP BY port_name ORDER BY COUNT(*) DESC;";
+
+    if (sqlite3_prepare_v2(db_, q2.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, since_ts);
+        if (for_node != 0) sqlite3_bind_int64(st, 2, for_node);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            std::string port = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+            uint64_t cnt = static_cast<uint64_t>(sqlite3_column_int64(st, 1));
+            res.port_distribution[port] = cnt;
+            if (port == "TEXT_MESSAGE_APP") res.msg_count = cnt;
+            else if (port == "TELEMETRY_APP") res.telemetry_count = cnt;
+            else if (port == "POSITION_APP") res.position_count = cnt;
+            else if (port == "ROUTING_APP") res.ack_count = cnt;
+            else if (port == "TRACEROUTE_APP") res.traceroute_count = cnt;
+            else if (port == "NODEINFO_APP") res.nodeinfo_count = cnt;
+            else res.other_count += cnt;
+        }
+        sqlite3_finalize(st);
+    }
+
+    // 3. Channel distribution
+    std::string q3 = "SELECT channel_idx, COUNT(*) FROM packet_log WHERE ts >= ? ";
+    if (for_node != 0) q3 += "AND from_node = ? ";
+    q3 += "GROUP BY channel_idx ORDER BY channel_idx ASC;";
+
+    if (sqlite3_prepare_v2(db_, q3.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, since_ts);
+        if (for_node != 0) sqlite3_bind_int64(st, 2, for_node);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            uint32_t ch = static_cast<uint32_t>(sqlite3_column_int64(st, 0));
+            uint64_t cnt = static_cast<uint64_t>(sqlite3_column_int64(st, 1));
+            res.channel_distribution[ch] = cnt;
+        }
+        sqlite3_finalize(st);
+    }
+
+    // 4. Timeline buckets
+    uint64_t now = static_cast<uint64_t>(std::time(nullptr));
+    uint64_t duration = (since_ts > 0 && now > since_ts) ? (now - since_ts) : 864000;
+    uint64_t bucket_size = 3600;
+    if (duration <= 3600) bucket_size = 120;           // 1h -> 2 min buckets
+    else if (duration <= 21600) bucket_size = 600;     // 6h -> 10 min buckets
+    else if (duration <= 86400) bucket_size = 1800;    // 1d -> 30 min buckets
+    else if (duration <= 604800) bucket_size = 7200;   // 7d -> 2 hour buckets
+    else bucket_size = 86400;                          // all time -> 1 day buckets
+
+    std::string q4 = "SELECT (ts / ?) * ? AS b_ts, COUNT(*), "
+                     "SUM(CASE WHEN port_name = 'TEXT_MESSAGE_APP' THEN 1 ELSE 0 END), "
+                     "SUM(CASE WHEN port_name = 'TELEMETRY_APP' THEN 1 ELSE 0 END), "
+                     "SUM(CASE WHEN port_name = 'POSITION_APP' THEN 1 ELSE 0 END), "
+                     "SUM(CASE WHEN port_name NOT IN ('TEXT_MESSAGE_APP','TELEMETRY_APP','POSITION_APP') THEN 1 ELSE 0 END) "
+                     "FROM packet_log WHERE ts >= ? ";
+    if (for_node != 0) q4 += "AND from_node = ? ";
+    q4 += "GROUP BY b_ts ORDER BY b_ts ASC;";
+
+    if (sqlite3_prepare_v2(db_, q4.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, bucket_size);
+        sqlite3_bind_int64(st, 2, bucket_size);
+        sqlite3_bind_int64(st, 3, since_ts);
+        if (for_node != 0) sqlite3_bind_int64(st, 4, for_node);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            GlobalStats::TimelineBucket b;
+            b.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 0));
+            b.count = static_cast<uint64_t>(sqlite3_column_int64(st, 1));
+            b.msg_count = static_cast<uint64_t>(sqlite3_column_int64(st, 2));
+            b.telemetry_count = static_cast<uint64_t>(sqlite3_column_int64(st, 3));
+            b.pos_count = static_cast<uint64_t>(sqlite3_column_int64(st, 4));
+            b.other_count = static_cast<uint64_t>(sqlite3_column_int64(st, 5));
+            res.timeline.push_back(b);
+        }
+        sqlite3_finalize(st);
+    }
+
+    // 5. Per-node statistics breakdown
+    std::string q5 = "SELECT from_node, COUNT(*), "
+                     "SUM(CASE WHEN port_name = 'TEXT_MESSAGE_APP' THEN 1 ELSE 0 END), "
+                     "SUM(CASE WHEN port_name = 'TELEMETRY_APP' THEN 1 ELSE 0 END), "
+                     "SUM(CASE WHEN port_name = 'POSITION_APP' THEN 1 ELSE 0 END), "
+                     "SUM(CASE WHEN port_name = 'ROUTING_APP' THEN 1 ELSE 0 END), "
+                     "AVG(CASE WHEN rx_snr != 0 THEN rx_snr ELSE NULL END), "
+                     "MAX(ts) "
+                     "FROM packet_log WHERE ts >= ? ";
+    if (for_node != 0) q5 += "AND from_node = ? ";
+    q5 += "GROUP BY from_node ORDER BY COUNT(*) DESC;";
+
+    if (sqlite3_prepare_v2(db_, q5.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, since_ts);
+        if (for_node != 0) sqlite3_bind_int64(st, 2, for_node);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            GlobalStats::NodeStat ns;
+            ns.node_num = static_cast<uint32_t>(sqlite3_column_int64(st, 0));
+            ns.packet_count = static_cast<uint64_t>(sqlite3_column_int64(st, 1));
+            ns.msg_count = static_cast<uint64_t>(sqlite3_column_int64(st, 2));
+            ns.telemetry_count = static_cast<uint64_t>(sqlite3_column_int64(st, 3));
+            ns.pos_count = static_cast<uint64_t>(sqlite3_column_int64(st, 4));
+            ns.ack_count = static_cast<uint64_t>(sqlite3_column_int64(st, 5));
+            if (sqlite3_column_type(st, 6) != SQLITE_NULL) {
+                ns.avg_snr = static_cast<float>(sqlite3_column_double(st, 6));
+            }
+            ns.last_seen = static_cast<uint64_t>(sqlite3_column_int64(st, 7));
+            res.per_node_stats.push_back(ns);
+        }
+        sqlite3_finalize(st);
+    }
+
+    return res;
 }
 
 void Database::maybe_checkpoint() {
