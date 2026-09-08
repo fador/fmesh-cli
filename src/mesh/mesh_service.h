@@ -111,6 +111,7 @@ public:
     void load_offline_history();
     [[nodiscard]] std::vector<std::string> device_ids() const;
     [[nodiscard]] const NodeDb* db_for(const std::string& device_id) const;
+    [[nodiscard]] std::optional<Node> find_node(uint32_t node_num) const;
     [[nodiscard]] std::string firmware_for(const std::string& device_id) const;
     [[nodiscard]] std::string hw_model_for(const std::string& device_id) const;
     [[nodiscard]] std::string display_name_for(const std::string& device_id) const;

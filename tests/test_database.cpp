@@ -544,3 +544,39 @@ TEST_F(DatabaseTest, RecentMessagesDeviceFallback) {
     EXPECT_EQ(dm_paginated[0].text, "Private DM on empty device");
 }
 
+TEST_F(DatabaseTest, GetAllDevicesFiltersEmpty) {
+    StoredMessage m;
+    m.device = "";
+    m.window_kind = "channel";
+    m.window_target = 0;
+    m.text = "empty device msg";
+    db_.insert_message(m);
+
+    Node n;
+    n.node_num = 123;
+    n.long_name = "Node on Dev1";
+    db_.upsert_node("dev1", n);
+
+    auto devs = db_.get_all_devices();
+    ASSERT_EQ(devs.size(), 1u);
+    EXPECT_EQ(devs[0], "dev1");
+}
+
+TEST_F(DatabaseTest, GetNodeAnyDevice) {
+    Node n;
+    n.node_num = 0x55aa;
+    n.node_id = "!000055aa";
+    n.long_name = "Global Node";
+    n.short_name = "GN";
+    db_.upsert_node("dev_xyz", n);
+
+    auto found = db_.get_node_any_device(0x55aa);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->long_name, "Global Node");
+    EXPECT_EQ(found->short_name, "GN");
+
+    auto not_found = db_.get_node_any_device(0x9999);
+    EXPECT_FALSE(not_found.has_value());
+}
+
+

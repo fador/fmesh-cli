@@ -408,10 +408,28 @@ std::optional<MeshEvent> decode_packet(
         }
         return ev;
     }
-    // Other portnums (nodeinfo) arriving as packets
-    // would normally be processed into the node DB; the firmware typically
-    // sends them as FromRadio.node_info rather than FromRadio.packet, so we
-    // ignore stray packets here for v1.
+    if (d.portnum() == PortNum::NODEINFO_APP) {
+        meshtastic::User u;
+        if (!u.ParseFromString(d.payload())) return std::nullopt;
+        EvNodeUpdated ev;
+        ev.device = device;
+        ev.node.node_num = pkt.from();
+        ev.node.node_id = u.id().empty() ? node_num_to_id(pkt.from()) : u.id();
+        ev.node.long_name = u.long_name();
+        ev.node.short_name = u.short_name();
+        ev.node.hw_model = meshtastic::HardwareModel_Name(u.hw_model());
+        ev.node.role = meshtastic::Config_DeviceConfig_Role_Name(u.role());
+        ev.node.has_public_key = !u.public_key().empty();
+        if (ev.node.has_public_key) {
+            ev.node.public_key.assign(u.public_key().begin(), u.public_key().end());
+        }
+        if (pkt.rx_time() != 0) ev.node.last_heard = pkt.rx_time();
+        if (pkt.rx_snr() != 0.0f) ev.node.snr = pkt.rx_snr();
+        if (pkt.hop_start() > 0 && pkt.hop_start() >= pkt.hop_limit()) {
+            ev.node.hops_away = pkt.hop_start() - pkt.hop_limit();
+        }
+        return ev;
+    }
     return std::nullopt;
 }
 

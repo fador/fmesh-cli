@@ -535,3 +535,38 @@ TEST(MeshCodec, DecodeTelemetryDeviceUptime) {
     EXPECT_EQ(*upd->node.uptime_seconds, 86400u);
 }
 
+TEST(MeshCodec, DecodeNodeInfoPacket) {
+    meshtastic::User u;
+    u.set_id("!12345678");
+    u.set_long_name("Test Long Name");
+    u.set_short_name("TLN");
+    u.set_hw_model(meshtastic::HardwareModel::HELTEC_V3);
+    u.set_role(meshtastic::Config_DeviceConfig_Role_ROUTER);
+
+    meshtastic::FromRadio fr;
+    auto* pkt = fr.mutable_packet();
+    pkt->set_from(0x12345678);
+    pkt->set_rx_time(1710000000);
+    pkt->set_rx_snr(9.5f);
+    pkt->set_hop_start(3);
+    pkt->set_hop_limit(2);
+    auto* d = pkt->mutable_decoded();
+    d->set_portnum(meshtastic::PortNum::NODEINFO_APP);
+    d->set_payload(u.SerializeAsString());
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* upd = std::get_if<EvNodeUpdated>(&*ev);
+    ASSERT_NE(upd, nullptr);
+    EXPECT_EQ(upd->node.node_num, 0x12345678u);
+    EXPECT_EQ(upd->node.node_id, "!12345678");
+    EXPECT_EQ(upd->node.long_name, "Test Long Name");
+    EXPECT_EQ(upd->node.short_name, "TLN");
+    EXPECT_EQ(upd->node.hw_model, "HELTEC_V3");
+    EXPECT_EQ(upd->node.role, "ROUTER");
+    ASSERT_TRUE(upd->node.hops_away.has_value());
+    EXPECT_EQ(*upd->node.hops_away, 1u);
+}
+
+

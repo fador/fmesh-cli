@@ -1,4 +1,5 @@
 #include "window.h"
+#include "mesh/node_db.h"
 
 #include <string>
 #include <ctime>
@@ -91,23 +92,43 @@ void Window::append_meta(std::string text, int color_pair) {
 
 void Window::rebuild_nick(uint32_t sender_node, const std::string& old_nick,
                           const std::string& new_nick) {
-    if (old_nick == new_nick || old_nick.empty() || new_nick.empty()) return;
-    std::string old_pattern = "<" + old_nick + "> ";
+    if (new_nick.empty() || old_nick == new_nick) return;
     std::string new_pattern = "<" + new_nick + "> ";
-    std::string old_action = " * " + old_nick + " ";
     std::string new_action = " * " + new_nick + " ";
+    std::string raw_id = node_num_to_id(sender_node).substr(0, 10);
+    std::string raw_pattern = "<" + raw_id + "> ";
+    std::string raw_action = " * " + raw_id + " ";
+
+    std::string old_pattern = !old_nick.empty() ? "<" + old_nick + "> " : "";
+    std::string old_action = !old_nick.empty() ? " * " + old_nick + " " : "";
+
     for (auto& line : lines_) {
         if (line.sender_node != sender_node) continue;
         // Regular message: <nick> message
-        size_t pos = line.text.find(old_pattern);
-        if (pos != std::string::npos) {
-            line.text.replace(pos, old_pattern.size(), new_pattern);
+        if (!old_pattern.empty()) {
+            size_t pos = line.text.find(old_pattern);
+            if (pos != std::string::npos) {
+                line.text.replace(pos, old_pattern.size(), new_pattern);
+                continue;
+            }
+        }
+        size_t rpos = line.text.find(raw_pattern);
+        if (rpos != std::string::npos) {
+            line.text.replace(rpos, raw_pattern.size(), new_pattern);
             continue;
         }
+
         // Action: * nick action
-        pos = line.text.find(old_action);
-        if (pos != std::string::npos) {
-            line.text.replace(pos, old_action.size(), new_action);
+        if (!old_action.empty()) {
+            size_t pos = line.text.find(old_action);
+            if (pos != std::string::npos) {
+                line.text.replace(pos, old_action.size(), new_action);
+                continue;
+            }
+        }
+        size_t rapos = line.text.find(raw_action);
+        if (rapos != std::string::npos) {
+            line.text.replace(rapos, raw_action.size(), new_action);
         }
     }
 }

@@ -83,6 +83,7 @@ public:
     // --- offline history loading -----------------------------------------
     std::vector<std::string> get_all_devices();
     std::vector<WindowKey> get_all_windows(const std::string& device);
+    [[nodiscard]] std::optional<Node> get_node_any_device(uint32_t node_num);
 
     // --- messages ---------------------------------------------------------
     int64_t insert_message(const StoredMessage& m);

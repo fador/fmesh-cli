@@ -140,3 +140,29 @@ TEST(WrapText, EdgeCases) {
     EXPECT_EQ(res.size(), 0u);
 }
 
+TEST(Window, RebuildNickWithRawPlaceholder) {
+    Window w(WindowTarget{"dev1", "channel", 0}, "channel");
+    Line l1;
+    l1.sender_node = 0x12345678;
+    l1.text = "[12:00:00] <!12345678> hello world";
+    w.append_line(l1);
+
+    Line l2;
+    l2.sender_node = 0x12345678;
+    l2.text = "[12:00:01] * !12345678 waves";
+    l2.is_meta = true;
+    w.append_line(l2);
+
+    // Old nick is empty (unknown), learned new nick "Alice"
+    w.rebuild_nick(0x12345678, "", "Alice");
+    ASSERT_EQ(w.lines().size(), 2u);
+    EXPECT_EQ(w.lines()[0].text, "[12:00:00] <Alice> hello world");
+    EXPECT_EQ(w.lines()[1].text, "[12:00:01] * Alice waves");
+
+    // Renamed from "Alice" to "Bob"
+    w.rebuild_nick(0x12345678, "Alice", "Bob");
+    EXPECT_EQ(w.lines()[0].text, "[12:00:00] <Bob> hello world");
+    EXPECT_EQ(w.lines()[1].text, "[12:00:01] * Bob waves");
+}
+
+

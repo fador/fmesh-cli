@@ -292,10 +292,60 @@ std::vector<std::string> Database::get_all_devices() {
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
     while (sqlite3_step(st) == SQLITE_ROW) {
-        if (auto* p = sqlite3_column_text(st, 0)) out.push_back(reinterpret_cast<const char*>(p));
+        if (auto* p = sqlite3_column_text(st, 0)) {
+            std::string d = reinterpret_cast<const char*>(p);
+            if (!d.empty()) out.push_back(std::move(d));
+        }
     }
     sqlite3_finalize(st);
     return out;
+}
+
+std::optional<Node> Database::get_node_any_device(uint32_t node_num) {
+    if (!db_) return std::nullopt;
+    const char* sql = "SELECT node_num,node_id,long_name,short_name,hw_model,role,"
+                      "battery,voltage,snr,hops_away,last_heard,"
+                      "temperature,relative_humidity,barometric_pressure,"
+                      "channel_util,air_util_tx,uptime_seconds FROM nodes "
+                      "WHERE node_num=? AND (long_name != '' OR short_name != '') "
+                      "ORDER BY last_heard DESC LIMIT 1";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return std::nullopt;
+    sqlite3_bind_int64(st, 1, node_num);
+    std::optional<Node> result;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        Node n;
+        n.node_num = static_cast<uint32_t>(sqlite3_column_int64(st, 0));
+        if (auto* p = sqlite3_column_text(st, 1)) n.node_id = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 2)) n.long_name = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 3)) n.short_name = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 4)) n.hw_model = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 5)) n.role = reinterpret_cast<const char*>(p);
+        int b = sqlite3_column_int(st, 6);
+        if (b >= 0) n.battery_level = static_cast<uint8_t>(b);
+        if (sqlite3_column_type(st, 7) != SQLITE_NULL)
+            n.voltage = static_cast<float>(sqlite3_column_double(st, 7));
+        if (sqlite3_column_type(st, 8) != SQLITE_NULL)
+            n.snr = static_cast<float>(sqlite3_column_double(st, 8));
+        int h = sqlite3_column_int(st, 9);
+        if (h >= 0) n.hops_away = static_cast<uint32_t>(h);
+        n.last_heard = static_cast<uint64_t>(sqlite3_column_int64(st, 10));
+        if (sqlite3_column_type(st, 11) != SQLITE_NULL)
+            n.temperature = static_cast<float>(sqlite3_column_double(st, 11));
+        if (sqlite3_column_type(st, 12) != SQLITE_NULL)
+            n.relative_humidity = static_cast<float>(sqlite3_column_double(st, 12));
+        if (sqlite3_column_type(st, 13) != SQLITE_NULL)
+            n.barometric_pressure = static_cast<float>(sqlite3_column_double(st, 13));
+        if (sqlite3_column_type(st, 14) != SQLITE_NULL)
+            n.channel_util = static_cast<float>(sqlite3_column_double(st, 14));
+        if (sqlite3_column_type(st, 15) != SQLITE_NULL)
+            n.air_util_tx = static_cast<float>(sqlite3_column_double(st, 15));
+        if (sqlite3_column_type(st, 16) != SQLITE_NULL)
+            n.uptime_seconds = static_cast<uint32_t>(sqlite3_column_int64(st, 16));
+        result = std::move(n);
+    }
+    sqlite3_finalize(st);
+    return result;
 }
 
 std::vector<WindowKey> Database::get_all_windows(const std::string& device) {

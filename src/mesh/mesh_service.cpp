@@ -499,6 +499,7 @@ void MeshService::load_offline_history() {
     auto devs = db_.get_all_devices();
     std::lock_guard<std::mutex> lock(devices_mu_);
     for (const auto& d : devs) {
+        if (d.empty()) continue;
         if (devices_.find(d) == devices_.end() && offline_dbs_.find(d) == offline_dbs_.end()) {
             auto ndb = std::make_unique<NodeDb>();
             db_.load_nodes(d, *ndb);
@@ -515,7 +516,7 @@ std::vector<std::string> MeshService::device_ids() const {
     out.reserve(devices_.size() + offline_dbs_.size());
     for (const auto& [id, _] : devices_) out.push_back(id);
     for (const auto& [id, _] : offline_dbs_) {
-        if (devices_.find(id) == devices_.end()) out.push_back(id);
+        if (!id.empty() && devices_.find(id) == devices_.end()) out.push_back(id);
     }
     for (const auto& [id, _] : virtual_devices_) {
         out.push_back(id);
@@ -529,11 +530,42 @@ const NodeDb* MeshService::db_for(const std::string& device_id) const {
         if (!sid.empty()) return db_for(sid);
     }
     std::lock_guard<std::mutex> lock(devices_mu_);
-    auto it = devices_.find(device_id);
-    if (it != devices_.end()) return it->second->db.get();
-    auto it2 = offline_dbs_.find(device_id);
-    if (it2 != offline_dbs_.end()) return it2->second.get();
+    if (!device_id.empty()) {
+        auto it = devices_.find(device_id);
+        if (it != devices_.end()) return it->second->db.get();
+        auto it2 = offline_dbs_.find(device_id);
+        if (it2 != offline_dbs_.end()) return it2->second.get();
+    }
+    // If device_id is empty or not found, check if there's only 1 active or offline device
+    if (devices_.size() == 1) return devices_.begin()->second->db.get();
+    if (devices_.empty() && offline_dbs_.size() == 1) return offline_dbs_.begin()->second.get();
     return nullptr;
+}
+
+std::optional<Node> MeshService::find_node(uint32_t node_num) const {
+    {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        // 1. Check live devices
+        for (const auto& [_, rt] : devices_) {
+            if (rt && rt->db) {
+                auto n = rt->db->get(node_num);
+                if (n && (!n->long_name.empty() || !n->short_name.empty())) return n;
+            }
+        }
+        // 2. Check offline dbs
+        for (const auto& [_, db] : offline_dbs_) {
+            if (db) {
+                auto n = db->get(node_num);
+                if (n && (!n->long_name.empty() || !n->short_name.empty())) return n;
+            }
+        }
+    }
+    // 3. Check SQLite database directly
+    auto from_db = const_cast<Database&>(db_).get_node_any_device(node_num);
+    if (from_db && (!from_db->long_name.empty() || !from_db->short_name.empty())) {
+        return from_db;
+    }
+    return std::nullopt;
 }
 
 std::string MeshService::firmware_for(const std::string& device_id) const {

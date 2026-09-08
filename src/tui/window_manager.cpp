@@ -27,8 +27,11 @@ std::string fmt_time(uint32_t ts) {
     return buf;
 }
 
-std::string short_nick(const NodeDb* db, uint32_t node) {
+std::string short_nick(const NodeDb* db, uint32_t node, const MeshService* service = nullptr) {
     auto n = db ? db->get(node) : std::nullopt;
+    if ((!n || (n->short_name.empty() && n->long_name.empty())) && service) {
+        n = service->find_node(node);
+    }
     if (n && !n->short_name.empty()) return n->short_name;
     if (n && !n->long_name.empty()) {
         std::string s = n->long_name;
@@ -267,7 +270,8 @@ int WindowManager::ensure_nodelist(const std::string& device) {
 static std::string format_message_signal(const std::string& direction,
                                         uint32_t hop_start, uint32_t hop_limit,
                                         float rx_snr, int32_t rx_rssi,
-                                        uint32_t relay_node, const NodeDb* db) {
+                                        uint32_t relay_node, const NodeDb* db,
+                                        const MeshService* service = nullptr) {
     if (direction == "out") return "";
 
     uint32_t hops = (hop_start > hop_limit) ? (hop_start - hop_limit) : 0;
@@ -290,8 +294,9 @@ static std::string format_message_signal(const std::string& direction,
         std::string sig = " [hops=" + std::to_string(hops);
         if (relay_node != 0) {
             std::string relay_name;
+            std::optional<Node> n;
             if (db) {
-                auto n = db->get(relay_node);
+                n = db->get(relay_node);
                 if (!n && relay_node <= 0xFF) {
                     for (const auto& node : db->all()) {
                         if ((node.node_num & 0xFF) == relay_node) {
@@ -300,10 +305,13 @@ static std::string format_message_signal(const std::string& direction,
                         }
                     }
                 }
-                if (n) {
-                    relay_name = n->short_name.empty() ? n->long_name : n->short_name;
-                    if (relay_name.empty()) relay_name = node_num_to_id(n->node_num);
-                }
+            }
+            if ((!n || (n->short_name.empty() && n->long_name.empty())) && service) {
+                n = service->find_node(relay_node);
+            }
+            if (n) {
+                relay_name = n->short_name.empty() ? n->long_name : n->short_name;
+                if (relay_name.empty()) relay_name = node_num_to_id(n->node_num);
             }
             if (relay_name.empty()) {
                 char rbuf[16];
@@ -336,7 +344,7 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
                                 float rx_snr, uint32_t hop_start, uint32_t hop_limit,
                                 int32_t rx_rssi, uint32_t relay_node) {
     int idx;
-    std::string sender_nick = short_nick(db, from_node);
+    std::string sender_nick = short_nick(db, from_node, &service_);
     if (broadcast) {
         idx = ensure_channel(device, channel_idx, "");
     } else {
@@ -344,7 +352,7 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
         if (db && from_node == db->my_node_num()) {
             peer_node = to_node;
         }
-        std::string peer_nick = short_nick(db, peer_node);
+        std::string peer_nick = short_nick(db, peer_node, &service_);
         idx = ensure_dm(device, peer_node, peer_nick);
     }
     Window& w = *windows_[idx - 1];
@@ -361,7 +369,7 @@ void WindowManager::append_text(const std::string& device, uint32_t from_node,
     }
     if (mention) std::fputc('\a', stdout);
 
-    std::string sig = format_message_signal("in", hop_start, hop_limit, rx_snr, rx_rssi, relay_node, db);
+    std::string sig = format_message_signal("in", hop_start, hop_limit, rx_snr, rx_rssi, relay_node, db, &service_);
 
     Line line;
     bool is_action = (text.size() > 2 && text[0] == '*' && text[1] == ' ');
@@ -438,7 +446,7 @@ void WindowManager::append_outgoing(const std::string& device,
         return;
     Window& w = *windows_[idx - 1];
     uint32_t me = db ? db->my_node_num() : 0;
-    std::string nick = short_nick(db, me);
+    std::string nick = short_nick(db, me, &service_);
     Line line;
     uint32_t ts = static_cast<uint32_t>(std::time(nullptr));
     line.text = "[" + fmt_time(ts) + "] <" + nick + "> " + text;
@@ -554,11 +562,13 @@ void WindowManager::load_history(int window_idx) {
     if (msgs.empty()) return;
 
     const NodeDb* db = service_.db_for(t.device);
-    if (!db) {
+    if (!db || db->all().empty()) {
         for (const auto& did : service_.device_ids()) {
             if (const auto* d = service_.db_for(did)) {
-                db = d;
-                break;
+                if (!d->all().empty()) {
+                    db = d;
+                    break;
+                }
             }
         }
     }
@@ -570,13 +580,13 @@ void WindowManager::load_history(int window_idx) {
         if (m.direction == "out") {
             // Message we sent. Use our own nick.
             uint32_t me = db ? db->my_node_num() : 0;
-            nick = short_nick(db, me);
+            nick = short_nick(db, me, &service_);
         } else {
-            nick = short_nick(db, m.from_node);
+            nick = short_nick(db, m.from_node, &service_);
         }
 
         std::string sig = format_message_signal(m.direction, m.hop_start, m.hop_limit,
-                                                m.rx_snr, m.rx_rssi, m.relay_node, db);
+                                                m.rx_snr, m.rx_rssi, m.relay_node, db, &service_);
         Line line;
         line.text = "[" + fmt_time(static_cast<uint32_t>(m.ts)) + "] <" + nick + "> " + m.text + sig;
         bool is_dm = (t.kind == "dm");

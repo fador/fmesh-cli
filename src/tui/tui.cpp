@@ -634,6 +634,15 @@ bool TuiApp::handle_nodelist_key(int ch) {
 
         auto [dev, n] = get_nth_node(nodelist_cursor_);
         if (n) {
+            if (n->long_name.empty() || n->short_name.empty()) {
+                auto enriched = service_.find_node(n->node_num);
+                if (enriched) {
+                    if (n->long_name.empty()) n->long_name = enriched->long_name;
+                    if (n->short_name.empty()) n->short_name = enriched->short_name;
+                    if (n->hw_model.empty()) n->hw_model = enriched->hw_model;
+                    if (n->role.empty()) n->role = enriched->role;
+                }
+            }
             popup_device_ = dev;
             popup_node_ = *n;
             popup_selection_ = 0;
@@ -694,6 +703,22 @@ void TuiApp::render_nodelist(const Window& w, int top, int height, int width) {
         const NodeDb* db = service_.db_for(nodelist_device_);
         if (!db) { mvprintw(top, 0, "(no device selected)"); return; }
         nodes = db->all();
+    }
+
+    for (auto& n : nodes) {
+        if (n.long_name.empty() || n.long_name == "?" || n.short_name.empty()) {
+            auto enriched = service_.find_node(n.node_num);
+            if (enriched) {
+                if ((n.long_name.empty() || n.long_name == "?") && !enriched->long_name.empty())
+                    n.long_name = enriched->long_name;
+                if (n.short_name.empty() && !enriched->short_name.empty())
+                    n.short_name = enriched->short_name;
+                if (n.hw_model.empty() && !enriched->hw_model.empty())
+                    n.hw_model = enriched->hw_model;
+                if (n.role.empty() && !enriched->role.empty())
+                    n.role = enriched->role;
+            }
+        }
     }
 
     if (nodes.empty()) {
@@ -1691,9 +1716,14 @@ void TuiApp::handle_event(const MeshEvent& ev) {
                 if (display_name.empty()) display_name = e.node.node_id;
                 wm_.append_status("*** Node joined: " + display_name +
                                   " (" + e.node.node_id + ")", tui_color::INFO);
-            } else if (!old_nick.empty() && !nick.empty() && old_nick != nick) {
-                wm_.append_status("*** Node renamed: " + old_nick + " -> " + nick +
-                                  " (" + e.node.node_id + ")", tui_color::INFO);
+                if (!nick.empty()) {
+                    wm_.rebuild_all_nicks(e.device, e.node.node_num, "", nick);
+                }
+            } else if (!nick.empty() && old_nick != nick) {
+                if (!old_nick.empty()) {
+                    wm_.append_status("*** Node renamed: " + old_nick + " -> " + nick +
+                                      " (" + e.node.node_id + ")", tui_color::INFO);
+                }
                 wm_.rebuild_all_nicks(e.device, e.node.node_num, old_nick, nick);
             }
 
