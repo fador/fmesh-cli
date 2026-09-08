@@ -120,6 +120,7 @@ public:
     [[nodiscard]] std::string virtual_original_for(const std::string& device_id) const;
     [[nodiscard]] std::vector<std::string> config_lines_for(const std::string& device_id) const;
     [[nodiscard]] std::vector<EvRawPacket> raw_packets_for(const std::string& device_id) const;
+    [[nodiscard]] bool is_my_node(uint32_t node_num) const;
     [[nodiscard]] Database& database() { return db_; }
     [[nodiscard]] bool has_devices() const { return !devices_.empty(); }
 

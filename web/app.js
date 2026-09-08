@@ -1818,8 +1818,24 @@
     }
   }
 
+  function isLocalNodePacket(packet) {
+    if (!packet || !packet.from_node) return false;
+    if (state.myNodeNum && packet.from_node === state.myNodeNum) return true;
+    if (Array.isArray(state.devices) && state.devices.some(d => d.my_node_num && d.my_node_num === packet.from_node)) return true;
+    return false;
+  }
+
   function addPacketToHud(packet, isNew = true) {
     if (!el.packetHudList) return;
+
+    // Exclude local node keepalive, telemetry, and node status packets from Live RF Packet Traffic
+    if (isLocalNodePacket(packet) && (
+      packet.port_name === 'TELEMETRY_APP' ||
+      packet.port_name === 'NODEINFO_APP' ||
+      packet.port_name === 'POSITION_APP'
+    )) {
+      return;
+    }
 
     const emptyEl = el.packetHudList.querySelector('.packet-hud-empty');
     if (emptyEl) emptyEl.remove();
@@ -1909,6 +1925,7 @@
 
   function animatePacketTransmission(packet) {
     if (!map || !layerGroupPacketAnim || !state.showPacketAnim) return;
+    if (isLocalNodePacket(packet) && (packet.port_name === 'TELEMETRY_APP' || packet.port_name === 'NODEINFO_APP')) return;
 
     const fromNode = state.nodes.get(packet.from_node);
     const toNode = (packet.to_node && packet.to_node !== 0xFFFFFFFF) ? state.nodes.get(packet.to_node) : null;

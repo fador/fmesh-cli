@@ -432,4 +432,63 @@ TEST(WebService, TelemetryApi) {
     web.stop();
 }
 
+TEST(WebService, ExcludeLocalNodeFromPacketActivity) {
+    meshcli::MeshService service;
+    service.open_database(":memory:");
+
+    std::string dev = "test_dev";
+    auto rt = std::make_shared<meshcli::DeviceRuntime>();
+    rt->my_node_num = 0x11112222;
+    rt->db = std::make_unique<meshcli::NodeDb>();
+    rt->db->set_my_node_num(0x11112222);
+
+    {
+        std::lock_guard<std::mutex> lock(service.devices_mu_for_test());
+        service.devices_for_test()[dev] = rt;
+    }
+
+    meshcli::WebService web(service);
+    EXPECT_TRUE(web.start("127.0.0.1", 0, ""));
+
+    // 1. Simulate local node keepalive / telemetry event
+    meshcli::EvNodeUpdated local_ev;
+    local_ev.device = dev;
+    local_ev.node.node_num = 0x11112222;
+    local_ev.node.node_id = "!11112222";
+    local_ev.node.battery_level = 99;
+    local_ev.node.voltage = 4.15f;
+    local_ev.is_new = false;
+    service.dispatch_to_ui(local_ev);
+
+    // 2. Simulate local node position update
+    meshcli::EvPositionReceived local_pos;
+    local_pos.device = dev;
+    local_pos.from_node = 0x11112222;
+    local_pos.latitude = 60.1;
+    local_pos.longitude = 24.9;
+    service.dispatch_to_ui(local_pos);
+
+    // Verify recent_packets() is STILL EMPTY because local node events are excluded
+    auto packets = web.recent_packets();
+    EXPECT_EQ(packets.size(), 0u);
+
+    // 3. Simulate remote node heard over the RF mesh
+    meshcli::EvNodeUpdated remote_ev;
+    remote_ev.device = dev;
+    remote_ev.node.node_num = 0x99998888;
+    remote_ev.node.node_id = "!99998888";
+    remote_ev.node.long_name = "Remote Node";
+    remote_ev.node.battery_level = 75;
+    remote_ev.is_new = true;
+    service.dispatch_to_ui(remote_ev);
+
+    // Verify recent_packets() now contains the remote RF packet
+    packets = web.recent_packets();
+    ASSERT_EQ(packets.size(), 1u);
+    EXPECT_EQ(packets[0].from_node, 0x99998888);
+    EXPECT_EQ(packets[0].port_name, "NODEINFO_APP");
+
+    web.stop();
+}
+
 

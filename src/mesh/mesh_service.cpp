@@ -659,6 +659,22 @@ std::vector<EvRawPacket> MeshService::raw_packets_for(const std::string& device_
     return it->second->raw_packets;
 }
 
+bool MeshService::is_my_node(uint32_t node_num) const {
+    if (node_num == 0) return false;
+    std::lock_guard<std::mutex> lock(devices_mu_);
+    for (const auto& [_, rt] : devices_) {
+        if (rt && (rt->my_node_num == node_num || (rt->db && rt->db->my_node_num() == node_num))) {
+            return true;
+        }
+    }
+    for (const auto& [_, db] : offline_dbs_) {
+        if (db && db->my_node_num() == node_num) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ---------------------------------------------------------------------------
 // event handling (runs on the BLE thread of whichever device emitted it)
 // ---------------------------------------------------------------------------

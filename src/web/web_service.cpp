@@ -770,7 +770,11 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
             };
             server_.broadcast_sse("node_updated", data.dump());
 
-            if (e.is_new || e.node.battery_level || e.node.voltage) {
+            const NodeDb* db = mesh_service_.db_for(e.device);
+            uint32_t my_node = db ? db->my_node_num() : 0;
+            bool is_local = (my_node != 0 && e.node.node_num == my_node) || mesh_service_.is_my_node(e.node.node_num);
+
+            if (!is_local && (e.is_new || e.node.battery_level || e.node.voltage)) {
                 PacketActivity act;
                 act.device = e.device;
                 act.from_node = e.node.node_num;
@@ -788,9 +792,7 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
             }
 
             if (e.node.hops_away.has_value() && *e.node.hops_away == 0) {
-                const NodeDb* db = mesh_service_.db_for(e.device);
-                uint32_t my_node = db ? db->my_node_num() : 0;
-                if (my_node != 0 && e.node.node_num != my_node) {
+                if (my_node != 0 && e.node.node_num != my_node && !is_local) {
                     uint64_t ts = e.node.last_heard.value_or(static_cast<uint64_t>(
                         std::chrono::duration_cast<std::chrono::seconds>(
                             std::chrono::system_clock::now().time_since_epoch()).count()));
@@ -811,19 +813,25 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
             };
             server_.broadcast_sse("position_received", data.dump());
 
-            PacketActivity act;
-            act.device = e.device;
-            act.from_node = e.from_node;
-            act.from_id = node_num_to_id(e.from_node);
-            act.to_node = kBroadcastNodeNum;
-            act.to_id = "!ffffffff";
-            act.port_name = "POSITION_APP";
-            act.summary = "GPS Position Update";
-            act.broadcast = true;
-            act.ts = e.rx_time ? e.rx_time : static_cast<uint64_t>(
-                std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::system_clock::now().time_since_epoch()).count());
-            record_and_broadcast_activity(act);
+            const NodeDb* db = mesh_service_.db_for(e.device);
+            uint32_t my_node = db ? db->my_node_num() : 0;
+            bool is_local = (my_node != 0 && e.from_node == my_node) || mesh_service_.is_my_node(e.from_node);
+
+            if (!is_local) {
+                PacketActivity act;
+                act.device = e.device;
+                act.from_node = e.from_node;
+                act.from_id = node_num_to_id(e.from_node);
+                act.to_node = kBroadcastNodeNum;
+                act.to_id = "!ffffffff";
+                act.port_name = "POSITION_APP";
+                act.summary = "GPS Position Update";
+                act.broadcast = true;
+                act.ts = e.rx_time ? e.rx_time : static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count());
+                record_and_broadcast_activity(act);
+            }
         }
         else if constexpr (std::is_same_v<T, EvTextReceived>) {
             uint32_t hops = (e.hop_start > e.hop_limit) ? (e.hop_start - e.hop_limit) : 0;
@@ -846,31 +854,37 @@ void WebService::on_mesh_event(const MeshEvent& ev) {
             };
             server_.broadcast_sse("message_received", data.dump());
 
-            PacketActivity act;
-            act.device = e.device;
-            act.from_node = e.from_node;
-            act.from_id = node_num_to_id(e.from_node);
-            act.to_node = e.to_node;
-            act.to_id = (e.broadcast || e.to_node == kBroadcastNodeNum) ? "!ffffffff" : node_num_to_id(e.to_node);
-            act.packet_id = e.packet_id;
-            act.channel_idx = e.channel_idx;
-            act.port_name = "TEXT_MESSAGE_APP";
-            act.summary = e.text;
-            act.rx_snr = e.rx_snr;
-            act.rx_rssi = e.rx_rssi;
-            act.hop_limit = e.hop_limit;
-            act.hop_start = e.hop_start;
-            act.broadcast = e.broadcast;
-            act.ts = e.rx_time ? e.rx_time : static_cast<uint64_t>(
+            const NodeDb* db = mesh_service_.db_for(e.device);
+            uint32_t my_node = db ? db->my_node_num() : 0;
+            bool is_local = (my_node != 0 && e.from_node == my_node) || mesh_service_.is_my_node(e.from_node);
+
+            uint64_t rx_ts = e.rx_time ? e.rx_time : static_cast<uint64_t>(
                 std::chrono::duration_cast<std::chrono::seconds>(
                     std::chrono::system_clock::now().time_since_epoch()).count());
-            record_and_broadcast_activity(act);
+
+            if (!is_local) {
+                PacketActivity act;
+                act.device = e.device;
+                act.from_node = e.from_node;
+                act.from_id = node_num_to_id(e.from_node);
+                act.to_node = e.to_node;
+                act.to_id = (e.broadcast || e.to_node == kBroadcastNodeNum) ? "!ffffffff" : node_num_to_id(e.to_node);
+                act.packet_id = e.packet_id;
+                act.channel_idx = e.channel_idx;
+                act.port_name = "TEXT_MESSAGE_APP";
+                act.summary = e.text;
+                act.rx_snr = e.rx_snr;
+                act.rx_rssi = e.rx_rssi;
+                act.hop_limit = e.hop_limit;
+                act.hop_start = e.hop_start;
+                act.broadcast = e.broadcast;
+                act.ts = rx_ts;
+                record_and_broadcast_activity(act);
+            }
 
             if (e.hop_start > 0 && e.hop_start == e.hop_limit) {
-                const NodeDb* db = mesh_service_.db_for(e.device);
-                uint32_t my_node = db ? db->my_node_num() : 0;
-                if (my_node != 0 && e.from_node != my_node) {
-                    update_link(e.device, my_node, e.from_node, e.rx_snr, "direct", act.ts);
+                if (my_node != 0 && e.from_node != my_node && !is_local) {
+                    update_link(e.device, my_node, e.from_node, e.rx_snr, "direct", rx_ts);
                 }
             }
         }
