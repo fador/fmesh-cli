@@ -8,6 +8,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <cstring>
 #include <ctime>
 #include <map>
 #include <sstream>
@@ -1046,11 +1047,11 @@ void CommandDispatcher::cmd_telemetry(const std::vector<std::string>& args) {
     for (const auto& r : rows) {
         char time_buf[32];
         std::time_t t = static_cast<std::time_t>(r.ts);
-        struct tm tm_info;
+        struct tm tm_info = {};
 #ifdef _WIN32
-        if (::localtime_s(&tm_info, &t) != 0) std::memset(&tm_info, 0, sizeof(tm_info));
+        ::localtime_s(&tm_info, &t);
 #else
-        if (::localtime_r(&t, &tm_info) == nullptr) std::memset(&tm_info, 0, sizeof(tm_info));
+        ::localtime_r(&t, &tm_info);
 #endif
         std::strftime(time_buf, sizeof(time_buf), "%m-%d %H:%M", &tm_info);
 
