@@ -230,6 +230,11 @@
     layerGroupTrails = L.layerGroup().addTo(map);
     layerGroupPacketAnim = L.layerGroup().addTo(map);
     layerGroupNodes = L.layerGroup().addTo(map);
+
+    // Re-render co-located marker positions on zoom so pixel separation remains consistent
+    map.on('zoomend', () => {
+      renderMapNodes();
+    });
   }
 
 
@@ -281,16 +286,109 @@
     });
   }
 
+  // Displace co-located nodes slightly so all overlapping markers remain visible and clickable
+  function calculateDisplacedPositions() {
+    const nodesWithPos = [];
+    state.nodes.forEach(node => {
+      if (node.latitude != null && node.longitude != null && node.latitude !== 0 && node.longitude !== 0) {
+        nodesWithPos.push(node);
+      }
+    });
+
+    // Group nodes that share the same or virtually identical location (< ~15 meters)
+    const clusters = [];
+    nodesWithPos.forEach(node => {
+      let cluster = null;
+      for (const c of clusters) {
+        const leader = c[0];
+        // ~15m threshold (0.00015 deg lat/lng)
+        if (Math.abs(leader.latitude - node.latitude) < 0.00015 &&
+            Math.abs(leader.longitude - node.longitude) < 0.00015) {
+          cluster = c;
+          break;
+        }
+      }
+      if (cluster) {
+        cluster.push(node);
+      } else {
+        clusters.push([node]);
+      }
+    });
+
+    const positions = new Map(); // node_num -> [lat, lng]
+
+    clusters.forEach(cluster => {
+      if (cluster.length === 1) {
+        const n = cluster[0];
+        positions.set(n.node_num, [n.latitude, n.longitude]);
+        return;
+      }
+
+      // Stable sort: keep local node (ME) first if present, then by node_num
+      cluster.sort((a, b) => {
+        const aIsMe = state.myNodeNum && a.node_num === state.myNodeNum ? 1 : 0;
+        const bIsMe = state.myNodeNum && b.node_num === state.myNodeNum ? 1 : 0;
+        if (aIsMe !== bIsMe) return bIsMe - aIsMe;
+        return a.node_num - b.node_num;
+      });
+
+      const baseLat = cluster[0].latitude;
+      const baseLng = cluster[0].longitude;
+      const N = cluster.length;
+
+      // Marker pin is 32px wide; radius of 24px gives 48px center distance for 2 nodes
+      const pixelRadius = Math.min(50, 20 + N * 3);
+
+      const canUsePixel = Boolean(map && map._loaded && typeof map.latLngToLayerPoint === 'function');
+      let basePoint = null;
+      if (canUsePixel) {
+        try {
+          basePoint = map.latLngToLayerPoint([baseLat, baseLng]);
+        } catch (_) {
+          basePoint = null;
+        }
+      }
+
+      cluster.forEach((node, i) => {
+        let angle;
+        if (N === 2) {
+          // Horizontal side-by-side layout: left (-23px) and right (+23px)
+          angle = i === 0 ? Math.PI : 0;
+        } else {
+          // Circular distribution around base point, starting from top
+          angle = (2 * Math.PI * i) / N - Math.PI / 2;
+        }
+
+        if (basePoint) {
+          const offsetX = pixelRadius * Math.cos(angle);
+          const offsetY = pixelRadius * Math.sin(angle);
+          const pt = L.point(basePoint.x + offsetX, basePoint.y + offsetY);
+          const latLng = map.layerPointToLatLng(pt);
+          positions.set(node.node_num, [latLng.lat, latLng.lng]);
+        } else {
+          // Fallback: geographic degree offset (~20m)
+          const geoRadius = 0.0002;
+          const dLat = geoRadius * Math.sin(angle);
+          const dLng = (geoRadius * Math.cos(angle)) / Math.max(0.1, Math.cos((baseLat * Math.PI) / 180));
+          positions.set(node.node_num, [baseLat + dLat, baseLng + dLng]);
+        }
+      });
+    });
+
+    return positions;
+  }
+
   function renderMapNodes() {
     if (!map) return;
 
     const bounds = [];
     const currentNodesWithPos = new Set();
+    const positions = calculateDisplacedPositions();
 
     state.nodes.forEach(node => {
-      if (node.latitude != null && node.longitude != null && node.latitude !== 0 && node.longitude !== 0) {
-        const latLng = [node.latitude, node.longitude];
-        bounds.push(latLng);
+      if (positions.has(node.node_num)) {
+        const latLng = positions.get(node.node_num);
+        bounds.push([node.latitude, node.longitude]);
         currentNodesWithPos.add(node.node_num);
 
         const icon = createNodeMarkerIcon(node);
@@ -381,6 +479,11 @@
       if (fromNode.latitude === 0 && fromNode.longitude === 0) return;
       if (toNode.latitude === 0 && toNode.longitude === 0) return;
 
+      const fromMarker = state.nodeMarkers.get(link.from_node);
+      const toMarker = state.nodeMarkers.get(link.to_node);
+      const fromPos = fromMarker ? fromMarker.getLatLng() : [fromNode.latitude, fromNode.longitude];
+      const toPos = toMarker ? toMarker.getLatLng() : [toNode.latitude, toNode.longitude];
+
       const snr = link.snr != null ? link.snr : 0;
       let color = '#10b981'; // green (> 5 dB)
       if (snr < -5) color = '#f43f5e'; // red (< -5 dB)
@@ -390,8 +493,8 @@
       const isTraceroute = link.source === 'traceroute';
 
       const line = L.polyline([
-        [fromNode.latitude, fromNode.longitude],
-        [toNode.latitude, toNode.longitude]
+        fromPos,
+        toPos
       ], {
         color: color,
         weight: Math.max(2, Math.min(5, 2.5 + (snr / 8))),
@@ -1904,14 +2007,18 @@
     if (!map) return;
     document.querySelector('.nav-tab[data-tab="map"]')?.click();
 
-    const fromNode = state.nodes.get(packet.from_node);
-    const toNode = (packet.to_node && packet.to_node !== 0xFFFFFFFF) ? state.nodes.get(packet.to_node) : null;
+    const fromMarker = state.nodeMarkers.get(packet.from_node);
+    const toMarker = (packet.to_node && packet.to_node !== 0xFFFFFFFF) ? state.nodeMarkers.get(packet.to_node) : null;
 
     const coords = [];
-    if (fromNode && fromNode.latitude && fromNode.longitude) {
+    if (fromMarker) {
+      coords.push(fromMarker.getLatLng());
+    } else if (fromNode && fromNode.latitude && fromNode.longitude) {
       coords.push([fromNode.latitude, fromNode.longitude]);
     }
-    if (toNode && toNode.latitude && toNode.longitude) {
+    if (toMarker) {
+      coords.push(toMarker.getLatLng());
+    } else if (toNode && toNode.latitude && toNode.longitude) {
       coords.push([toNode.latitude, toNode.longitude]);
     }
 
@@ -2262,9 +2369,10 @@
       }
       document.querySelector('.nav-tab[data-tab="map"]').click();
       setTimeout(() => {
-        map.setView([node.latitude, node.longitude], 15);
-        selectNodeForMap(node);
         const marker = state.nodeMarkers.get(nodeNum);
+        const targetPos = marker ? marker.getLatLng() : [node.latitude, node.longitude];
+        map.setView(targetPos, 15);
+        selectNodeForMap(node);
         if (marker) marker.openPopup();
       }, 300);
     },
