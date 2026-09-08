@@ -1333,14 +1333,23 @@ int TuiApp::run() {
         wm_.ensure_nodelist("*");
     } else if (devices.size() == 1) {
         wm_.ensure_nodelist(devices[0]);
+    } else {
+        wm_.ensure_nodelist("");
     }
-    for (const auto& dev : devices) {
-        if (const auto* db = service_.db_for(dev)) {
-            for (const auto& ch : db->channels()) {
-                if (ch.role != "DISABLED") {
-                    std::string name = ch.name;
-                    if (name.empty() && ch.role == "PRIMARY") name = "Primary";
-                    wm_.ensure_channel(dev, ch.index, name);
+
+    std::set<std::string> scan_devs(devices.begin(), devices.end());
+    scan_devs.insert("");
+    if (!active_device_.empty()) scan_devs.insert(active_device_);
+
+    for (const auto& dev : scan_devs) {
+        if (!dev.empty()) {
+            if (const auto* db = service_.db_for(dev)) {
+                for (const auto& ch : db->channels()) {
+                    if (ch.role != "DISABLED") {
+                        std::string name = ch.name;
+                        if (name.empty() && ch.role == "PRIMARY") name = "Primary";
+                        wm_.ensure_channel(dev, ch.index, name);
+                    }
                 }
             }
         }
@@ -1349,10 +1358,29 @@ int TuiApp::run() {
             windows = service_.database().get_all_windows("");
         }
         for (const auto& w : windows) {
+            std::string d = dev.empty() ? w.device : dev;
             if (w.kind == "channel") {
-                wm_.ensure_channel(dev, w.target, "");
+                std::string name = "";
+                for (const auto& id : service_.device_ids()) {
+                    if (const auto* db = service_.db_for(id)) {
+                        auto ch = db->channel(w.target);
+                        if (ch && !ch->name.empty()) { name = ch->name; break; }
+                    }
+                }
+                if (name.empty() && w.target == 0) name = "Primary";
+                wm_.ensure_channel(d, w.target, name);
             } else if (w.kind == "dm") {
-                wm_.ensure_dm(dev, w.target, "");
+                std::string nick = "";
+                for (const auto& id : service_.device_ids()) {
+                    if (const auto* db = service_.db_for(id)) {
+                        auto n = db->get(w.target);
+                        if (n) {
+                            nick = n->short_name.empty() ? n->long_name : n->short_name;
+                            break;
+                        }
+                    }
+                }
+                wm_.ensure_dm(d, w.target, nick);
             }
         }
     }
@@ -1585,6 +1613,41 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             if (active_device_.empty()) {
                 active_device_ = e.device;
             }
+            auto devs = service_.device_ids();
+            if (devs.size() > 1) {
+                wm_.ensure_nodelist("*");
+            } else {
+                wm_.ensure_nodelist(e.device);
+            }
+            if (const auto* db = service_.db_for(e.device)) {
+                for (const auto& ch : db->channels()) {
+                    if (ch.role != "DISABLED") {
+                        std::string name = ch.name;
+                        if (name.empty() && ch.role == "PRIMARY") name = "Primary";
+                        wm_.ensure_channel(e.device, ch.index, name);
+                    }
+                }
+            }
+            auto windows = service_.database().get_all_windows(e.device);
+            if (windows.empty()) windows = service_.database().get_all_windows("");
+            for (const auto& w : windows) {
+                if (w.kind == "channel") {
+                    std::string name = "";
+                    if (const auto* db = service_.db_for(e.device)) {
+                        auto ch = db->channel(w.target);
+                        if (ch && !ch->name.empty()) name = ch->name;
+                    }
+                    if (name.empty() && w.target == 0) name = "Primary";
+                    wm_.ensure_channel(e.device, w.target, name);
+                } else if (w.kind == "dm") {
+                    std::string nick = "";
+                    if (const auto* db = service_.db_for(e.device)) {
+                        auto n = db->get(w.target);
+                        if (n) nick = n->short_name.empty() ? n->long_name : n->short_name;
+                    }
+                    wm_.ensure_dm(e.device, w.target, nick);
+                }
+            }
         } else if constexpr (std::is_same_v<T, EvDisconnected>) {
             wm_.append_status("*** Disconnected: " + e.reason, tui_color::ERROR);
             if (e.device == active_device_) {
@@ -1645,7 +1708,7 @@ void TuiApp::handle_event(const MeshEvent& ev) {
             }
         } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
             std::string name = e.channel.name;
-            if (e.channel.index == 0) {
+            if (e.channel.role != "DISABLED") {
                 wm_.ensure_channel(e.device, e.channel.index, name);
             } else {
                 wm_.update_channel_name(e.device, e.channel.index, name);

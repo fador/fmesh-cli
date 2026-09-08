@@ -386,6 +386,11 @@ std::vector<StoredMessage> Database::recent_messages(const WindowKey& w, int lim
     }
     sqlite3_finalize(st);
     std::reverse(out.begin(), out.end());
+    if (out.empty() && !w.device.empty()) {
+        WindowKey any_dev = w;
+        any_dev.device = "";
+        return recent_messages(any_dev, limit);
+    }
     return out;
 }
 
@@ -604,6 +609,11 @@ std::vector<StoredMessage> Database::get_messages_paginated(const WindowKey& w, 
     }
     sqlite3_finalize(st);
     std::reverse(out.begin(), out.end());
+    if (out.empty() && !w.device.empty()) {
+        WindowKey any_dev = w;
+        any_dev.device = "";
+        return get_messages_paginated(any_dev, limit, offset);
+    }
     return out;
 }
 

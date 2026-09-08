@@ -497,3 +497,50 @@ TEST_F(DatabaseTest, MessageSignalAndHopsPersistence) {
     EXPECT_EQ(p2->hop_limit, 1u);
 }
 
+TEST_F(DatabaseTest, RecentMessagesDeviceFallback) {
+    // Insert channel broadcast with empty device string
+    StoredMessage ch_msg;
+    ch_msg.device = "";
+    ch_msg.window_kind = "channel";
+    ch_msg.window_target = 0;
+    ch_msg.direction = "in";
+    ch_msg.from_node = 0x1234;
+    ch_msg.to_node = 0xFFFFFFFF;
+    ch_msg.channel_idx = 0;
+    ch_msg.text = "Broadcast on empty device";
+    ch_msg.ts = 1000;
+    db_.insert_message(ch_msg);
+
+    // Insert private DM message with empty device string
+    StoredMessage dm_msg;
+    dm_msg.device = "";
+    dm_msg.window_kind = "dm";
+    dm_msg.window_target = 0x5678;
+    dm_msg.direction = "in";
+    dm_msg.from_node = 0x5678;
+    dm_msg.to_node = 0x1234;
+    dm_msg.channel_idx = 0;
+    dm_msg.text = "Private DM on empty device";
+    dm_msg.ts = 1010;
+    db_.insert_message(dm_msg);
+
+    // Query with concrete device string that doesn't match directly
+    WindowKey ch_key{"stream:mesh:192.168.178.23:4404", "channel", 0};
+    auto ch_recent = db_.recent_messages(ch_key, 50);
+    ASSERT_EQ(ch_recent.size(), 1u);
+    EXPECT_EQ(ch_recent[0].text, "Broadcast on empty device");
+
+    auto ch_paginated = db_.get_messages_paginated(ch_key, 50, 0);
+    ASSERT_EQ(ch_paginated.size(), 1u);
+    EXPECT_EQ(ch_paginated[0].text, "Broadcast on empty device");
+
+    WindowKey dm_key{"stream:mesh:192.168.178.23:4404", "dm", 0x5678};
+    auto dm_recent = db_.recent_messages(dm_key, 50);
+    ASSERT_EQ(dm_recent.size(), 1u);
+    EXPECT_EQ(dm_recent[0].text, "Private DM on empty device");
+
+    auto dm_paginated = db_.get_messages_paginated(dm_key, 50, 0);
+    ASSERT_EQ(dm_paginated.size(), 1u);
+    EXPECT_EQ(dm_paginated[0].text, "Private DM on empty device");
+}
+

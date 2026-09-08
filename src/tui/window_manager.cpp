@@ -103,6 +103,9 @@ int WindowManager::ensure_channel(const std::string& device, uint32_t idx,
         // Update title if a real name arrived (created earlier with "").
         if (!name.empty())
             windows_[it->second - 1]->set_title(channel_title(device, idx, name));
+        if (windows_[it->second - 1]->lines().empty()) {
+            load_history(it->second);
+        }
         return it->second;
     }
 
@@ -116,6 +119,9 @@ int WindowManager::ensure_channel(const std::string& device, uint32_t idx,
         windows_[win_idx - 1]->set_target(WindowTarget{device, "channel", idx});
         if (!name.empty())
             windows_[win_idx - 1]->set_title(channel_title(device, idx, name));
+        if (windows_[win_idx - 1]->lines().empty()) {
+            load_history(win_idx);
+        }
         return win_idx;
     }
     // Also check if any existing window has the same channel index
@@ -128,6 +134,9 @@ int WindowManager::ensure_channel(const std::string& device, uint32_t idx,
                 windows_[i]->set_title(channel_title(device, idx, name));
             int win_idx = static_cast<int>(i + 1);
             by_key_[key] = win_idx;
+            if (windows_[i]->lines().empty()) {
+                load_history(win_idx);
+            }
             return win_idx;
         }
     }
@@ -156,6 +165,9 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
             if (cur_title != new_title && (cur_is_placeholder || !new_is_placeholder))
                 windows_[it->second - 1]->set_title(new_title);
         }
+        if (windows_[it->second - 1]->lines().empty()) {
+            load_history(it->second);
+        }
         return it->second;
     }
 
@@ -169,6 +181,9 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
         windows_[win_idx - 1]->set_target(WindowTarget{device, "dm", peer_node});
         if (!nick.empty())
             windows_[win_idx - 1]->set_title(dm_title(device, peer_node, nick));
+        if (windows_[win_idx - 1]->lines().empty()) {
+            load_history(win_idx);
+        }
         return win_idx;
     }
     for (size_t i = 0; i < windows_.size(); ++i) {
@@ -180,6 +195,9 @@ int WindowManager::ensure_dm(const std::string& device, uint32_t peer_node,
                 windows_[i]->set_title(dm_title(device, peer_node, nick));
             int win_idx = static_cast<int>(i + 1);
             by_key_[key] = win_idx;
+            if (windows_[i]->lines().empty()) {
+                load_history(win_idx);
+            }
             return win_idx;
         }
     }
@@ -524,12 +542,26 @@ void WindowManager::load_history(int window_idx) {
     Window& w = *windows_[window_idx - 1];
     const auto& t = w.target();
     if (t.kind == "status") return;
+    if (!w.lines().empty()) return;
 
     WindowKey wk{t.device, t.kind, t.target};
     auto msgs = service_.database().recent_messages(wk, 200);
+    if (msgs.empty() && !t.device.empty()) {
+        WindowKey any_dev = wk;
+        any_dev.device = "";
+        msgs = service_.database().recent_messages(any_dev, 200);
+    }
     if (msgs.empty()) return;
 
     const NodeDb* db = service_.db_for(t.device);
+    if (!db) {
+        for (const auto& did : service_.device_ids()) {
+            if (const auto* d = service_.db_for(did)) {
+                db = d;
+                break;
+            }
+        }
+    }
     for (const auto& m : msgs) {
         // Skip empty messages.
         if (m.text.empty()) continue;
