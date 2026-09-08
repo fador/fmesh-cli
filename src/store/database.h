@@ -80,6 +80,34 @@ public:
     std::vector<LocationRow> get_node_locations(uint32_t node_num, uint64_t since_ts = 0, int limit = 500);
     std::vector<LocationRow> get_recent_node_locations(uint64_t since_ts = 0, int limit = 1000);
 
+    // --- telemetry history ------------------------------------------------
+    struct TelemetryRow {
+        int64_t rowid = 0;
+        std::string device;
+        uint32_t node_num = 0;
+        uint64_t ts = 0;
+        std::optional<uint8_t> battery_level;
+        std::optional<float> voltage;
+        std::optional<float> channel_util;
+        std::optional<float> air_util_tx;
+        std::optional<uint32_t> uptime_seconds;
+        std::optional<float> temperature;
+        std::optional<float> relative_humidity;
+        std::optional<float> barometric_pressure;
+        std::optional<float> gas_resistance;
+        std::optional<uint32_t> iaq;
+        std::optional<uint32_t> pm25;
+        std::optional<uint32_t> co2;
+        std::optional<float> current;
+        std::optional<float> snr;
+        std::optional<uint32_t> hops_away;
+    };
+    bool insert_telemetry(const TelemetryRow& row);
+    uint64_t max_telemetry_ts();
+    std::vector<TelemetryRow> get_telemetry_after_ts(uint64_t ts, int limit = 100);
+    std::vector<TelemetryRow> get_node_telemetry(uint32_t node_num, uint64_t since_ts = 0, uint64_t before_ts = 0, int limit = 500);
+    std::vector<TelemetryRow> get_recent_telemetry(uint64_t since_ts = 0, int limit = 500);
+
     // --- offline history loading -----------------------------------------
     std::vector<std::string> get_all_devices();
     std::vector<WindowKey> get_all_windows(const std::string& device);

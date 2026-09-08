@@ -358,21 +358,33 @@ std::optional<MeshEvent> decode_packet(
         }
         if (t.has_device_metrics()) {
             const auto& m = t.device_metrics();
-            if (m.battery_level() != 0) ev.node.battery_level = static_cast<uint8_t>(m.battery_level());
-            if (m.voltage() != 0.0f) ev.node.voltage = m.voltage();
-            if (m.channel_utilization() != 0.0f) ev.node.channel_util = m.channel_utilization();
-            if (m.air_util_tx() != 0.0f) ev.node.air_util_tx = m.air_util_tx();
-            if (m.uptime_seconds() != 0) ev.node.uptime_seconds = m.uptime_seconds();
+            if (m.has_battery_level()) ev.node.battery_level = static_cast<uint8_t>(m.battery_level());
+            else if (m.battery_level() != 0) ev.node.battery_level = static_cast<uint8_t>(m.battery_level());
+            if (m.has_voltage()) ev.node.voltage = m.voltage();
+            else if (m.voltage() != 0.0f) ev.node.voltage = m.voltage();
+            if (m.has_channel_utilization()) ev.node.channel_util = m.channel_utilization();
+            else if (m.channel_utilization() != 0.0f) ev.node.channel_util = m.channel_utilization();
+            if (m.has_air_util_tx()) ev.node.air_util_tx = m.air_util_tx();
+            else if (m.air_util_tx() != 0.0f) ev.node.air_util_tx = m.air_util_tx();
+            if (m.has_uptime_seconds()) ev.node.uptime_seconds = m.uptime_seconds();
+            else if (m.uptime_seconds() != 0) ev.node.uptime_seconds = m.uptime_seconds();
         }
         if (t.has_environment_metrics()) {
             const auto& em = t.environment_metrics();
-            if (em.temperature() != 0.0f) ev.node.temperature = em.temperature();
-            if (em.relative_humidity() != 0.0f) ev.node.relative_humidity = em.relative_humidity();
-            if (em.barometric_pressure() != 0.0f) ev.node.barometric_pressure = em.barometric_pressure();
-            if (em.gas_resistance() != 0.0f) ev.node.gas_resistance = em.gas_resistance();
-            if (em.iaq() != 0) ev.node.iaq = em.iaq();
-            if (em.current() != 0.0f) ev.node.current = em.current();
-            if (em.voltage() != 0.0f && !ev.node.voltage.has_value()) ev.node.voltage = em.voltage();
+            if (em.has_temperature()) ev.node.temperature = em.temperature();
+            else if (em.temperature() != 0.0f) ev.node.temperature = em.temperature();
+            if (em.has_relative_humidity()) ev.node.relative_humidity = em.relative_humidity();
+            else if (em.relative_humidity() != 0.0f) ev.node.relative_humidity = em.relative_humidity();
+            if (em.has_barometric_pressure()) ev.node.barometric_pressure = em.barometric_pressure();
+            else if (em.barometric_pressure() != 0.0f) ev.node.barometric_pressure = em.barometric_pressure();
+            if (em.has_gas_resistance()) ev.node.gas_resistance = em.gas_resistance();
+            else if (em.gas_resistance() != 0.0f) ev.node.gas_resistance = em.gas_resistance();
+            if (em.has_iaq()) ev.node.iaq = em.iaq();
+            else if (em.iaq() != 0) ev.node.iaq = em.iaq();
+            if (em.has_current()) ev.node.current = em.current();
+            else if (em.current() != 0.0f) ev.node.current = em.current();
+            if (em.has_voltage() && !ev.node.voltage.has_value()) ev.node.voltage = em.voltage();
+            else if (em.voltage() != 0.0f && !ev.node.voltage.has_value()) ev.node.voltage = em.voltage();
         }
         if (t.has_air_quality_metrics()) {
             const auto& aq = t.air_quality_metrics();

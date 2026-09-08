@@ -40,6 +40,7 @@ void DbSyncManager::initiate_sync() {
     j["type"] = "inventory";
     j["max_message_ts"] = db_.max_message_ts();
     j["max_location_ts"] = db_.max_location_ts();
+    j["max_telemetry_ts"] = db_.max_telemetry_ts();
 
     mesh_.send_db_sync(j.dump());
 
@@ -94,30 +95,62 @@ void DbSyncManager::push_location(const Database::LocationRow& loc) {
     mesh_.send_db_sync(j.dump());
 }
 
+void DbSyncManager::push_telemetry(const Database::TelemetryRow& t) {
+    json row;
+    row["device"] = t.device;
+    row["node_num"] = t.node_num;
+    row["ts"] = t.ts;
+    if (t.battery_level) row["battery_level"] = *t.battery_level;
+    if (t.voltage) row["voltage"] = *t.voltage;
+    if (t.channel_util) row["channel_util"] = *t.channel_util;
+    if (t.air_util_tx) row["air_util_tx"] = *t.air_util_tx;
+    if (t.uptime_seconds) row["uptime_seconds"] = *t.uptime_seconds;
+    if (t.temperature) row["temperature"] = *t.temperature;
+    if (t.relative_humidity) row["relative_humidity"] = *t.relative_humidity;
+    if (t.barometric_pressure) row["barometric_pressure"] = *t.barometric_pressure;
+    if (t.gas_resistance) row["gas_resistance"] = *t.gas_resistance;
+    if (t.iaq) row["iaq"] = *t.iaq;
+    if (t.pm25) row["pm25"] = *t.pm25;
+    if (t.co2) row["co2"] = *t.co2;
+    if (t.current) row["current"] = *t.current;
+    if (t.snr) row["snr"] = *t.snr;
+    if (t.hops_away) row["hops_away"] = *t.hops_away;
+
+    json j;
+    j["type"] = "data";
+    j["telemetries"] = json::array({row});
+
+    mesh_.send_db_sync(j.dump());
+}
+
 void DbSyncManager::handle_inventory(const std::string& device, const std::string& json_str) {
     auto j = json::parse(json_str);
     uint64_t remote_msg = j.value("max_message_ts", (uint64_t)0);
     uint64_t remote_loc = j.value("max_location_ts", (uint64_t)0);
+    uint64_t remote_telem = j.value("max_telemetry_ts", (uint64_t)0);
 
     uint64_t local_msg = db_.max_message_ts();
     uint64_t local_loc = db_.max_location_ts();
+    uint64_t local_telem = db_.max_telemetry_ts();
 
     // If they have more than us, request the difference.
-    if (remote_msg > local_msg || remote_loc > local_loc) {
+    if (remote_msg > local_msg || remote_loc > local_loc || remote_telem > local_telem) {
         json req;
         req["type"] = "request";
         req["after_message_ts"] = local_msg;
         req["after_location_ts"] = local_loc;
+        req["after_telemetry_ts"] = local_telem;
         
         mesh_.send_db_sync(req.dump());
     }
     
     // If we have more than them, proactively send our data to them
     // by pretending they requested it from their max points.
-    if (local_msg > remote_msg || local_loc > remote_loc) {
+    if (local_msg > remote_msg || local_loc > remote_loc || local_telem > remote_telem) {
         json req;
         req["after_message_ts"] = remote_msg;
         req["after_location_ts"] = remote_loc;
+        req["after_telemetry_ts"] = remote_telem;
         handle_request(device, req.dump());
     }
 }
@@ -126,11 +159,13 @@ void DbSyncManager::handle_request(const std::string& device, const std::string&
     auto j = json::parse(json_str);
     uint64_t after_msg = j.value("after_message_ts", (uint64_t)0);
     uint64_t after_loc = j.value("after_location_ts", (uint64_t)0);
+    uint64_t after_telem = j.value("after_telemetry_ts", (uint64_t)0);
 
     auto msgs = db_.get_messages_after_ts(after_msg, 21); // fetch 21 to check if has_more
     auto locs = db_.get_locations_after(after_loc, 21);
+    auto telems = db_.get_telemetry_after_ts(after_telem, 21);
 
-    if (msgs.empty() && locs.empty()) return;
+    if (msgs.empty() && locs.empty() && telems.empty()) return;
 
     bool has_more = false;
     if (msgs.size() > 20) {
@@ -140,6 +175,10 @@ void DbSyncManager::handle_request(const std::string& device, const std::string&
     if (locs.size() > 20) {
         has_more = true;
         locs.pop_back(); // remove the 21st
+    }
+    if (telems.size() > 20) {
+        has_more = true;
+        telems.pop_back(); // remove the 21st
     }
 
     json resp;
@@ -183,6 +222,31 @@ void DbSyncManager::handle_request(const std::string& device, const std::string&
     }
     resp["locations"] = l_arr;
 
+    json t_arr = json::array();
+    for (const auto& t : telems) {
+        json row;
+        row["device"] = t.device;
+        row["node_num"] = t.node_num;
+        row["ts"] = t.ts;
+        if (t.battery_level) row["battery_level"] = *t.battery_level;
+        if (t.voltage) row["voltage"] = *t.voltage;
+        if (t.channel_util) row["channel_util"] = *t.channel_util;
+        if (t.air_util_tx) row["air_util_tx"] = *t.air_util_tx;
+        if (t.uptime_seconds) row["uptime_seconds"] = *t.uptime_seconds;
+        if (t.temperature) row["temperature"] = *t.temperature;
+        if (t.relative_humidity) row["relative_humidity"] = *t.relative_humidity;
+        if (t.barometric_pressure) row["barometric_pressure"] = *t.barometric_pressure;
+        if (t.gas_resistance) row["gas_resistance"] = *t.gas_resistance;
+        if (t.iaq) row["iaq"] = *t.iaq;
+        if (t.pm25) row["pm25"] = *t.pm25;
+        if (t.co2) row["co2"] = *t.co2;
+        if (t.current) row["current"] = *t.current;
+        if (t.snr) row["snr"] = *t.snr;
+        if (t.hops_away) row["hops_away"] = *t.hops_away;
+        t_arr.push_back(row);
+    }
+    resp["telemetries"] = t_arr;
+
     mesh_.send_db_sync(resp.dump());
 }
 
@@ -223,7 +287,7 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
             ev.to_node = m.to_node;
             ev.channel_idx = m.channel_idx;
             ev.text = m.text;
-            ev.rx_time = m.ts;
+            ev.rx_time = static_cast<uint32_t>(m.ts);
             ev.packet_id = m.packet_id;
             ev.rx_snr = m.rx_snr;
             ev.rx_rssi = m.rx_rssi;
@@ -255,6 +319,49 @@ void DbSyncManager::handle_data(const std::string& device, const std::string& js
                 push_location(lr); // Forward to other connected mesh peers
             }
             // We could emit EvNodeUpdated to UI, but UI probably re-queries DB on /nodes.
+        }
+    }
+
+    if (j.contains("telemetries")) {
+        for (const auto& telem : j["telemetries"]) {
+            Database::TelemetryRow tr;
+            tr.device = telem.value("device", "");
+            tr.node_num = telem.value("node_num", (uint32_t)0);
+            tr.ts = telem.value("ts", (uint64_t)0);
+            if (telem.contains("battery_level") && !telem["battery_level"].is_null())
+                tr.battery_level = telem["battery_level"].get<uint8_t>();
+            if (telem.contains("voltage") && !telem["voltage"].is_null())
+                tr.voltage = telem["voltage"].get<float>();
+            if (telem.contains("channel_util") && !telem["channel_util"].is_null())
+                tr.channel_util = telem["channel_util"].get<float>();
+            if (telem.contains("air_util_tx") && !telem["air_util_tx"].is_null())
+                tr.air_util_tx = telem["air_util_tx"].get<float>();
+            if (telem.contains("uptime_seconds") && !telem["uptime_seconds"].is_null())
+                tr.uptime_seconds = telem["uptime_seconds"].get<uint32_t>();
+            if (telem.contains("temperature") && !telem["temperature"].is_null())
+                tr.temperature = telem["temperature"].get<float>();
+            if (telem.contains("relative_humidity") && !telem["relative_humidity"].is_null())
+                tr.relative_humidity = telem["relative_humidity"].get<float>();
+            if (telem.contains("barometric_pressure") && !telem["barometric_pressure"].is_null())
+                tr.barometric_pressure = telem["barometric_pressure"].get<float>();
+            if (telem.contains("gas_resistance") && !telem["gas_resistance"].is_null())
+                tr.gas_resistance = telem["gas_resistance"].get<float>();
+            if (telem.contains("iaq") && !telem["iaq"].is_null())
+                tr.iaq = telem["iaq"].get<uint32_t>();
+            if (telem.contains("pm25") && !telem["pm25"].is_null())
+                tr.pm25 = telem["pm25"].get<uint32_t>();
+            if (telem.contains("co2") && !telem["co2"].is_null())
+                tr.co2 = telem["co2"].get<uint32_t>();
+            if (telem.contains("current") && !telem["current"].is_null())
+                tr.current = telem["current"].get<float>();
+            if (telem.contains("snr") && !telem["snr"].is_null())
+                tr.snr = telem["snr"].get<float>();
+            if (telem.contains("hops_away") && !telem["hops_away"].is_null())
+                tr.hops_away = telem["hops_away"].get<uint32_t>();
+
+            if (db_.insert_telemetry(tr)) {
+                push_telemetry(tr);
+            }
         }
     }
 

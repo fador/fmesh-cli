@@ -37,6 +37,7 @@
     rawPackets: [],
     packetCount: 0,
     telemetryHistory: new Map(), // node_num -> Array<{ts, battery_level, voltage, temperature, relative_humidity, barometric_pressure, channel_util, air_util_tx}>
+    telemetryLoadedNodes: new Set(), // Set<node_num> that have been fetched from /api/telemetry
     eventSource: null
   };
 
@@ -893,6 +894,50 @@
   // ==========================================================================
   // Telemetry Dashboard & Charts (Real Data Only)
   // ==========================================================================
+  async function loadTelemetryForNode(nodeNum) {
+    if (!nodeNum || state.telemetryLoadedNodes.has(nodeNum)) return;
+    state.telemetryLoadedNodes.add(nodeNum);
+    try {
+      const res = await fetch(`/api/telemetry?node_num=${nodeNum}&limit=500`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!Array.isArray(data)) return;
+
+      const dbSamples = data.map(item => ({
+        ts: item.ts,
+        battery_level: item.battery_level,
+        voltage: item.voltage,
+        temperature: item.temperature,
+        relative_humidity: item.relative_humidity,
+        barometric_pressure: item.barometric_pressure,
+        channel_util: item.channel_util,
+        air_util_tx: item.air_util_tx
+      }));
+
+      const existing = state.telemetryHistory.get(nodeNum) || [];
+      const sampleMap = new Map();
+      dbSamples.forEach(s => sampleMap.set(s.ts, s));
+      existing.forEach(s => {
+        if (!sampleMap.has(s.ts)) {
+          sampleMap.set(s.ts, s);
+        } else {
+          const curr = sampleMap.get(s.ts);
+          sampleMap.set(s.ts, Object.assign({}, curr, s));
+        }
+      });
+
+      const merged = Array.from(sampleMap.values()).sort((a, b) => a.ts - b.ts);
+      if (merged.length > 500) merged.splice(0, merged.length - 500);
+      state.telemetryHistory.set(nodeNum, merged);
+
+      if (state.selectedNodeNumForTelemetry === nodeNum) {
+        updateTelemetryCharts(state.nodes.get(nodeNum));
+      }
+    } catch (e) {
+      console.warn('Failed to load historical telemetry for node:', nodeNum, e);
+    }
+  }
+
   function recordTelemetrySample(node) {
     if (!node) return;
     const hasAny = node.battery_level != null || node.voltage != null ||
@@ -929,7 +974,7 @@
         channel_util: node.channel_util,
         air_util_tx: node.air_util_tx
       });
-      if (samples.length > 50) samples.shift();
+      if (samples.length > 500) samples.shift();
     }
   }
 
@@ -1036,6 +1081,10 @@
 
     if (el.telemetryNodeSelect && targetNode) {
       el.telemetryNodeSelect.value = targetNode.node_num;
+    }
+
+    if (targetNode && !state.telemetryLoadedNodes.has(targetNode.node_num)) {
+      loadTelemetryForNode(targetNode.node_num);
     }
 
     updateTelemetrySummaryCards(targetNode);
@@ -1236,7 +1285,12 @@
 
     const formatTimeLabel = (ts) => {
       if (!ts) return '';
-      return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const d = new Date(ts * 1000);
+      const now = new Date();
+      if (d.toDateString() !== now.toDateString()) {
+        return `${d.getMonth() + 1}/${d.getDate()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      }
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
     // 1. Battery & Voltage Chart (Real Data Only)

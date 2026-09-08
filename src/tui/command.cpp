@@ -91,6 +91,7 @@ CommandResult CommandDispatcher::execute(const std::string& line) {
     else if (cmd == "server")                 cmd_server(tokens);
     else if (cmd == "traceroute" || cmd == "trace" || cmd == "tr") cmd_traceroute(tokens);
     else if (cmd == "web")                     cmd_web(tokens);
+    else if (cmd == "telemetry" || cmd == "telem") cmd_telemetry(tokens);
     else {
         status_("Unknown command: /" + cmd + " (try /help)", tui_color::ERROR);
     }
@@ -101,6 +102,7 @@ void CommandDispatcher::cmd_help() {
     status_("Commands:", tui_color::INFO);
     status_("  /help                 this help", tui_color::INFO);
     status_("  /web                  show web dashboard status and URL", tui_color::INFO);
+    status_("  /telemetry [node] [N] show recent telemetry readings (temp, hum, batt)", tui_color::INFO);
     status_("  /list                 list windows", tui_color::INFO);
     status_("  /nodes                open interactive node list (arrows, enter, s=sort)", tui_color::INFO);
     status_("  /query <node|nick>    open a DM window with a node", tui_color::INFO);
@@ -997,6 +999,91 @@ void CommandDispatcher::cmd_web(const std::vector<std::string>&) {
         status_("Web dashboard is active: http://" + config_.web_host + ":" + std::to_string(config_.web_port), tui_color::INFO);
     } else {
         status_("Web dashboard is not running. Start fmesh-cli with --web or --web-port <port>", tui_color::INFO);
+    }
+}
+
+void CommandDispatcher::cmd_telemetry(const std::vector<std::string>& args) {
+    uint32_t node_num = 0;
+    int limit = 15;
+    if (!args.empty()) {
+        if (!parse_node_id(args[0], node_num)) {
+            try {
+                limit = std::stoi(args[0]);
+            } catch (...) {
+                for (const auto& dev : service_.device_ids()) {
+                    const NodeDb* db = service_.db_for(dev);
+                    if (db) {
+                        auto match = db->find_fuzzy(args[0]);
+                        if (match) { node_num = match->node_num; break; }
+                    }
+                }
+                if (node_num == 0) {
+                    status_("Unknown node target: " + args[0], tui_color::ERROR);
+                    return;
+                }
+            }
+        }
+        if (args.size() > 1) {
+            try { limit = std::stoi(args[1]); } catch (...) {}
+        }
+    }
+    if (limit <= 0) limit = 15;
+    if (limit > 100) limit = 100;
+
+    std::vector<Database::TelemetryRow> rows;
+    if (node_num != 0) {
+        rows = service_.database().get_node_telemetry(node_num, 0, 0, limit);
+    } else {
+        rows = service_.database().get_recent_telemetry(0, limit);
+    }
+
+    if (rows.empty()) {
+        status_("No telemetry records found.", tui_color::STATUS);
+        return;
+    }
+
+    status_("--- Historical Telemetry (" + std::to_string(rows.size()) + " records) ---", tui_color::INFO);
+    for (const auto& r : rows) {
+        char time_buf[32];
+        std::time_t t = static_cast<std::time_t>(r.ts);
+        struct tm tm_info;
+#ifdef _WIN32
+        if (::localtime_s(&tm_info, &t) != 0) std::memset(&tm_info, 0, sizeof(tm_info));
+#else
+        if (::localtime_r(&t, &tm_info) == nullptr) std::memset(&tm_info, 0, sizeof(tm_info));
+#endif
+        std::strftime(time_buf, sizeof(time_buf), "%m-%d %H:%M", &tm_info);
+
+        std::string line = "[" + std::string(time_buf) + "] " + node_num_to_id(r.node_num);
+        if (r.temperature) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), " %.1fC", *r.temperature);
+            line += buf;
+        }
+        if (r.relative_humidity) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), " %.0f%%hum", *r.relative_humidity);
+            line += buf;
+        }
+        if (r.barometric_pressure) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), " %.0fhPa", *r.barometric_pressure);
+            line += buf;
+        }
+        if (r.battery_level) {
+            line += " " + std::to_string(*r.battery_level) + "%bat";
+        }
+        if (r.voltage) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), " %.2fV", *r.voltage);
+            line += buf;
+        }
+        if (r.channel_util) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), " util:%.1f%%", *r.channel_util);
+            line += buf;
+        }
+        status_(line, 0);
     }
 }
 

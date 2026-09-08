@@ -72,6 +72,7 @@ private:
     void cmd_server(const std::vector<std::string>& args);
     void cmd_traceroute(const std::vector<std::string>& args);
     void cmd_web(const std::vector<std::string>& args);
+    void cmd_telemetry(const std::vector<std::string>& args);
 };
 
 } // namespace meshcli

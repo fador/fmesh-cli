@@ -20,6 +20,7 @@ public:
     // Call this whenever a new message is received or a local update occurs.
     void push_message(const StoredMessage& msg);
     void push_location(const Database::LocationRow& loc);
+    void push_telemetry(const Database::TelemetryRow& telem);
     
     // Broadcast local physical devices to remote streams
     void push_devices(const std::vector<std::pair<std::string, uint32_t>>& local_devices);

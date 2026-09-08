@@ -385,3 +385,51 @@ TEST(WebService, RfLinksApi) {
     web.stop();
 }
 
+TEST(WebService, TelemetryApi) {
+    meshcli::MeshService service;
+    service.open_database(":memory:");
+    auto& db = service.database();
+
+    meshcli::Database::TelemetryRow r1;
+    r1.device = "dev1";
+    r1.node_num = 0x12345678;
+    r1.ts = 1000;
+    r1.temperature = 21.5f;
+    r1.relative_humidity = 50.0f;
+    r1.barometric_pressure = 1012.0f;
+    r1.battery_level = 95;
+    r1.voltage = 4.1f;
+    db.insert_telemetry(r1);
+
+    meshcli::Database::TelemetryRow r2;
+    r2.device = "dev1";
+    r2.node_num = 0x87654321;
+    r2.ts = 1010;
+    r2.temperature = 19.8f;
+    r2.battery_level = 80;
+    db.insert_telemetry(r2);
+
+    meshcli::WebService web(service);
+    EXPECT_TRUE(web.start("127.0.0.1", 0, ""));
+    int port = web.bound_port();
+
+    // Query telemetry for node !12345678
+    std::string req1 = "GET /api/telemetry?node_num=!12345678 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res1 = http_client_request(port, req1);
+    EXPECT_NE(res1.find("200 OK"), std::string::npos);
+    EXPECT_NE(res1.find("!12345678"), std::string::npos);
+    EXPECT_NE(res1.find("21.5"), std::string::npos);
+    EXPECT_NE(res1.find("1012"), std::string::npos);
+    EXPECT_EQ(res1.find("!87654321"), std::string::npos);
+
+    // Query all telemetry
+    std::string req2 = "GET /api/telemetry HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string res2 = http_client_request(port, req2);
+    EXPECT_NE(res2.find("200 OK"), std::string::npos);
+    EXPECT_NE(res2.find("!12345678"), std::string::npos);
+    EXPECT_NE(res2.find("!87654321"), std::string::npos);
+
+    web.stop();
+}
+
+

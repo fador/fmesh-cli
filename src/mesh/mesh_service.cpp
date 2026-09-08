@@ -767,6 +767,45 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
                 loc.ts = ts;
                 if (sync_manager_) sync_manager_->push_location(loc);
             }
+
+            bool has_telemetry = e.node.battery_level.has_value() ||
+                                 e.node.voltage.has_value() ||
+                                 e.node.channel_util.has_value() ||
+                                 e.node.air_util_tx.has_value() ||
+                                 e.node.uptime_seconds.has_value() ||
+                                 e.node.temperature.has_value() ||
+                                 e.node.relative_humidity.has_value() ||
+                                 e.node.barometric_pressure.has_value() ||
+                                 e.node.gas_resistance.has_value() ||
+                                 e.node.iaq.has_value() ||
+                                 e.node.pm25.has_value() ||
+                                 e.node.co2.has_value() ||
+                                 e.node.current.has_value();
+            if (has_telemetry) {
+                uint64_t ts = e.node.last_heard.value_or(0);
+                if (ts == 0) ts = static_cast<uint64_t>(std::time(nullptr));
+                Database::TelemetryRow telem;
+                telem.device = e.device;
+                telem.node_num = e.node.node_num;
+                telem.ts = ts;
+                telem.battery_level = e.node.battery_level;
+                telem.voltage = e.node.voltage;
+                telem.channel_util = e.node.channel_util;
+                telem.air_util_tx = e.node.air_util_tx;
+                telem.uptime_seconds = e.node.uptime_seconds;
+                telem.temperature = e.node.temperature;
+                telem.relative_humidity = e.node.relative_humidity;
+                telem.barometric_pressure = e.node.barometric_pressure;
+                telem.gas_resistance = e.node.gas_resistance;
+                telem.iaq = e.node.iaq;
+                telem.pm25 = e.node.pm25;
+                telem.co2 = e.node.co2;
+                telem.current = e.node.current;
+                telem.snr = e.node.snr;
+                telem.hops_away = e.node.hops_away;
+                db_.insert_telemetry(telem);
+                if (sync_manager_) sync_manager_->push_telemetry(telem);
+            }
         } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
             rt->db->upsert_channel(e.channel);
             db_.upsert_channel(e.device, e.channel);

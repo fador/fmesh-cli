@@ -579,4 +579,100 @@ TEST_F(DatabaseTest, GetNodeAnyDevice) {
     EXPECT_FALSE(not_found.has_value());
 }
 
+TEST_F(DatabaseTest, InsertAndQueryNodeTelemetry) {
+    Database::TelemetryRow r1;
+    r1.device = "dev1";
+    r1.node_num = 0x12345678;
+    r1.ts = 1000;
+    r1.temperature = 22.5f;
+    r1.relative_humidity = 45.0f;
+    r1.barometric_pressure = 1013.25f;
+    r1.battery_level = 98;
+    r1.voltage = 4.15f;
+    r1.channel_util = 5.4f;
+
+    ASSERT_TRUE(db_.insert_telemetry(r1));
+
+    Database::TelemetryRow r2;
+    r2.device = "dev1";
+    r2.node_num = 0x12345678;
+    r2.ts = 1060;
+    r2.temperature = 23.0f;
+    r2.relative_humidity = 44.5f;
+    r2.battery_level = 97;
+
+    ASSERT_TRUE(db_.insert_telemetry(r2));
+
+    auto rows = db_.get_node_telemetry(0x12345678, 900, 1100, 50);
+    ASSERT_EQ(rows.size(), 2u);
+    EXPECT_EQ(rows[0].ts, 1000u);
+    ASSERT_TRUE(rows[0].temperature.has_value());
+    EXPECT_FLOAT_EQ(*rows[0].temperature, 22.5f);
+    ASSERT_TRUE(rows[0].battery_level.has_value());
+    EXPECT_EQ(*rows[0].battery_level, 98);
+    ASSERT_TRUE(rows[0].barometric_pressure.has_value());
+    EXPECT_FLOAT_EQ(*rows[0].barometric_pressure, 1013.25f);
+
+    EXPECT_EQ(rows[1].ts, 1060u);
+    ASSERT_TRUE(rows[1].temperature.has_value());
+    EXPECT_FLOAT_EQ(*rows[1].temperature, 23.0f);
+}
+
+TEST_F(DatabaseTest, TelemetryUpsertMergesOnSameTimestamp) {
+    Database::TelemetryRow r1;
+    r1.device = "dev1";
+    r1.node_num = 0xABCD;
+    r1.ts = 2000;
+    r1.battery_level = 85;
+    r1.voltage = 3.95f;
+    ASSERT_TRUE(db_.insert_telemetry(r1));
+
+    // Another packet arrives for same node at same second with environment data
+    Database::TelemetryRow r2;
+    r2.device = "dev1";
+    r2.node_num = 0xABCD;
+    r2.ts = 2000;
+    r2.temperature = 18.2f;
+    r2.relative_humidity = 60.0f;
+    ASSERT_TRUE(db_.insert_telemetry(r2));
+
+    auto rows = db_.get_node_telemetry(0xABCD);
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].ts, 2000u);
+    ASSERT_TRUE(rows[0].battery_level.has_value());
+    EXPECT_EQ(*rows[0].battery_level, 85);
+    ASSERT_TRUE(rows[0].voltage.has_value());
+    EXPECT_FLOAT_EQ(*rows[0].voltage, 3.95f);
+    ASSERT_TRUE(rows[0].temperature.has_value());
+    EXPECT_FLOAT_EQ(*rows[0].temperature, 18.2f);
+    ASSERT_TRUE(rows[0].relative_humidity.has_value());
+    EXPECT_FLOAT_EQ(*rows[0].relative_humidity, 60.0f);
+}
+
+TEST_F(DatabaseTest, GetRecentTelemetryAndMaxTs) {
+    Database::TelemetryRow r1;
+    r1.device = "dev1";
+    r1.node_num = 0x1111;
+    r1.ts = 500;
+    r1.temperature = 10.0f;
+    db_.insert_telemetry(r1);
+
+    Database::TelemetryRow r2;
+    r2.device = "dev1";
+    r2.node_num = 0x2222;
+    r2.ts = 600;
+    r2.temperature = 12.5f;
+    db_.insert_telemetry(r2);
+
+    EXPECT_EQ(db_.max_telemetry_ts(), 600u);
+
+    auto recent = db_.get_recent_telemetry(0, 10);
+    ASSERT_TRUE(recent.size() >= 2u);
+
+    auto after = db_.get_telemetry_after_ts(550, 10);
+    ASSERT_EQ(after.size(), 1u);
+    EXPECT_EQ(after[0].node_num, 0x2222u);
+}
+
+
 

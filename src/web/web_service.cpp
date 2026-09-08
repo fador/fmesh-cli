@@ -103,6 +103,31 @@ nlohmann::json location_to_json(const Database::LocationRow& r) {
     };
 }
 
+nlohmann::json telemetry_to_json(const Database::TelemetryRow& r) {
+    nlohmann::json j = {
+        {"device", r.device},
+        {"node_num", r.node_num},
+        {"node_id", node_num_to_id(r.node_num)},
+        {"ts", r.ts}
+    };
+    if (r.battery_level) j["battery_level"] = *r.battery_level; else j["battery_level"] = nullptr;
+    if (r.voltage) j["voltage"] = *r.voltage; else j["voltage"] = nullptr;
+    if (r.channel_util) j["channel_util"] = *r.channel_util; else j["channel_util"] = nullptr;
+    if (r.air_util_tx) j["air_util_tx"] = *r.air_util_tx; else j["air_util_tx"] = nullptr;
+    if (r.uptime_seconds) j["uptime_seconds"] = *r.uptime_seconds; else j["uptime_seconds"] = nullptr;
+    if (r.temperature) j["temperature"] = *r.temperature; else j["temperature"] = nullptr;
+    if (r.relative_humidity) j["relative_humidity"] = *r.relative_humidity; else j["relative_humidity"] = nullptr;
+    if (r.barometric_pressure) j["barometric_pressure"] = *r.barometric_pressure; else j["barometric_pressure"] = nullptr;
+    if (r.gas_resistance) j["gas_resistance"] = *r.gas_resistance; else j["gas_resistance"] = nullptr;
+    if (r.iaq) j["iaq"] = *r.iaq; else j["iaq"] = nullptr;
+    if (r.pm25) j["pm25"] = *r.pm25; else j["pm25"] = nullptr;
+    if (r.co2) j["co2"] = *r.co2; else j["co2"] = nullptr;
+    if (r.current) j["current"] = *r.current; else j["current"] = nullptr;
+    if (r.snr) j["snr"] = *r.snr; else j["snr"] = nullptr;
+    if (r.hops_away) j["hops_away"] = *r.hops_away; else j["hops_away"] = nullptr;
+    return j;
+}
+
 nlohmann::json packet_activity_to_json(const PacketActivity& p) {
     nlohmann::json route_arr = nlohmann::json::array();
     for (uint32_t hop : p.route) route_arr.push_back(node_num_to_id(hop));
@@ -411,6 +436,39 @@ void WebService::register_routes() {
         nlohmann::json arr = nlohmann::json::array();
         for (const auto& r : rows) {
             arr.push_back(location_to_json(r));
+        }
+        return HttpResponse::json(200, arr);
+    });
+
+    // GET /api/telemetry
+    server_.get("/api/telemetry", [this](const HttpRequest& req) {
+        std::string node_str = req.get_query("node_num");
+        std::string since_str = req.get_query("since", "0");
+        std::string before_str = req.get_query("before", "0");
+        std::string limit_str = req.get_query("limit", "500");
+
+        uint64_t since_ts = 0;
+        uint64_t before_ts = 0;
+        int limit = 500;
+        try { since_ts = std::stoull(since_str); } catch (...) {}
+        try { before_ts = std::stoull(before_str); } catch (...) {}
+        try { limit = std::stoi(limit_str); } catch (...) {}
+        if (limit > 5000) limit = 5000;
+        if (limit <= 0) limit = 500;
+
+        std::vector<Database::TelemetryRow> rows;
+        if (!node_str.empty()) {
+            uint32_t node_num = 0;
+            if (parse_node_id(node_str, node_num)) {
+                rows = mesh_service_.database().get_node_telemetry(node_num, since_ts, before_ts, limit);
+            }
+        } else {
+            rows = mesh_service_.database().get_recent_telemetry(since_ts, limit);
+        }
+
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& r : rows) {
+            arr.push_back(telemetry_to_json(r));
         }
         return HttpResponse::json(200, arr);
     });

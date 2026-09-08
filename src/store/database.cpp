@@ -72,6 +72,33 @@ CREATE TABLE IF NOT EXISTS location_history(
 );
 CREATE INDEX IF NOT EXISTS idx_location_device_node
     ON location_history(device, node_num, ts);
+CREATE TABLE IF NOT EXISTS telemetry_history(
+    rowid               INTEGER PRIMARY KEY AUTOINCREMENT,
+    device              TEXT NOT NULL,
+    node_num            INTEGER NOT NULL,
+    ts                  INTEGER NOT NULL,
+    battery_level       INTEGER,
+    voltage             REAL,
+    channel_util        REAL,
+    air_util_tx         REAL,
+    uptime_seconds      INTEGER,
+    temperature         REAL,
+    relative_humidity   REAL,
+    barometric_pressure REAL,
+    gas_resistance      REAL,
+    iaq                 INTEGER,
+    pm25                INTEGER,
+    co2                 INTEGER,
+    current             REAL,
+    snr                 REAL,
+    hops_away           INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_telemetry_device_node_ts
+    ON telemetry_history(device, node_num, ts);
+CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts
+    ON telemetry_history(node_num, ts);
+CREATE INDEX IF NOT EXISTS idx_telemetry_ts
+    ON telemetry_history(ts);
 )SQL";
 
 const char* kSelectMessagesPrefix =
@@ -79,11 +106,16 @@ const char* kSelectMessagesPrefix =
     "channel_idx,text,ts,packet_id,ack_state,rx_snr,rx_rssi,hop_start,hop_limit,relay_node "
     "FROM messages ";
 
+const char* kSelectTelemetryPrefix =
+    "SELECT rowid,device,node_num,ts,battery_level,voltage,channel_util,air_util_tx,uptime_seconds,"
+    "temperature,relative_humidity,barometric_pressure,gas_resistance,iaq,pm25,co2,current,snr,hops_away "
+    "FROM telemetry_history ";
+
 StoredMessage read_message_row(sqlite3_stmt* st) {
     StoredMessage m;
     m.rowid = sqlite3_column_int64(st, 0);
     if (auto* p = sqlite3_column_text(st, 1)) m.device = reinterpret_cast<const char*>(p);
-    if (auto* p = sqlite3_column_text(st, 2)) m.window_kind = reinterpret_cast<const char*>(p);
+    m.window_kind = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
     m.window_target = static_cast<uint32_t>(sqlite3_column_int64(st, 3));
     if (auto* p = sqlite3_column_text(st, 4)) m.direction = reinterpret_cast<const char*>(p);
     m.from_node = static_cast<uint32_t>(sqlite3_column_int64(st, 5));
@@ -99,6 +131,30 @@ StoredMessage read_message_row(sqlite3_stmt* st) {
     m.hop_limit = static_cast<uint32_t>(sqlite3_column_int64(st, 15));
     m.relay_node = static_cast<uint32_t>(sqlite3_column_int64(st, 16));
     return m;
+}
+
+Database::TelemetryRow read_telemetry_row(sqlite3_stmt* st) {
+    Database::TelemetryRow r;
+    r.rowid = sqlite3_column_int64(st, 0);
+    if (auto* p = sqlite3_column_text(st, 1)) r.device = reinterpret_cast<const char*>(p);
+    r.node_num = static_cast<uint32_t>(sqlite3_column_int64(st, 2));
+    r.ts = static_cast<uint64_t>(sqlite3_column_int64(st, 3));
+    if (sqlite3_column_type(st, 4) != SQLITE_NULL) r.battery_level = static_cast<uint8_t>(sqlite3_column_int(st, 4));
+    if (sqlite3_column_type(st, 5) != SQLITE_NULL) r.voltage = static_cast<float>(sqlite3_column_double(st, 5));
+    if (sqlite3_column_type(st, 6) != SQLITE_NULL) r.channel_util = static_cast<float>(sqlite3_column_double(st, 6));
+    if (sqlite3_column_type(st, 7) != SQLITE_NULL) r.air_util_tx = static_cast<float>(sqlite3_column_double(st, 7));
+    if (sqlite3_column_type(st, 8) != SQLITE_NULL) r.uptime_seconds = static_cast<uint32_t>(sqlite3_column_int64(st, 8));
+    if (sqlite3_column_type(st, 9) != SQLITE_NULL) r.temperature = static_cast<float>(sqlite3_column_double(st, 9));
+    if (sqlite3_column_type(st, 10) != SQLITE_NULL) r.relative_humidity = static_cast<float>(sqlite3_column_double(st, 10));
+    if (sqlite3_column_type(st, 11) != SQLITE_NULL) r.barometric_pressure = static_cast<float>(sqlite3_column_double(st, 11));
+    if (sqlite3_column_type(st, 12) != SQLITE_NULL) r.gas_resistance = static_cast<float>(sqlite3_column_double(st, 12));
+    if (sqlite3_column_type(st, 13) != SQLITE_NULL) r.iaq = static_cast<uint32_t>(sqlite3_column_int64(st, 13));
+    if (sqlite3_column_type(st, 14) != SQLITE_NULL) r.pm25 = static_cast<uint32_t>(sqlite3_column_int64(st, 14));
+    if (sqlite3_column_type(st, 15) != SQLITE_NULL) r.co2 = static_cast<uint32_t>(sqlite3_column_int64(st, 15));
+    if (sqlite3_column_type(st, 16) != SQLITE_NULL) r.current = static_cast<float>(sqlite3_column_double(st, 16));
+    if (sqlite3_column_type(st, 17) != SQLITE_NULL) r.snr = static_cast<float>(sqlite3_column_double(st, 17));
+    if (sqlite3_column_type(st, 18) != SQLITE_NULL) r.hops_away = static_cast<uint32_t>(sqlite3_column_int64(st, 18));
+    return r;
 }
 
 int null_cb(void*, int, char**, char**) { return 0; }
@@ -136,6 +192,30 @@ bool Database::open(const std::string& path) {
     sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN hop_start INTEGER;", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN hop_limit INTEGER;", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN relay_node INTEGER;", nullptr, nullptr, nullptr);
+    // Migration: ensure telemetry_history exists
+    sqlite3_exec(db_, "CREATE TABLE IF NOT EXISTS telemetry_history("
+                       "rowid INTEGER PRIMARY KEY AUTOINCREMENT,"
+                       "device TEXT NOT NULL,"
+                       "node_num INTEGER NOT NULL,"
+                       "ts INTEGER NOT NULL,"
+                       "battery_level INTEGER,"
+                       "voltage REAL,"
+                       "channel_util REAL,"
+                       "air_util_tx REAL,"
+                       "uptime_seconds INTEGER,"
+                       "temperature REAL,"
+                       "relative_humidity REAL,"
+                       "barometric_pressure REAL,"
+                       "gas_resistance REAL,"
+                       "iaq INTEGER,"
+                       "pm25 INTEGER,"
+                       "co2 INTEGER,"
+                       "current REAL,"
+                       "snr REAL,"
+                       "hops_away INTEGER);", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_telemetry_device_node_ts ON telemetry_history(device, node_num, ts);", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts ON telemetry_history(node_num, ts);", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_history(ts);", nullptr, nullptr, nullptr);
 
     LOG_INFO() << "db opened: " << path;
     return true;
@@ -664,6 +744,184 @@ std::vector<StoredMessage> Database::get_messages_paginated(const WindowKey& w, 
         any_dev.device = "";
         return get_messages_paginated(any_dev, limit, offset);
     }
+    return out;
+}
+
+// --- telemetry history ------------------------------------------------------
+
+bool Database::insert_telemetry(const TelemetryRow& r) {
+    if (!db_) return false;
+
+    // Check if a row already exists for (device, node_num, ts)
+    const char* check_sql = "SELECT rowid, battery_level, voltage, channel_util, air_util_tx, uptime_seconds, "
+                            "temperature, relative_humidity, barometric_pressure, gas_resistance, iaq, pm25, co2, current, snr, hops_away "
+                            "FROM telemetry_history WHERE device=? AND node_num=? AND ts=?";
+    sqlite3_stmt* check_st = nullptr;
+    int64_t existing_rowid = 0;
+    TelemetryRow merged = r;
+    if (sqlite3_prepare_v2(db_, check_sql, -1, &check_st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(check_st, 1, r.device.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(check_st, 2, r.node_num);
+        sqlite3_bind_int64(check_st, 3, r.ts);
+        if (sqlite3_step(check_st) == SQLITE_ROW) {
+            existing_rowid = sqlite3_column_int64(check_st, 0);
+            if (!merged.battery_level.has_value() && sqlite3_column_type(check_st, 1) != SQLITE_NULL)
+                merged.battery_level = static_cast<uint8_t>(sqlite3_column_int(check_st, 1));
+            if (!merged.voltage.has_value() && sqlite3_column_type(check_st, 2) != SQLITE_NULL)
+                merged.voltage = static_cast<float>(sqlite3_column_double(check_st, 2));
+            if (!merged.channel_util.has_value() && sqlite3_column_type(check_st, 3) != SQLITE_NULL)
+                merged.channel_util = static_cast<float>(sqlite3_column_double(check_st, 3));
+            if (!merged.air_util_tx.has_value() && sqlite3_column_type(check_st, 4) != SQLITE_NULL)
+                merged.air_util_tx = static_cast<float>(sqlite3_column_double(check_st, 4));
+            if (!merged.uptime_seconds.has_value() && sqlite3_column_type(check_st, 5) != SQLITE_NULL)
+                merged.uptime_seconds = static_cast<uint32_t>(sqlite3_column_int64(check_st, 5));
+            if (!merged.temperature.has_value() && sqlite3_column_type(check_st, 6) != SQLITE_NULL)
+                merged.temperature = static_cast<float>(sqlite3_column_double(check_st, 6));
+            if (!merged.relative_humidity.has_value() && sqlite3_column_type(check_st, 7) != SQLITE_NULL)
+                merged.relative_humidity = static_cast<float>(sqlite3_column_double(check_st, 7));
+            if (!merged.barometric_pressure.has_value() && sqlite3_column_type(check_st, 8) != SQLITE_NULL)
+                merged.barometric_pressure = static_cast<float>(sqlite3_column_double(check_st, 8));
+            if (!merged.gas_resistance.has_value() && sqlite3_column_type(check_st, 9) != SQLITE_NULL)
+                merged.gas_resistance = static_cast<float>(sqlite3_column_double(check_st, 9));
+            if (!merged.iaq.has_value() && sqlite3_column_type(check_st, 10) != SQLITE_NULL)
+                merged.iaq = static_cast<uint32_t>(sqlite3_column_int64(check_st, 10));
+            if (!merged.pm25.has_value() && sqlite3_column_type(check_st, 11) != SQLITE_NULL)
+                merged.pm25 = static_cast<uint32_t>(sqlite3_column_int64(check_st, 11));
+            if (!merged.co2.has_value() && sqlite3_column_type(check_st, 12) != SQLITE_NULL)
+                merged.co2 = static_cast<uint32_t>(sqlite3_column_int64(check_st, 12));
+            if (!merged.current.has_value() && sqlite3_column_type(check_st, 13) != SQLITE_NULL)
+                merged.current = static_cast<float>(sqlite3_column_double(check_st, 13));
+            if (!merged.snr.has_value() && sqlite3_column_type(check_st, 14) != SQLITE_NULL)
+                merged.snr = static_cast<float>(sqlite3_column_double(check_st, 14));
+            if (!merged.hops_away.has_value() && sqlite3_column_type(check_st, 15) != SQLITE_NULL)
+                merged.hops_away = static_cast<uint32_t>(sqlite3_column_int64(check_st, 15));
+        }
+        sqlite3_finalize(check_st);
+    }
+
+    if (existing_rowid > 0) {
+        const char* sql = "UPDATE telemetry_history SET "
+                          "battery_level=?, voltage=?, channel_util=?, air_util_tx=?, uptime_seconds=?, "
+                          "temperature=?, relative_humidity=?, barometric_pressure=?, gas_resistance=?, "
+                          "iaq=?, pm25=?, co2=?, current=?, snr=?, hops_away=? WHERE rowid=?";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+        int idx = 1;
+        if (merged.battery_level) sqlite3_bind_int(st, idx++, *merged.battery_level); else sqlite3_bind_null(st, idx++);
+        if (merged.voltage) sqlite3_bind_double(st, idx++, *merged.voltage); else sqlite3_bind_null(st, idx++);
+        if (merged.channel_util) sqlite3_bind_double(st, idx++, *merged.channel_util); else sqlite3_bind_null(st, idx++);
+        if (merged.air_util_tx) sqlite3_bind_double(st, idx++, *merged.air_util_tx); else sqlite3_bind_null(st, idx++);
+        if (merged.uptime_seconds) sqlite3_bind_int64(st, idx++, *merged.uptime_seconds); else sqlite3_bind_null(st, idx++);
+        if (merged.temperature) sqlite3_bind_double(st, idx++, *merged.temperature); else sqlite3_bind_null(st, idx++);
+        if (merged.relative_humidity) sqlite3_bind_double(st, idx++, *merged.relative_humidity); else sqlite3_bind_null(st, idx++);
+        if (merged.barometric_pressure) sqlite3_bind_double(st, idx++, *merged.barometric_pressure); else sqlite3_bind_null(st, idx++);
+        if (merged.gas_resistance) sqlite3_bind_double(st, idx++, *merged.gas_resistance); else sqlite3_bind_null(st, idx++);
+        if (merged.iaq) sqlite3_bind_int64(st, idx++, *merged.iaq); else sqlite3_bind_null(st, idx++);
+        if (merged.pm25) sqlite3_bind_int64(st, idx++, *merged.pm25); else sqlite3_bind_null(st, idx++);
+        if (merged.co2) sqlite3_bind_int64(st, idx++, *merged.co2); else sqlite3_bind_null(st, idx++);
+        if (merged.current) sqlite3_bind_double(st, idx++, *merged.current); else sqlite3_bind_null(st, idx++);
+        if (merged.snr) sqlite3_bind_double(st, idx++, *merged.snr); else sqlite3_bind_null(st, idx++);
+        if (merged.hops_away) sqlite3_bind_int64(st, idx++, *merged.hops_away); else sqlite3_bind_null(st, idx++);
+        sqlite3_bind_int64(st, idx++, existing_rowid);
+        sqlite3_step(st);
+        sqlite3_finalize(st);
+        maybe_checkpoint();
+        return true;
+    }
+
+    const char* sql = "INSERT INTO telemetry_history(device,node_num,ts,battery_level,voltage,channel_util,"
+                      "air_util_tx,uptime_seconds,temperature,relative_humidity,barometric_pressure,"
+                      "gas_resistance,iaq,pm25,co2,current,snr,hops_away) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, merged.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, merged.node_num);
+    sqlite3_bind_int64(st, 3, merged.ts);
+    int idx = 4;
+    if (merged.battery_level) sqlite3_bind_int(st, idx++, *merged.battery_level); else sqlite3_bind_null(st, idx++);
+    if (merged.voltage) sqlite3_bind_double(st, idx++, *merged.voltage); else sqlite3_bind_null(st, idx++);
+    if (merged.channel_util) sqlite3_bind_double(st, idx++, *merged.channel_util); else sqlite3_bind_null(st, idx++);
+    if (merged.air_util_tx) sqlite3_bind_double(st, idx++, *merged.air_util_tx); else sqlite3_bind_null(st, idx++);
+    if (merged.uptime_seconds) sqlite3_bind_int64(st, idx++, *merged.uptime_seconds); else sqlite3_bind_null(st, idx++);
+    if (merged.temperature) sqlite3_bind_double(st, idx++, *merged.temperature); else sqlite3_bind_null(st, idx++);
+    if (merged.relative_humidity) sqlite3_bind_double(st, idx++, *merged.relative_humidity); else sqlite3_bind_null(st, idx++);
+    if (merged.barometric_pressure) sqlite3_bind_double(st, idx++, *merged.barometric_pressure); else sqlite3_bind_null(st, idx++);
+    if (merged.gas_resistance) sqlite3_bind_double(st, idx++, *merged.gas_resistance); else sqlite3_bind_null(st, idx++);
+    if (merged.iaq) sqlite3_bind_int64(st, idx++, *merged.iaq); else sqlite3_bind_null(st, idx++);
+    if (merged.pm25) sqlite3_bind_int64(st, idx++, *merged.pm25); else sqlite3_bind_null(st, idx++);
+    if (merged.co2) sqlite3_bind_int64(st, idx++, *merged.co2); else sqlite3_bind_null(st, idx++);
+    if (merged.current) sqlite3_bind_double(st, idx++, *merged.current); else sqlite3_bind_null(st, idx++);
+    if (merged.snr) sqlite3_bind_double(st, idx++, *merged.snr); else sqlite3_bind_null(st, idx++);
+    if (merged.hops_away) sqlite3_bind_int64(st, idx++, *merged.hops_away); else sqlite3_bind_null(st, idx++);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    maybe_checkpoint();
+    return true;
+}
+
+uint64_t Database::max_telemetry_ts() {
+    if (!db_) return 0;
+    const char* sql = "SELECT MAX(ts) FROM telemetry_history";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+    uint64_t ret = 0;
+    if (sqlite3_step(st) == SQLITE_ROW) {
+        ret = static_cast<uint64_t>(sqlite3_column_int64(st, 0));
+    }
+    sqlite3_finalize(st);
+    return ret;
+}
+
+std::vector<Database::TelemetryRow> Database::get_telemetry_after_ts(uint64_t ts, int limit) {
+    std::vector<TelemetryRow> out;
+    if (!db_) return out;
+    std::string sql = std::string(kSelectTelemetryPrefix) + "WHERE ts > ? ORDER BY ts ASC LIMIT ?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_int64(st, 1, ts);
+    sqlite3_bind_int(st, 2, limit);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        out.push_back(read_telemetry_row(st));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::vector<Database::TelemetryRow> Database::get_node_telemetry(uint32_t node_num, uint64_t since_ts, uint64_t before_ts, int limit) {
+    std::vector<TelemetryRow> out;
+    if (!db_) return out;
+    std::string sql = std::string(kSelectTelemetryPrefix) +
+                      "WHERE node_num = ? AND ts >= ? " +
+                      (before_ts > 0 ? "AND ts <= ? " : "") +
+                      "ORDER BY ts ASC LIMIT ?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
+    int idx = 1;
+    sqlite3_bind_int64(st, idx++, node_num);
+    sqlite3_bind_int64(st, idx++, since_ts);
+    if (before_ts > 0) sqlite3_bind_int64(st, idx++, before_ts);
+    sqlite3_bind_int(st, idx++, limit);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        out.push_back(read_telemetry_row(st));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::vector<Database::TelemetryRow> Database::get_recent_telemetry(uint64_t since_ts, int limit) {
+    std::vector<TelemetryRow> out;
+    if (!db_) return out;
+    std::string sql = std::string(kSelectTelemetryPrefix) +
+                      "WHERE ts >= ? ORDER BY ts ASC LIMIT ?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_int64(st, 1, since_ts);
+    sqlite3_bind_int(st, 2, limit);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        out.push_back(read_telemetry_row(st));
+    }
+    sqlite3_finalize(st);
     return out;
 }
 
