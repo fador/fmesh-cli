@@ -53,10 +53,31 @@ if(NOT Protobuf_FOUND)
 endif()
 
 set(PROTO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/protobufs")
+
+# Ensure third_party/protobufs submodule is populated
+if(NOT EXISTS "${PROTO_ROOT}/meshtastic/mesh.proto")
+    find_package(Git QUIET)
+    if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+        message(STATUS "Meshtastic protobufs not found in ${PROTO_ROOT}, initializing git submodule...")
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            RESULT_VARIABLE GIT_SUBMOD_RESULT
+        )
+        if(NOT GIT_SUBMOD_RESULT EQUAL 0)
+            message(WARNING "git submodule update --init --recursive failed with exit code ${GIT_SUBMOD_RESULT}")
+        endif()
+    endif()
+endif()
+
 file(GLOB MESHTASTIC_PROTOS "${PROTO_ROOT}/meshtastic/*.proto")
 # nanopb.proto lives at the repo root and is imported by deviceonly.proto.
 file(GLOB ROOT_PROTOS "${PROTO_ROOT}/nanopb.proto")
 set(ALL_PROTOS ${MESHTASTIC_PROTOS} ${ROOT_PROTOS})
+
+if(NOT ALL_PROTOS)
+    message(FATAL_ERROR "No protobuf files found in ${PROTO_ROOT}. Please initialize git submodules by running: git submodule update --init --recursive")
+endif()
 
 set(GENERATED_PROTO_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY ${GENERATED_PROTO_DIR})
