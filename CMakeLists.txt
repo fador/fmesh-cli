@@ -76,19 +76,52 @@ foreach(PROTO_FILE ${ALL_PROTOS})
     list(APPEND GENERATED_PROTO_HDRS "${OUT_DIR}/${PROTO_NAME}.pb.h")
 endforeach()
 
-# Generate all protos in one protoc invocation (handles cross-imports).
-add_custom_command(
-    OUTPUT ${GENERATED_PROTO_SRCS} ${GENERATED_PROTO_HDRS}
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${GENERATED_PROTO_DIR}/meshtastic"
-    COMMAND ${Protobuf_PROTOC_EXECUTABLE}
-        --proto_path=${PROTO_ROOT}
-        --proto_path=${protobuf_SOURCE_DIR}/src
-        --cpp_out=${GENERATED_PROTO_DIR}
-        ${ALL_PROTOS}
-    DEPENDS ${ALL_PROTOS}
-    COMMENT "Generating meshtastic protobuf C++ sources"
-    VERBATIM
+# Locate protoc executable for configure-time generation
+if(NOT PROTOC_EXECUTABLE)
+    if(Protobuf_PROTOC_EXECUTABLE AND EXISTS "${Protobuf_PROTOC_EXECUTABLE}")
+        set(PROTOC_EXECUTABLE "${Protobuf_PROTOC_EXECUTABLE}")
+    elseif(PROTOBUF_PROTOC_EXECUTABLE AND EXISTS "${PROTOBUF_PROTOC_EXECUTABLE}")
+        set(PROTOC_EXECUTABLE "${PROTOBUF_PROTOC_EXECUTABLE}")
+    else()
+        find_program(PROTOC_EXECUTABLE NAMES protoc
+            HINTS
+                "${CMAKE_CURRENT_BINARY_DIR}/_deps/protobuf-build/Debug"
+                "${CMAKE_CURRENT_BINARY_DIR}/_deps/protobuf-build/Release"
+                "${CMAKE_CURRENT_BINARY_DIR}/_deps/protobuf-build"
+        )
+    endif()
+endif()
+
+file(MAKE_DIRECTORY "${GENERATED_PROTO_DIR}/meshtastic")
+
+set(PROTOC_ARGS
+    "--proto_path=${PROTO_ROOT}"
+    "--cpp_out=${GENERATED_PROTO_DIR}"
 )
+if(protobuf_SOURCE_DIR)
+    list(APPEND PROTOC_ARGS "--proto_path=${protobuf_SOURCE_DIR}/src")
+endif()
+
+if(PROTOC_EXECUTABLE)
+    message(STATUS "Generating meshtastic protobuf C++ sources via execute_process...")
+    execute_process(
+        COMMAND "${PROTOC_EXECUTABLE}"
+            ${PROTOC_ARGS}
+            ${ALL_PROTOS}
+        RESULT_VARIABLE PROTOC_RESULT
+        ERROR_VARIABLE PROTOC_ERR
+    )
+    if(NOT PROTOC_RESULT EQUAL 0)
+        message(WARNING "protoc execution returned ${PROTOC_RESULT}: ${PROTOC_ERR}")
+    endif()
+else()
+    message(STATUS "protoc not available at configure time; using existing generated protobufs if present")
+endif()
+
+# Re-run configure if any proto definition changes
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${ALL_PROTOS})
+
+set_source_files_properties(${GENERATED_PROTO_SRCS} ${GENERATED_PROTO_HDRS} PROPERTIES GENERATED TRUE)
 
 add_library(meshtastic_protos STATIC ${GENERATED_PROTO_SRCS} ${GENERATED_PROTO_HDRS})
 target_include_directories(meshtastic_protos PUBLIC ${GENERATED_PROTO_DIR} ${Protobuf_INCLUDE_DIRS})
