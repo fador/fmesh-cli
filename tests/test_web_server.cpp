@@ -555,5 +555,88 @@ TEST(WebService, StatsApi) {
     web.stop();
 }
 
+TEST(WebService, ConfigApiAndDeviceConsolidation) {
+    meshcli::MeshService service;
+    service.open_database(":memory:");
+
+    std::string mac = "AA:BB:CC:DD:EE:FF";
+    std::string bluez_alias = "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF";
+
+    auto rt = std::make_shared<meshcli::DeviceRuntime>();
+    rt->id = mac;
+    rt->spec.address = mac;
+    rt->spec.name = "Heltec V3";
+    rt->display_name = "Heltec V3 (AA:BB:CC:DD:EE:FF)";
+    rt->aliases.push_back(bluez_alias);
+    rt->aliases.push_back("Heltec V3");
+    rt->my_node_num = 0x12345678;
+    rt->db = std::make_unique<meshcli::NodeDb>();
+
+    {
+        std::lock_guard<std::mutex> lock(service.devices_mu_for_test());
+        service.devices_for_test()[mac] = rt;
+    }
+
+    // Pre-populate some config in SQLite
+    service.database().upsert_device_config(mac, "lora", "region", "EU_868");
+    service.database().upsert_device_config(mac, "lora", "hop_limit", "3");
+    service.database().upsert_device_config(mac, "device", "role", "ROUTER");
+
+    meshcli::WebService web(service);
+    EXPECT_TRUE(web.start("127.0.0.1", 0, ""));
+    int port = web.bound_port();
+
+    // 1. GET /api/devices: should only return 1 unified device
+    std::string dev_req = "GET /api/devices HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string dev_res = http_client_request(port, dev_req);
+    EXPECT_NE(dev_res.find("200 OK"), std::string::npos);
+    EXPECT_NE(dev_res.find("AA:BB:CC:DD:EE:FF"), std::string::npos);
+    EXPECT_EQ(dev_res.find("/org/bluez"), std::string::npos); // Bluez internal path not leaked as device
+
+    // 2. GET /api/config using bluez alias: should resolve and return structured sections
+    std::string cfg_req = "GET /api/config?device=" + bluez_alias + " HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+    std::string cfg_res = http_client_request(port, cfg_req);
+    EXPECT_NE(cfg_res.find("200 OK"), std::string::npos);
+    EXPECT_NE(cfg_res.find("\"sections\""), std::string::npos);
+    EXPECT_NE(cfg_res.find("\"lora\""), std::string::npos);
+    EXPECT_NE(cfg_res.find("\"EU_868\""), std::string::npos);
+    EXPECT_NE(cfg_res.find("\"ROUTER\""), std::string::npos);
+
+    // 3. POST /api/config: update single setting
+    std::string post_body1 = "{\"device\":\"" + mac + "\",\"key\":\"lora.hop_limit\",\"value\":\"5\"}";
+    std::string post_req1 = "POST /api/config HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                           std::to_string(post_body1.size()) + "\r\n\r\n" + post_body1;
+    std::string post_res1 = http_client_request(port, post_req1);
+    EXPECT_NE(post_res1.find("200 OK"), std::string::npos);
+
+    // Verify persisted
+    auto lines_after = service.database().load_device_config(mac);
+    bool found_hop5 = false;
+    for (const auto& l : lines_after) {
+        if (l.section == "lora" && l.key == "hop_limit" && l.value == "5") found_hop5 = true;
+    }
+    EXPECT_TRUE(found_hop5);
+
+    // 4. POST /api/config: batch update via settings object
+    std::string post_body2 = "{\"device\":\"" + bluez_alias + "\",\"settings\":{\"lora.tx_power\":\"22\",\"device.role\":\"CLIENT\"}}";
+    std::string post_req2 = "POST /api/config HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: " +
+                           std::to_string(post_body2.size()) + "\r\n\r\n" + post_body2;
+    std::string post_res2 = http_client_request(port, post_req2);
+    EXPECT_NE(post_res2.find("200 OK"), std::string::npos);
+
+    // Verify batch persisted
+    auto lines_batch = service.database().load_device_config(mac);
+    bool found_tx22 = false, found_client = false;
+    for (const auto& l : lines_batch) {
+        if (l.key == "tx_power" && l.value == "22") found_tx22 = true;
+        if (l.key == "role" && l.value == "CLIENT") found_client = true;
+    }
+    EXPECT_TRUE(found_tx22);
+    EXPECT_TRUE(found_client);
+
+    web.stop();
+}
+
+
 
 

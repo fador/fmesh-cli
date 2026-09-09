@@ -139,6 +139,33 @@ TEST_F(DatabaseTest, UpsertChannelUpdatesExisting) {
     EXPECT_EQ(ndb.channels().size(), 1u);
 }
 
+TEST_F(DatabaseTest, DeviceConfigPersistence) {
+    db_.upsert_device_config("dev1", "lora", "lora.tx_power", "27");
+    db_.upsert_device_config("dev1", "lora", "lora.use_preset", "true");
+    db_.upsert_device_config("dev1", "device", "device.role", "ROUTER");
+
+    auto items = db_.load_device_config("dev1");
+    ASSERT_EQ(items.size(), 3u);
+
+    // Update existing
+    db_.upsert_device_config("dev1", "lora", "lora.tx_power", "20");
+    auto items2 = db_.load_device_config("dev1");
+    ASSERT_EQ(items2.size(), 3u);
+
+    bool found = false;
+    for (const auto& it : items2) {
+        if (it.key == "lora.tx_power") {
+            EXPECT_EQ(it.value, "20");
+            found = true;
+        }
+    }
+    EXPECT_TRUE(found);
+
+    // Empty for other device
+    auto empty_items = db_.load_device_config("dev2");
+    EXPECT_TRUE(empty_items.empty());
+}
+
 TEST_F(DatabaseTest, MultipleChannels) {
     for (uint32_t i = 0; i < 8; ++i) {
         Channel c{i, "ch" + std::to_string(i),

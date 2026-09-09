@@ -113,6 +113,15 @@ public:
     std::vector<WindowKey> get_all_windows(const std::string& device);
     [[nodiscard]] std::optional<Node> get_node_any_device(uint32_t node_num);
 
+    // --- device configuration persistence --------------------------------
+    struct DeviceConfigItem {
+        std::string section;
+        std::string key;
+        std::string value;
+    };
+    void upsert_device_config(const std::string& device, const std::string& section, const std::string& key, const std::string& value);
+    std::vector<DeviceConfigItem> load_device_config(const std::string& device);
+
     // --- messages ---------------------------------------------------------
     int64_t insert_message(const StoredMessage& m);
     void update_ack_state(int64_t rowid, const std::string& ack_state);

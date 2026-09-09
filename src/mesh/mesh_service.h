@@ -30,6 +30,7 @@ struct VirtualDevice {
 };
 
 struct DeviceRuntime {
+    std::string id;
     BleDeviceSpec spec;             // stored for reconnection
     std::unique_ptr<BleClient> client;       // BLE transport
     std::unique_ptr<class StreamClient> stream; // TCP/serial transport
@@ -44,10 +45,15 @@ struct DeviceRuntime {
     std::vector<std::string> config_lines;   // from /config decoding
     std::string raw_config;
     std::string raw_module_config;
+    std::map<std::string, std::string> raw_configs;        // section_name -> bytes
+    std::map<std::string, std::string> raw_module_configs; // module_name -> bytes
+    std::vector<std::string> aliases;
     std::vector<EvRawPacket> raw_packets;    // last N raw FromRadio packets
     static constexpr size_t kMaxRawPackets = 200;
     // pending outbound messages awaiting ack, keyed by packet_id -> db rowid
     std::map<uint32_t, int64_t> pending_acks;
+
+    bool matches_identifier(const std::string& query) const;
 };
 
 // Owns the BLE connections to one or more Meshtastic devices, runs the
@@ -121,6 +127,8 @@ public:
     [[nodiscard]] std::vector<std::string> config_lines_for(const std::string& device_id) const;
     [[nodiscard]] std::vector<EvRawPacket> raw_packets_for(const std::string& device_id) const;
     [[nodiscard]] bool is_my_node(uint32_t node_num) const;
+    [[nodiscard]] std::shared_ptr<DeviceRuntime> find_device_runtime(const std::string& device_id) const;
+    [[nodiscard]] std::string canonical_id_for(const std::string& device_id) const;
     [[nodiscard]] Database& database() { return db_; }
     [[nodiscard]] bool has_devices() const { return !devices_.empty(); }
 
@@ -153,6 +161,7 @@ private:
     mutable std::mutex devices_mu_;
     std::map<std::string, std::shared_ptr<DeviceRuntime>> devices_;
     std::map<std::string, std::unique_ptr<NodeDb>> offline_dbs_;
+    std::map<std::string, std::string> offline_device_names_;
     std::map<std::string, VirtualDevice> virtual_devices_;
 
 #ifdef ENABLE_MESH_NET

@@ -11,6 +11,12 @@
 #include "util/log.h"
 #include "util/compression.h"
 
+#include <meshtastic/config.pb.h>
+#include <meshtastic/module_config.pb.h>
+#include <meshtastic/admin.pb.h>
+
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <sstream>
 
@@ -25,7 +31,88 @@ namespace {
             port = static_cast<uint16_t>(std::stoul(tcp_host.substr(colon + 1)));
         return {host, port};
     }
+
+    std::string normalize_device_identifier(const std::string& raw) {
+        if (raw.empty()) return {};
+        // If it's a BlueZ D-Bus path: /org/bluez/hci0/dev_EB_DE_DD_22_98_5D
+        auto pos = raw.rfind("/dev_");
+        if (pos != std::string::npos) {
+            std::string s = raw.substr(pos + 5);
+            std::string mac;
+            for (char c : s) {
+                if (c == '_') mac += ':';
+                else mac += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            }
+            return mac;
+        }
+        // If it's dev_XX_XX_XX_XX_XX_XX
+        if (raw.rfind("dev_", 0) == 0 && raw.size() == 21) {
+            std::string s = raw.substr(4);
+            std::string mac;
+            for (char c : s) {
+                if (c == '_') mac += ':';
+                else mac += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            }
+            return mac;
+        }
+        // If it's a MAC address like eb:de:dd:22:98:5d or eb-de-dd-22-98-5d or EB_DE_DD_22_98_5D
+        bool is_mac = true;
+        int colons = 0;
+        std::string norm_mac;
+        for (char c : raw) {
+            if (c == ':' || c == '-' || c == '_') {
+                norm_mac += ':';
+                colons++;
+            } else if (std::isxdigit(static_cast<unsigned char>(c))) {
+                norm_mac += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            } else {
+                is_mac = false;
+                break;
+            }
+        }
+        if (is_mac && colons == 5 && norm_mac.size() == 17) {
+            return norm_mac;
+        }
+        return raw;
+    }
 } // namespace
+
+bool DeviceRuntime::matches_identifier(const std::string& query) const {
+    if (query.empty()) return false;
+    if (id == query) return true;
+    if (!spec.address.empty() && spec.address == query) return true;
+    if (!spec.name.empty() && spec.name == query) return true;
+    if (!display_name.empty() && display_name == query) return true;
+    if (!my_long_name.empty() && my_long_name == query) return true;
+    if (!my_short_name.empty() && my_short_name == query) return true;
+    if (my_node_num != 0 && node_num_to_id(my_node_num) == query) return true;
+
+    for (const auto& a : aliases) {
+        if (a == query) return true;
+    }
+
+    std::string norm_q = normalize_device_identifier(query);
+    if (!norm_q.empty()) {
+        if (normalize_device_identifier(id) == norm_q) return true;
+        if (!spec.address.empty() && normalize_device_identifier(spec.address) == norm_q) return true;
+        for (const auto& a : aliases) {
+            if (normalize_device_identifier(a) == norm_q) return true;
+        }
+    }
+
+    auto eq_ci = [](const std::string& a, const std::string& b) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (std::tolower(static_cast<unsigned char>(a[i])) !=
+                std::tolower(static_cast<unsigned char>(b[i]))) return false;
+        }
+        return true;
+    };
+    if (!spec.name.empty() && eq_ci(spec.name, query)) return true;
+    if (!display_name.empty() && eq_ci(display_name, query)) return true;
+
+    return false;
+}
 
 bool MeshService::is_duplicate(uint32_t from_node, uint32_t packet_id) {
     if (packet_id == 0) return false;
@@ -134,11 +221,22 @@ std::string MeshService::connect_device(const BleDeviceSpec& spec, bool pair) {
     }
 
     std::lock_guard<std::mutex> lock(devices_mu_);
+    rt->id = id;
+    if (!spec.address.empty()) {
+        std::string nmac = normalize_device_identifier(spec.address);
+        if (!nmac.empty() && nmac != id) rt->aliases.push_back(nmac);
+        if (spec.address != id) rt->aliases.push_back(spec.address);
+    }
+    if (!spec.name.empty() && spec.name != id) rt->aliases.push_back(spec.name);
     devices_[id] = rt;
     // Preload cached nodes/channels from the DB (if this device was seen
     // before). The live handshake will refresh them.
     db_.load_nodes(id, *rt->db);
     db_.load_channels(id, *rt->db);
+    for (const auto& a : rt->aliases) {
+        db_.load_nodes(a, *rt->db);
+        db_.load_channels(a, *rt->db);
+    }
     return id;
 }
 
@@ -450,41 +548,127 @@ uint32_t MeshService::send_traceroute(const std::string& device_id,
     return pid;
 }
 
-bool MeshService::set_config(const std::string& device_id, const std::string& key, const std::string& value) {
+std::shared_ptr<DeviceRuntime> MeshService::find_device_runtime(const std::string& device_id) const {
     std::lock_guard<std::mutex> lock(devices_mu_);
-    
+    if (device_id.empty()) {
+        if (!devices_.empty()) return devices_.begin()->second;
+        return nullptr;
+    }
+    // 1. Exact key match
+    auto it = devices_.find(device_id);
+    if (it != devices_.end()) return it->second;
+
+    // 2. Normalized key match
+    std::string norm = normalize_device_identifier(device_id);
+    if (!norm.empty() && norm != device_id) {
+        auto it2 = devices_.find(norm);
+        if (it2 != devices_.end()) return it2->second;
+    }
+
+    // 3. Match through matches_identifier
+    for (const auto& [_, rt] : devices_) {
+        if (rt && (rt->matches_identifier(device_id) || (!norm.empty() && rt->matches_identifier(norm)))) {
+            return rt;
+        }
+    }
+    return nullptr;
+}
+
+std::string MeshService::canonical_id_for(const std::string& device_id) const {
+    auto rt = find_device_runtime(device_id);
+    if (rt) {
+        if (!rt->id.empty()) return rt->id;
+        if (!rt->spec.address.empty()) return normalize_device_identifier(rt->spec.address);
+    }
+    std::string norm = normalize_device_identifier(device_id);
+    return norm.empty() ? device_id : norm;
+}
+
+bool MeshService::set_config(const std::string& device_id, const std::string& key, const std::string& value) {
+    auto dot = key.find('.');
+    if (dot == std::string::npos) return false;
+    std::string section_name = key.substr(0, dot);
+    if (section_name == "ext_notif") section_name = "external_notification";
+    if (section_name == "canned_messages") section_name = "canned_message";
+
     // First, check virtual nodes
-    auto vit = virtual_devices_.find(device_id);
-    if (vit != virtual_devices_.end()) {
-        auto rt = devices_.find(vit->second.stream_id);
-        if (rt == devices_.end()) return false;
-        
-        bool is_module = false;
-        std::string modified_bytes;
-        if (!MeshCodec::set_config_value(rt->second->raw_config, rt->second->raw_module_config, key, value, is_module, modified_bytes)) {
-            return false;
+    {
+        std::lock_guard<std::mutex> lock(devices_mu_);
+        auto vit = virtual_devices_.find(device_id);
+        if (vit != virtual_devices_.end()) {
+            auto rt_it = devices_.find(vit->second.stream_id);
+            if (rt_it == devices_.end()) return false;
+            auto rt = rt_it->second;
+
+            bool is_module = false;
+            std::string modified_bytes;
+            std::string base_cfg = rt->raw_configs[section_name];
+            std::string base_mod = rt->raw_module_configs[section_name];
+            if (!MeshCodec::set_config_value(base_cfg, base_mod, key, value, is_module, modified_bytes)) {
+                return false;
+            }
+            if (is_module) {
+                rt->raw_module_configs[section_name] = modified_bytes;
+                rt->raw_module_config = modified_bytes;
+            } else {
+                rt->raw_configs[section_name] = modified_bytes;
+                rt->raw_config = modified_bytes;
+            }
+
+            uint32_t pid = next_packet_id();
+            auto admin_pkt = MeshCodec::encode_admin_packet(rt->my_node_num, vit->second.node_num, modified_bytes, is_module, pid);
+            if (sync_manager_) {
+                sync_manager_->send_raw_to_device(device_id, admin_pkt);
+            }
+            return true;
         }
-        
-        auto admin_pkt = MeshCodec::encode_admin_packet(rt->second->my_node_num, vit->second.node_num, modified_bytes, is_module);
-        if (sync_manager_) {
-            sync_manager_->send_raw_to_device(device_id, admin_pkt);
-        }
-        return true;
     }
     
-    // Check local nodes
-    auto it = devices_.find(device_id);
-    if (it == devices_.end()) return false;
-    
-    auto rt = it->second.get();
+    // Check local devices with alias resolution
+    auto rt = find_device_runtime(device_id);
+    if (!rt) return false;
     
     bool is_module = false;
     std::string modified_bytes;
-    if (!MeshCodec::set_config_value(rt->raw_config, rt->raw_module_config, key, value, is_module, modified_bytes)) {
+    std::string base_cfg = rt->raw_configs[section_name];
+    std::string base_mod = rt->raw_module_configs[section_name];
+    
+    if (!MeshCodec::set_config_value(base_cfg, base_mod, key, value, is_module, modified_bytes)) {
         return false;
     }
     
-    auto admin_pkt = MeshCodec::encode_admin_packet(rt->my_node_num, rt->my_node_num, modified_bytes, is_module);
+    if (is_module) {
+        rt->raw_module_configs[section_name] = modified_bytes;
+        rt->raw_module_config = modified_bytes;
+    } else {
+        rt->raw_configs[section_name] = modified_bytes;
+        rt->raw_config = modified_bytes;
+    }
+
+    // Persist to database
+    std::string canonical_dev = rt->id.empty() ? (!rt->spec.address.empty() ? rt->spec.address : device_id) : rt->id;
+    std::string field_key = key;
+    if (field_key.rfind(section_name + ".", 0) == 0) {
+        field_key = field_key.substr(section_name.size() + 1);
+    }
+    db_.upsert_device_config(canonical_dev, section_name, field_key, value);
+
+    // Re-build config_lines
+    std::vector<std::string> all_lines;
+    for (const auto& [sec, bytes] : rt->raw_configs) {
+        auto dec = MeshCodec::decode_config_lines(bytes, false);
+        for (const auto& l : dec) all_lines.push_back(l);
+    }
+    for (const auto& [sec, bytes] : rt->raw_module_configs) {
+        auto dec = MeshCodec::decode_config_lines(bytes, true);
+        for (const auto& l : dec) all_lines.push_back(l);
+    }
+    if (!all_lines.empty()) {
+        rt->config_lines = std::move(all_lines);
+    }
+    
+    uint32_t pid = next_packet_id();
+    auto admin_pkt = MeshCodec::encode_admin_packet(rt->my_node_num, rt->my_node_num, modified_bytes, is_module, pid);
     
     if (rt->client) {
         rt->client->send_to_radio(admin_pkt);
@@ -498,25 +682,76 @@ bool MeshService::set_config(const std::string& device_id, const std::string& ke
 void MeshService::load_offline_history() {
     auto devs = db_.get_all_devices();
     std::lock_guard<std::mutex> lock(devices_mu_);
-    for (const auto& d : devs) {
-        if (d.empty()) continue;
-        if (devices_.find(d) == devices_.end() && offline_dbs_.find(d) == offline_dbs_.end()) {
-            auto ndb = std::make_unique<NodeDb>();
-            db_.load_nodes(d, *ndb);
-            db_.load_channels(d, *ndb);
-            offline_dbs_[d] = std::move(ndb);
-            LOG_INFO() << "loaded offline history for device " << d;
+    for (const auto& raw_d : devs) {
+        if (raw_d.empty()) continue;
+        std::string d = normalize_device_identifier(raw_d);
+        if (d.empty()) d = raw_d;
+
+        // Check if raw_d or d matches any active device
+        bool matches_live = false;
+        for (auto& [_, rt] : devices_) {
+            if (rt && (rt->matches_identifier(d) || rt->matches_identifier(raw_d))) {
+                if (std::find(rt->aliases.begin(), rt->aliases.end(), raw_d) == rt->aliases.end())
+                    rt->aliases.push_back(raw_d);
+                if (d != raw_d && std::find(rt->aliases.begin(), rt->aliases.end(), d) == rt->aliases.end())
+                    rt->aliases.push_back(d);
+                matches_live = true;
+                break;
+            }
         }
+        if (matches_live) continue;
+
+        // Check if matches an already loaded offline DB
+        bool matches_offline = false;
+        for (const auto& [off_id, _] : offline_dbs_) {
+            if (off_id == d || normalize_device_identifier(off_id) == d || off_id == raw_d) {
+                matches_offline = true;
+                break;
+            }
+        }
+        if (matches_offline) continue;
+
+        auto ndb = std::make_unique<NodeDb>();
+        db_.load_nodes(raw_d, *ndb);
+        if (d != raw_d) db_.load_nodes(d, *ndb);
+        db_.load_channels(raw_d, *ndb);
+        if (d != raw_d) db_.load_channels(d, *ndb);
+
+        std::string disp_name;
+        if (ndb->my_node_num() != 0) {
+            auto myn = ndb->get(ndb->my_node_num());
+            if (myn) {
+                if (!myn->long_name.empty()) disp_name = myn->long_name;
+                else if (!myn->short_name.empty()) disp_name = myn->short_name;
+            }
+        }
+        if (disp_name.empty() && raw_d.find("/org/bluez/") == std::string::npos) {
+            disp_name = raw_d;
+        }
+        if (!disp_name.empty()) {
+            offline_device_names_[d] = disp_name;
+        }
+
+        offline_dbs_[d] = std::move(ndb);
+        LOG_INFO() << "loaded offline history for unified device " << d;
     }
 }
 
 std::vector<std::string> MeshService::device_ids() const {
     std::vector<std::string> out;
     std::lock_guard<std::mutex> lock(devices_mu_);
-    out.reserve(devices_.size() + offline_dbs_.size());
+    out.reserve(devices_.size() + offline_dbs_.size() + virtual_devices_.size());
     for (const auto& [id, _] : devices_) out.push_back(id);
     for (const auto& [id, _] : offline_dbs_) {
-        if (!id.empty() && devices_.find(id) == devices_.end()) out.push_back(id);
+        if (id.empty()) continue;
+        bool covered = false;
+        for (const auto& [_, rt] : devices_) {
+            if (rt && (rt->matches_identifier(id) || normalize_device_identifier(id) == normalize_device_identifier(rt->id))) {
+                covered = true;
+                break;
+            }
+        }
+        if (!covered) out.push_back(id);
     }
     for (const auto& [id, _] : virtual_devices_) {
         out.push_back(id);
@@ -533,8 +768,19 @@ const NodeDb* MeshService::db_for(const std::string& device_id) const {
     if (!device_id.empty()) {
         auto it = devices_.find(device_id);
         if (it != devices_.end()) return it->second->db.get();
+
+        for (const auto& [_, rt] : devices_) {
+            if (rt && rt->matches_identifier(device_id)) return rt->db.get();
+        }
+
         auto it2 = offline_dbs_.find(device_id);
         if (it2 != offline_dbs_.end()) return it2->second.get();
+
+        std::string norm = normalize_device_identifier(device_id);
+        if (!norm.empty() && norm != device_id) {
+            auto it3 = offline_dbs_.find(norm);
+            if (it3 != offline_dbs_.end()) return it3->second.get();
+        }
     }
     // If device_id is empty or not found, check if there's only 1 active or offline device
     if (devices_.size() == 1) return devices_.begin()->second->db.get();
@@ -569,34 +815,64 @@ std::optional<Node> MeshService::find_node(uint32_t node_num) const {
 }
 
 std::string MeshService::firmware_for(const std::string& device_id) const {
-    std::lock_guard<std::mutex> lock(devices_mu_);
-    auto it = devices_.find(device_id);
-    if (it == devices_.end()) return {};
-    return it->second->firmware_version;
+    auto rt = find_device_runtime(device_id);
+    return rt ? rt->firmware_version : std::string{};
 }
 
 std::string MeshService::hw_model_for(const std::string& device_id) const {
-    std::lock_guard<std::mutex> lock(devices_mu_);
-    auto it = devices_.find(device_id);
-    if (it == devices_.end()) return {};
-    return it->second->hw_model;
+    auto rt = find_device_runtime(device_id);
+    return rt ? rt->hw_model : std::string{};
 }
 
 std::string MeshService::display_name_for(const std::string& device_id) const {
+    if (device_id.empty() || device_id == "*") {
+        return {};
+    }
     if (device_id.find("virtual:") == 0) {
         return "Virtual " + virtual_original_for(device_id);
     }
     std::lock_guard<std::mutex> lock(devices_mu_);
     auto it = devices_.find(device_id);
-    if (it == devices_.end()) return {};
-    return it->second->display_name;
+    if (it != devices_.end()) {
+        if (!it->second->display_name.empty()) return it->second->display_name;
+        if (!it->second->my_long_name.empty()) return it->second->my_long_name;
+        if (!it->second->spec.name.empty()) return it->second->spec.name;
+        return it->first;
+    }
+    for (const auto& [_, rt] : devices_) {
+        if (rt && rt->matches_identifier(device_id)) {
+            if (!rt->display_name.empty()) return rt->display_name;
+            if (!rt->my_long_name.empty()) return rt->my_long_name;
+            if (!rt->spec.name.empty()) return rt->spec.name;
+            return rt->id;
+        }
+    }
+    auto it2 = offline_dbs_.find(device_id);
+    if (it2 != offline_dbs_.end() && it2->second) {
+        auto nit = offline_device_names_.find(device_id);
+        if (nit != offline_device_names_.end() && !nit->second.empty()) return nit->second;
+        return it2->first;
+    }
+    std::string norm = normalize_device_identifier(device_id);
+    if (!norm.empty() && norm != device_id) {
+        auto it3 = offline_dbs_.find(norm);
+        if (it3 != offline_dbs_.end() && it3->second) {
+            auto nit = offline_device_names_.find(norm);
+            if (nit != offline_device_names_.end() && !nit->second.empty()) return nit->second;
+            return it3->first;
+        }
+    }
+    return {};
 }
 
 BleDeviceSpec MeshService::spec_for(const std::string& device_id) const {
     std::lock_guard<std::mutex> lock(devices_mu_);
     auto it = devices_.find(device_id);
-    if (it == devices_.end()) return {};
-    return it->second->spec;
+    if (it != devices_.end()) return it->second->spec;
+    for (const auto& [_, rt] : devices_) {
+        if (rt && rt->matches_identifier(device_id)) return rt->spec;
+    }
+    return {};
 }
 
 std::string MeshService::virtual_stream_for(const std::string& device_id) const {
@@ -640,16 +916,39 @@ void MeshService::send_raw_to_physical(const std::string& target_original_id, co
     }
     if (rt) {
         if (rt->client && rt->client->is_connected()) rt->client->send_to_radio(bytes);
-        // If it's a physical device connected via a local stream? Well, local stream acts like a client.
         if (rt->stream && rt->stream->is_connected()) rt->stream->send_to_radio(bytes);
     }
 }
 
 std::vector<std::string> MeshService::config_lines_for(const std::string& device_id) const {
-    std::lock_guard<std::mutex> lock(devices_mu_);
-    auto it = devices_.find(device_id);
-    if (it == devices_.end()) return {};
-    return it->second->config_lines;
+    std::shared_ptr<DeviceRuntime> rt = find_device_runtime(device_id);
+    if (rt && !rt->config_lines.empty()) return rt->config_lines;
+
+    // Fallback: load persisted config from SQLite
+    std::string canonical_dev = rt ? (rt->id.empty() ? rt->spec.address : rt->id) : normalize_device_identifier(device_id);
+    if (canonical_dev.empty()) canonical_dev = device_id;
+
+    auto items = const_cast<Database&>(db_).load_device_config(canonical_dev);
+    if (items.empty() && rt) {
+        for (const auto& al : rt->aliases) {
+            items = const_cast<Database&>(db_).load_device_config(al);
+            if (!items.empty()) break;
+        }
+    }
+    if (!items.empty()) {
+        std::vector<std::string> out;
+        std::string cur_sec;
+        for (const auto& item : items) {
+            if (item.section != cur_sec) {
+                cur_sec = item.section;
+                out.push_back("--- " + cur_sec + " ---");
+            }
+            out.push_back(item.key + " = " + item.value);
+        }
+        return out;
+    }
+
+    return rt ? rt->config_lines : std::vector<std::string>{};
 }
 
 std::vector<EvRawPacket> MeshService::raw_packets_for(const std::string& device_id) const {
@@ -908,18 +1207,95 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
             while (std::getline(iss, ln)) {
                 if (!ln.empty()) dst.push_back(ln);
             }
+        } else if constexpr (std::is_same_v<T, EvConnected>) {
+            if (!e.display_name.empty()) {
+                rt->display_name = e.display_name;
+                if (std::find(rt->aliases.begin(), rt->aliases.end(), e.display_name) == rt->aliases.end())
+                    rt->aliases.push_back(e.display_name);
+            }
+            if (!e.device.empty() && e.device != rt->id) {
+                if (std::find(rt->aliases.begin(), rt->aliases.end(), e.device) == rt->aliases.end())
+                    rt->aliases.push_back(e.device);
+            }
         } else if constexpr (std::is_same_v<T, EvConfigBytes>) {
+            std::string section_name;
             if (e.is_module) {
+                meshtastic::ModuleConfig mc;
+                if (mc.ParseFromString(e.bytes)) {
+                    switch (mc.payload_variant_case()) {
+                        case meshtastic::ModuleConfig::kMqtt: section_name = "mqtt"; break;
+                        case meshtastic::ModuleConfig::kSerial: section_name = "serial"; break;
+                        case meshtastic::ModuleConfig::kExternalNotification: section_name = "external_notification"; break;
+                        case meshtastic::ModuleConfig::kStoreForward: section_name = "store_forward"; break;
+                        case meshtastic::ModuleConfig::kRangeTest: section_name = "range_test"; break;
+                        case meshtastic::ModuleConfig::kTelemetry: section_name = "telemetry"; break;
+                        case meshtastic::ModuleConfig::kCannedMessage: section_name = "canned_message"; break;
+                        case meshtastic::ModuleConfig::kAudio: section_name = "audio"; break;
+                        case meshtastic::ModuleConfig::kRemoteHardware: section_name = "remote_hardware"; break;
+                        case meshtastic::ModuleConfig::kNeighborInfo: section_name = "neighbor_info"; break;
+                        case meshtastic::ModuleConfig::kAmbientLighting: section_name = "ambient_lighting"; break;
+                        case meshtastic::ModuleConfig::kDetectionSensor: section_name = "detection_sensor"; break;
+                        case meshtastic::ModuleConfig::kPaxcounter: section_name = "paxcounter"; break;
+                        case meshtastic::ModuleConfig::kStatusmessage: section_name = "statusmessage"; break;
+                        case meshtastic::ModuleConfig::kTrafficManagement: section_name = "traffic_management"; break;
+                        case meshtastic::ModuleConfig::kTak: section_name = "tak"; break;
+                        default: section_name = "module_" + std::to_string(mc.payload_variant_case()); break;
+                    }
+                }
+                if (section_name.empty()) section_name = "module_unknown";
+                rt->raw_module_configs[section_name] = e.bytes;
                 rt->raw_module_config = e.bytes;
             } else {
+                meshtastic::Config cfg;
+                if (cfg.ParseFromString(e.bytes)) {
+                    switch (cfg.payload_variant_case()) {
+                        case meshtastic::Config::kDevice: section_name = "device"; break;
+                        case meshtastic::Config::kPosition: section_name = "position"; break;
+                        case meshtastic::Config::kPower: section_name = "power"; break;
+                        case meshtastic::Config::kNetwork: section_name = "network"; break;
+                        case meshtastic::Config::kDisplay: section_name = "display"; break;
+                        case meshtastic::Config::kLora: section_name = "lora"; break;
+                        case meshtastic::Config::kBluetooth: section_name = "bluetooth"; break;
+                        case meshtastic::Config::kSecurity: section_name = "security"; break;
+                        case meshtastic::Config::kSessionkey: section_name = "sessionkey"; break;
+                        case meshtastic::Config::kDeviceUi: section_name = "device_ui"; break;
+                        default: section_name = "config_" + std::to_string(cfg.payload_variant_case()); break;
+                    }
+                }
+                if (section_name.empty()) section_name = "config_unknown";
+                rt->raw_configs[section_name] = e.bytes;
                 rt->raw_config = e.bytes;
             }
+
+            // Persist decoded lines to SQLite
             auto lines = MeshCodec::decode_config_lines(e.bytes, e.is_module);
-            auto& dst = rt->config_lines;
-            if (!e.is_module) dst.clear(); // Clear on base Config, append ModuleConfig
+            std::string canonical_dev = rt->id.empty() ? (!rt->spec.address.empty() ? rt->spec.address : e.device) : rt->id;
             for (const auto& line : lines) {
-                dst.push_back(line);
+                auto eq = line.find('=');
+                if (eq != std::string::npos) {
+                    std::string k = line.substr(0, eq);
+                    std::string v = line.substr(eq + 1);
+                    while (!k.empty() && k.back() == ' ') k.pop_back();
+                    while (!v.empty() && v.front() == ' ') v.erase(v.begin());
+                    std::string field_k = k;
+                    if (field_k.rfind(section_name + ".", 0) == 0) {
+                        field_k = field_k.substr(section_name.size() + 1);
+                    }
+                    db_.upsert_device_config(canonical_dev, section_name, field_k, v);
+                }
             }
+
+            // Rebuild complete config_lines across all received sections
+            std::vector<std::string> all_lines;
+            for (const auto& [sec, bytes] : rt->raw_configs) {
+                auto dec = MeshCodec::decode_config_lines(bytes, false);
+                for (const auto& l : dec) all_lines.push_back(l);
+            }
+            for (const auto& [sec, bytes] : rt->raw_module_configs) {
+                auto dec = MeshCodec::decode_config_lines(bytes, true);
+                for (const auto& l : dec) all_lines.push_back(l);
+            }
+            rt->config_lines = std::move(all_lines);
         } else if constexpr (std::is_same_v<T, EvRawPacket>) {
             rt->raw_packets.push_back(e);
             if (rt->raw_packets.size() > DeviceRuntime::kMaxRawPackets)
@@ -933,7 +1309,7 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
         } else if constexpr (std::is_same_v<T, EvDbSyncPayload>) {
             if (sync_manager_) sync_manager_->handle_sync_payload(e.device, e.payload);
         } else {
-            // EvConnected / EvDisconnected / EvLogLine / EvError / EvSendRawToRadio: no DB work.
+            // EvDisconnected / EvLogLine / EvError / EvSendRawToRadio: no DB work.
         }
     }, ev);
 }

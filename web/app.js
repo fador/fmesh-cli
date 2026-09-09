@@ -42,6 +42,11 @@
     statsNodeFilter: 0,
     statsSearchQuery: '',
     statsData: null,
+    configData: null,
+    configSections: {},
+    configModified: new Map(),
+    activeConfigSection: 'all',
+    configSearchQuery: '',
     eventSource: null
   };
 
@@ -119,8 +124,16 @@
 
     // Config
     configDevicesList: document.getElementById('config-devices-list'),
+    configDevicesCount: document.getElementById('config-devices-count'),
     configDeviceTitle: document.getElementById('config-device-title'),
+    configDeviceBadges: document.getElementById('config-device-badges'),
+    btnRefreshConfig: document.getElementById('btn-refresh-config'),
+    btnSaveAllConfig: document.getElementById('btn-save-all-config'),
+    configCategoryPills: document.getElementById('config-category-pills'),
     configSearch: document.getElementById('config-search'),
+    btnConfigSearchClear: document.getElementById('btn-config-search-clear'),
+    configCardsContainer: document.getElementById('config-cards-container'),
+    configRawContainer: document.getElementById('config-raw-container'),
     configTableBody: document.getElementById('config-table-body'),
 
     // Statistics
@@ -1583,20 +1596,329 @@
   // ==========================================================================
   // Radio Configuration View
   // ==========================================================================
+  const CONFIG_ENUMS = {
+    'device.role': ['CLIENT', 'CLIENT_MUTE', 'ROUTER', 'ROUTER_LATE', 'REPEATER', 'TRACKER', 'SENSOR', 'TAK', 'CLIENT_HID', 'LOST_AND_FOUND', 'TAK_TRACKER'],
+    'lora.region': ['UNSET', 'US', 'EU_433', 'EU_868', 'CN', 'JP', 'ANZ', 'KR', 'TW', 'RU', 'IN', 'NZ_865', 'TH', 'LORA_24', 'UA_433', 'UA_868', 'MY_433', 'MY_919', 'SG_923', 'PH'],
+    'lora.modem_preset': ['LONG_FAST', 'LONG_SLOW', 'VERY_LONG_SLOW', 'MEDIUM_SLOW', 'MEDIUM_FAST', 'SHORT_SLOW', 'SHORT_FAST', 'LONG_MODERATE', 'SHORT_TURBO'],
+    'bluetooth.mode': ['FIXED_PIN', 'RANDOM_PIN'],
+    'position.gps_mode': ['DISABLED', 'ENABLED', 'NOT_PRESENT'],
+    'power.is_power_saving': ['OFF', 'ON'],
+    'network.ip_mode': ['DHCP', 'STATIC']
+  };
+
+  const SECTION_META = {
+    'device': {
+      title: 'Device Settings',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg>',
+      desc: 'Node role, serial debugging, button pin configs, and reboot behaviors'
+    },
+    'lora': {
+      title: 'LoRa Radio',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.93 19.07a10 10 0 0 1 0-14.14"/><path d="M7.76 16.24a6 6 0 0 1 0-8.48"/><circle cx="12" cy="12" r="2"/><path d="M16.24 7.76a6 6 0 0 1 0 8.48"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>',
+      desc: 'Frequency region, modem speed preset, hop limit, transmit power, and bandwidth'
+    },
+    'position': {
+      title: 'Position & GPS',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
+      desc: 'GPS broadcast interval, smart positioning, fixed coordinates, and altitude flags'
+    },
+    'power': {
+      title: 'Power Management',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="6" width="18" height="12" rx="2"/><line x1="23" y1="11" x2="23" y2="13"/></svg>',
+      desc: 'Battery ADC multiplier, sleep timeouts, wake schedules, and low power mode'
+    },
+    'network': {
+      title: 'Network & WiFi',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>',
+      desc: 'WiFi station credentials, soft AP, NTP time servers, and MQTT gateway'
+    },
+    'display': {
+      title: 'Screen & Display',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+      desc: 'Screen timeout, flip 180°, metric vs imperial units, and OLED brightness'
+    },
+    'bluetooth': {
+      title: 'Bluetooth BLE',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5"/></svg>',
+      desc: 'BLE advertisement, fixed vs random PIN pairing mode, and connection timeout'
+    },
+    'security': {
+      title: 'Security & Encryption',
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+      desc: 'Public encryption key, remote admin channel authorization, and lock codes'
+    }
+  };
+
   async function loadConfig() {
+    if (!state.activeDeviceId && state.devices.length > 0) {
+      state.activeDeviceId = state.devices[0].id;
+    }
+    if (!state.activeDeviceId) return;
+
     try {
+      if (el.configCardsContainer) {
+        el.configCardsContainer.innerHTML = `
+          <div class="config-loading-state">
+            <div class="spinner"></div>
+            <span>Fetching configuration from radio...</span>
+          </div>
+        `;
+      }
+
       const res = await fetch(`/api/config?device=${encodeURIComponent(state.activeDeviceId)}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (el.configCardsContainer) {
+          el.configCardsContainer.innerHTML = `
+            <div class="config-empty-state">
+              <p>Failed to retrieve configuration for this radio.</p>
+            </div>
+          `;
+        }
+        return;
+      }
+
       const data = await res.json();
-      renderConfigTable(data.config || []);
+      state.configData = data;
+      state.configSections = data.sections || {};
+      state.configModified.clear();
+
+      updateConfigSaveButton();
+      updateConfigHeaderBadges();
+      renderConfigView();
     } catch (err) {
       console.error('Error loading config:', err);
+      if (el.configCardsContainer) {
+        el.configCardsContainer.innerHTML = `
+          <div class="config-empty-state">
+            <p>Error connecting to radio configuration service.</p>
+          </div>
+        `;
+      }
     }
+  }
+
+  function updateConfigHeaderBadges() {
+    const dev = state.devices.find(d => d.id === state.activeDeviceId);
+    if (!dev) return;
+
+    if (el.configDeviceTitle) {
+      el.configDeviceTitle.textContent = dev.display_name || dev.name || dev.id;
+    }
+
+    if (el.configDeviceBadges) {
+      const isOnline = !!dev.connected;
+      el.configDeviceBadges.innerHTML = `
+        <span class="badge ${isOnline ? 'badge-success' : 'badge-muted'}">
+          <span class="badge-dot ${isOnline ? 'online' : 'offline'}"></span>
+          ${isOnline ? 'Connected' : 'Offline'}
+        </span>
+        ${dev.hw_model ? `<span class="badge badge-info">${escapeHtml(dev.hw_model)}</span>` : ''}
+        ${dev.firmware ? `<span class="badge badge-subtle">FW ${escapeHtml(dev.firmware)}</span>` : ''}
+        ${dev.my_node_id ? `<span class="badge badge-subtle mono-val">${escapeHtml(dev.my_node_id)}</span>` : ''}
+        <span class="badge badge-subtle mono-val">${escapeHtml(dev.mac || dev.id)}</span>
+      `;
+    }
+  }
+
+  function updateConfigSaveButton() {
+    if (!el.btnSaveAllConfig) return;
+    const count = state.configModified.size;
+    if (count > 0) {
+      el.btnSaveAllConfig.disabled = false;
+      el.btnSaveAllConfig.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+        <span>Save Changes (${count})</span>
+      `;
+      el.btnSaveAllConfig.classList.add('btn-pulse-save');
+    } else {
+      el.btnSaveAllConfig.disabled = true;
+      el.btnSaveAllConfig.innerHTML = `
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+        <span>Save Changes</span>
+      `;
+      el.btnSaveAllConfig.classList.remove('btn-pulse-save');
+    }
+  }
+
+  function renderConfigView() {
+    if (state.activeConfigSection === 'raw') {
+      if (el.configCardsContainer) el.configCardsContainer.style.display = 'none';
+      if (el.configRawContainer) el.configRawContainer.style.display = 'block';
+      renderConfigTable(state.configData?.config || []);
+    } else {
+      if (el.configCardsContainer) el.configCardsContainer.style.display = 'grid';
+      if (el.configRawContainer) el.configRawContainer.style.display = 'none';
+      renderConfigCards();
+    }
+  }
+
+  function renderConfigCards() {
+    if (!el.configCardsContainer) return;
+    const sections = state.configSections || {};
+    const sectionKeys = Object.keys(sections);
+
+    if (sectionKeys.length === 0) {
+      el.configCardsContainer.innerHTML = `
+        <div class="config-empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <h3>No Settings Available</h3>
+          <p>No configuration packets have been received from this radio yet. Ensure the device is powered and connected, then click Refresh.</p>
+          <button class="btn btn-primary" onclick="window.meshApp.refreshConfig()">Refresh from Radio</button>
+        </div>
+      `;
+      return;
+    }
+
+    const query = (state.configSearchQuery || '').trim().toLowerCase();
+    const activeSection = state.activeConfigSection || 'all';
+
+    // Standard sections vs modules
+    const standardSections = ['device', 'lora', 'position', 'power', 'network', 'display', 'bluetooth', 'security'];
+
+    let visibleSectionKeys = sectionKeys;
+    if (activeSection === 'modules') {
+      visibleSectionKeys = sectionKeys.filter(s => !standardSections.includes(s) || s.startsWith('module_') || s.startsWith('canned_') || s.startsWith('telemetry') || s.startsWith('ambient_') || s.startsWith('mqtt'));
+    } else if (activeSection !== 'all') {
+      visibleSectionKeys = sectionKeys.filter(s => s === activeSection);
+    }
+
+    let cardsHtml = '';
+    let totalRenderedItems = 0;
+
+    for (const secKey of visibleSectionKeys) {
+      const secData = sections[secKey] || {};
+      const fieldKeys = Object.keys(secData);
+
+      // Filter fields by search
+      const matchingFieldKeys = fieldKeys.filter(fKey => {
+        if (!query) return true;
+        const item = secData[fKey];
+        const fullKey = item.key || `${secKey}.${fKey}`;
+        const valStr = String(item.value || '').toLowerCase();
+        return fullKey.toLowerCase().includes(query) || valStr.includes(query) || fKey.toLowerCase().includes(query);
+      });
+
+      if (matchingFieldKeys.length === 0) continue;
+      totalRenderedItems += matchingFieldKeys.length;
+
+      const meta = SECTION_META[secKey] || {
+        title: secKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+        desc: `Configuration parameters for ${secKey}`
+      };
+
+      const fieldsHtml = matchingFieldKeys.map(fKey => {
+        const item = secData[fKey];
+        const fullKey = item.key || `${secKey}.${fKey}`;
+        const cleanKey = fullKey.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const origVal = item.value != null ? String(item.value) : '';
+        const currentVal = state.configModified.has(fullKey) ? state.configModified.get(fullKey) : origVal;
+        const isModified = state.configModified.has(fullKey) && state.configModified.get(fullKey) !== origVal;
+
+        let inputControlHtml = '';
+        const enums = CONFIG_ENUMS[fullKey];
+
+        if (item.type === 'boolean' || origVal === 'ON' || origVal === 'OFF' || origVal === 'true' || origVal === 'false') {
+          const isChecked = currentVal === 'ON' || currentVal === 'true' || currentVal === '1';
+          inputControlHtml = `
+            <div class="config-field-control">
+              <label class="config-toggle-switch">
+                <input type="checkbox" id="cfg-ctrl-${cleanKey}" ${isChecked ? 'checked' : ''} onchange="window.meshApp.onToggleChanged('${escapeHtml(fullKey)}', this.checked)">
+                <span class="toggle-slider"></span>
+              </label>
+              <span class="config-toggle-label ${isChecked ? 'is-on' : 'is-off'}">${isChecked ? 'ENABLED' : 'DISABLED'}</span>
+            </div>
+          `;
+        } else if (enums && Array.isArray(enums)) {
+          inputControlHtml = `
+            <div class="config-field-control">
+              <select id="cfg-ctrl-${cleanKey}" class="config-select" onchange="window.meshApp.onInputChanged('${escapeHtml(fullKey)}', this.value)">
+                ${enums.map(opt => `
+                  <option value="${escapeHtml(opt)}" ${opt.toUpperCase() === currentVal.toUpperCase() ? 'selected' : ''}>
+                    ${escapeHtml(opt)}
+                  </option>
+                `).join('')}
+                ${!enums.map(e => e.toUpperCase()).includes(currentVal.toUpperCase()) && currentVal ? `
+                  <option value="${escapeHtml(currentVal)}" selected>${escapeHtml(currentVal)} (Custom)</option>
+                ` : ''}
+              </select>
+            </div>
+          `;
+        } else if (item.type === 'number' || (!isNaN(Number(origVal)) && origVal.trim() !== '')) {
+          inputControlHtml = `
+            <div class="config-field-control">
+              <input type="number" id="cfg-ctrl-${cleanKey}" class="config-input config-input-number" value="${escapeHtml(currentVal)}" oninput="window.meshApp.onInputChanged('${escapeHtml(fullKey)}', this.value)" onkeydown="if(event.key==='Enter') window.meshApp.saveConfigKey('${escapeHtml(fullKey)}')">
+            </div>
+          `;
+        } else {
+          // Text / String / Key
+          const isPassword = fKey.toLowerCase().includes('psk') || fKey.toLowerCase().includes('pass') || fKey.toLowerCase().includes('key');
+          inputControlHtml = `
+            <div class="config-field-control">
+              <input type="${isPassword ? 'password' : 'text'}" id="cfg-ctrl-${cleanKey}" class="config-input" value="${escapeHtml(currentVal)}" oninput="window.meshApp.onInputChanged('${escapeHtml(fullKey)}', this.value)" onkeydown="if(event.key==='Enter') window.meshApp.saveConfigKey('${escapeHtml(fullKey)}')">
+            </div>
+          `;
+        }
+
+        const friendlyName = fKey.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+        return `
+          <div class="config-item ${isModified ? 'is-modified' : ''}" id="cfg-item-${cleanKey}">
+            <div class="config-item-info">
+              <div class="config-item-title-row">
+                <span class="config-item-name">${escapeHtml(friendlyName)}</span>
+                ${isModified ? '<span class="config-modified-badge">Modified</span>' : ''}
+              </div>
+              <span class="config-item-key">${escapeHtml(fullKey)}</span>
+            </div>
+            <div class="config-item-actions">
+              ${inputControlHtml}
+              <button class="btn btn-sm btn-secondary btn-item-save" title="Save ${escapeHtml(fullKey)} to radio" onclick="window.meshApp.saveConfigKey('${escapeHtml(fullKey)}')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                <span>Save</span>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      cardsHtml += `
+        <div class="config-card" id="cfg-card-${secKey}">
+          <div class="config-card-header">
+            <div class="config-card-title-group">
+              <div class="config-card-icon">${meta.icon}</div>
+              <div>
+                <h3 class="config-card-title">${escapeHtml(meta.title)}</h3>
+                <span class="config-card-desc">${escapeHtml(meta.desc)}</span>
+              </div>
+            </div>
+            <span class="badge badge-subtle">${matchingFieldKeys.length} ${matchingFieldKeys.length === 1 ? 'item' : 'items'}</span>
+          </div>
+          <div class="config-card-body">
+            ${fieldsHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    if (totalRenderedItems === 0) {
+      el.configCardsContainer.innerHTML = `
+        <div class="config-empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <h3>No Matching Settings</h3>
+          <p>No configuration items matched "${escapeHtml(query)}". Try clearing your search filter.</p>
+          <button class="btn btn-secondary" onclick="window.meshApp.clearConfigSearch()">Clear Filter</button>
+        </div>
+      `;
+      return;
+    }
+
+    el.configCardsContainer.innerHTML = cardsHtml;
   }
 
   function renderConfigTable(items) {
     if (!el.configTableBody) return;
-    const search = el.configSearch.value.toLowerCase().trim();
+    const search = (state.configSearchQuery || '').toLowerCase().trim();
 
     const normalized = (items || []).map(item => {
       if (typeof item === 'string') {
@@ -1612,29 +1934,106 @@
       };
     });
 
-    el.configTableBody.innerHTML = normalized
-      .filter(item => !search || item.key.toLowerCase().includes(search) || item.value.toLowerCase().includes(search))
-      .map(({ key, value }) => {
-        return `
-          <tr>
-            <td class="config-key">${escapeHtml(key)}</td>
-            <td>
-              <input type="text" class="config-val-input" id="cfg-val-${escapeHtml(key)}" value="${escapeHtml(value)}">
-            </td>
-            <td>
-              <button class="btn btn-sm btn-primary" onclick="window.meshApp.saveConfigKey('${escapeHtml(key)}')">Save</button>
-            </td>
-          </tr>
-        `;
-      }).join('');
+    const filtered = normalized.filter(item => !search || item.key.toLowerCase().includes(search) || item.value.toLowerCase().includes(search));
+
+    if (filtered.length === 0) {
+      el.configTableBody.innerHTML = `
+        <tr>
+          <td colspan="3" style="text-align:center; padding: 2rem; color: var(--text-muted);">
+            No configuration settings matching "${escapeHtml(search)}".
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    el.configTableBody.innerHTML = filtered.map(({ key, value }) => {
+      const cleanKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const curVal = state.configModified.has(key) ? state.configModified.get(key) : value;
+      const isModified = state.configModified.has(key) && state.configModified.get(key) !== value;
+
+      return `
+        <tr class="${isModified ? 'row-modified' : ''}">
+          <td class="config-key">
+            <span class="mono-val">${escapeHtml(key)}</span>
+            ${isModified ? '<span class="config-modified-badge" style="margin-left:8px;">Modified</span>' : ''}
+          </td>
+          <td>
+            <input type="text" class="config-val-input ${isModified ? 'is-modified' : ''}" id="cfg-raw-${cleanKey}" value="${escapeHtml(curVal)}" oninput="window.meshApp.onInputChanged('${escapeHtml(key)}', this.value)" onkeydown="if(event.key==='Enter') window.meshApp.saveConfigKey('${escapeHtml(key)}')">
+          </td>
+          <td>
+            <button class="btn btn-sm btn-primary" onclick="window.meshApp.saveConfigKey('${escapeHtml(key)}')">Save</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
   }
 
-  async function saveConfigKey(key) {
-    const input = document.getElementById(`cfg-val-${key}`);
-    if (!input) return;
-    const value = input.value.trim();
+  function handleConfigFieldChange(key, value) {
+    // Find original value
+    let origVal = '';
+    const parts = key.split('.');
+    if (parts.length >= 2 && state.configSections && state.configSections[parts[0]] && state.configSections[parts[0]][parts.slice(1).join('.')]) {
+      origVal = String(state.configSections[parts[0]][parts.slice(1).join('.')].value || '');
+    }
+
+    if (value === origVal) {
+      state.configModified.delete(key);
+    } else {
+      state.configModified.set(key, value);
+    }
+
+    // Update item DOM element state
+    const cleanKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const itemEl = document.getElementById(`cfg-item-${cleanKey}`);
+    if (itemEl) {
+      if (state.configModified.has(key)) {
+        itemEl.classList.add('is-modified');
+        let badge = itemEl.querySelector('.config-modified-badge');
+        if (!badge) {
+          const titleRow = itemEl.querySelector('.config-item-title-row');
+          if (titleRow) {
+            titleRow.insertAdjacentHTML('beforeend', '<span class="config-modified-badge">Modified</span>');
+          }
+        }
+      } else {
+        itemEl.classList.remove('is-modified');
+        const badge = itemEl.querySelector('.config-modified-badge');
+        if (badge) badge.remove();
+      }
+    }
+
+    updateConfigSaveButton();
+  }
+
+  async function saveConfigKey(key, customVal) {
+    let value = customVal;
+    const cleanKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    if (value === undefined) {
+      if (state.configModified.has(key)) {
+        value = state.configModified.get(key);
+      } else {
+        const cardInput = document.getElementById(`cfg-ctrl-${cleanKey}`);
+        const rawInput = document.getElementById(`cfg-raw-${cleanKey}`);
+        if (cardInput) {
+          value = cardInput.type === 'checkbox' ? (cardInput.checked ? 'ON' : 'OFF') : cardInput.value.trim();
+        } else if (rawInput) {
+          value = rawInput.value.trim();
+        }
+      }
+    }
+
+    if (value === undefined) return;
 
     try {
+      const itemEl = document.getElementById(`cfg-item-${cleanKey}`);
+      const btn = itemEl ? itemEl.querySelector('.btn-item-save') : null;
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-sm"></span>';
+      }
+
       const res = await fetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1646,16 +2045,80 @@
       });
 
       if (res.ok) {
-        alert(`Setting "${key}" updated successfully.`);
+        state.configModified.delete(key);
+        // Update local section cache
+        const parts = key.split('.');
+        if (parts.length >= 2 && state.configSections && state.configSections[parts[0]] && state.configSections[parts[0]][parts.slice(1).join('.')]) {
+          state.configSections[parts[0]][parts.slice(1).join('.')].value = value;
+        }
+
+        if (itemEl) {
+          itemEl.classList.remove('is-modified');
+          itemEl.classList.add('save-success-flash');
+          setTimeout(() => itemEl.classList.remove('save-success-flash'), 1200);
+          const badge = itemEl.querySelector('.config-modified-badge');
+          if (badge) badge.remove();
+        }
+
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.add('btn-success');
+          btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"></polyline></svg> Saved';
+          setTimeout(() => {
+            btn.classList.remove('btn-success');
+            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="20 6 9 17 4 12"></polyline></svg> <span>Save</span>';
+          }, 1500);
+        }
+
+        updateConfigSaveButton();
       } else {
-        alert(`Failed to update setting "${key}".`);
+        alert(`Failed to update setting "${key}" on radio.`);
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>Save</span>';
+        }
       }
     } catch (err) {
       console.error('Error updating config:', err);
+      alert(`Network error saving setting "${key}".`);
     }
   }
 
+  async function saveAllConfig() {
+    if (state.configModified.size === 0) return;
+    const settings = Object.fromEntries(state.configModified);
+    const count = state.configModified.size;
 
+    try {
+      if (el.btnSaveAllConfig) {
+        el.btnSaveAllConfig.disabled = true;
+        el.btnSaveAllConfig.innerHTML = '<span class="spinner-sm"></span> Saving to radio...';
+      }
+
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device: state.activeDeviceId,
+          settings: settings
+        })
+      });
+
+      if (res.ok) {
+        state.configModified.clear();
+        updateConfigSaveButton();
+        await loadConfig();
+        alert(`Successfully saved ${count} setting${count > 1 ? 's' : ''} to radio.`);
+      } else {
+        alert('Failed to save settings to radio.');
+        updateConfigSaveButton();
+      }
+    } catch (err) {
+      console.error('Error saving all config:', err);
+      alert('Network error while saving settings.');
+      updateConfigSaveButton();
+    }
+  }
 
   // ==========================================================================
   // Fetch APIs
@@ -1681,23 +2144,50 @@
       if (!res.ok) return;
       state.devices = await res.json();
 
+      // Ensure activeDeviceId is selected
+      if (!state.activeDeviceId && state.devices.length > 0) {
+        const liveDev = state.devices.find(d => d.connected);
+        state.activeDeviceId = liveDev ? liveDev.id : state.devices[0].id;
+      }
+
       const cur = state.devices.find(d => d.id === state.activeDeviceId);
       if (cur && cur.my_node_num) {
         state.myNodeNum = cur.my_node_num;
         state.myNodeId = cur.my_node_id || '';
       }
 
-      el.deviceSelect.innerHTML = state.devices.map(d => `
-        <option value="${escapeHtml(d.id)}" ${d.id === state.activeDeviceId ? 'selected' : ''}>
-          ${escapeHtml(d.display_name || d.id)}
-        </option>
-      `).join('');
+      if (el.deviceSelect) {
+        el.deviceSelect.innerHTML = state.devices.map(d => `
+          <option value="${escapeHtml(d.id)}" ${d.id === state.activeDeviceId ? 'selected' : ''}>
+            ${d.connected ? '● ' : '○ '}${escapeHtml(d.display_name || d.name || d.id)}
+          </option>
+        `).join('');
+      }
 
-      el.configDevicesList.innerHTML = state.devices.map(d => `
-        <li class="config-device-item ${d.id === state.activeDeviceId ? 'active' : ''}" onclick="window.meshApp.selectDevice('${escapeHtml(d.id)}')">
-          ${escapeHtml(d.display_name || d.id)}
-        </li>
-      `).join('');
+      if (el.configDevicesCount) {
+        el.configDevicesCount.textContent = `${state.devices.length} ${state.devices.length === 1 ? 'radio' : 'radios'}`;
+      }
+
+      if (el.configDevicesList) {
+        el.configDevicesList.innerHTML = state.devices.map(d => {
+          const isCurrent = d.id === state.activeDeviceId;
+          const isLive = !!d.connected;
+          const name = d.name || d.display_name || d.id;
+          const mac = d.mac || d.id;
+          return `
+            <li class="config-device-item ${isCurrent ? 'active' : ''}" onclick="window.meshApp.selectDevice('${escapeHtml(d.id)}')">
+              <div class="config-device-dot ${isLive ? 'online' : 'offline'}" title="${isLive ? 'Connected' : 'Offline'}"></div>
+              <div class="config-device-info">
+                <div class="config-device-name">${escapeHtml(name)}</div>
+                <div class="config-device-mac">${escapeHtml(mac)}</div>
+              </div>
+              ${d.hw_model ? `<span class="config-device-badge">${escapeHtml(d.hw_model)}</span>` : ''}
+            </li>
+          `;
+        }).join('');
+      }
+
+      updateConfigHeaderBadges();
     } catch (err) {
       console.error('Error fetching devices:', err);
     }
@@ -1972,8 +2462,38 @@
       state.rawPackets = [];
     });
 
-    // Config search
-    el.configSearch?.addEventListener('input', loadConfig);
+    // Config search & filters
+    el.configSearch?.addEventListener('input', () => {
+      state.configSearchQuery = el.configSearch.value;
+      if (el.btnConfigSearchClear) {
+        el.btnConfigSearchClear.style.display = state.configSearchQuery ? 'block' : 'none';
+      }
+      renderConfigView();
+    });
+
+    el.btnConfigSearchClear?.addEventListener('click', () => {
+      state.configSearchQuery = '';
+      if (el.configSearch) el.configSearch.value = '';
+      if (el.btnConfigSearchClear) el.btnConfigSearchClear.style.display = 'none';
+      renderConfigView();
+    });
+
+    el.configCategoryPills?.addEventListener('click', (e) => {
+      const pill = e.target.closest('.config-pill');
+      if (!pill) return;
+      document.querySelectorAll('#config-category-pills .config-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      state.activeConfigSection = pill.dataset.section || 'all';
+      renderConfigView();
+    });
+
+    el.btnRefreshConfig?.addEventListener('click', () => {
+      loadConfig();
+    });
+
+    el.btnSaveAllConfig?.addEventListener('click', () => {
+      saveAllConfig();
+    });
   }
 
   // ==========================================================================
@@ -2473,11 +2993,35 @@
 
     selectDevice: function(deviceId) {
       state.activeDeviceId = deviceId;
-      el.deviceSelect.value = deviceId;
+      if (el.deviceSelect) el.deviceSelect.value = deviceId;
+      fetchDevices();
       loadConfig();
     },
 
     saveConfigKey: saveConfigKey,
+    saveAllConfig: saveAllConfig,
+    refreshConfig: loadConfig,
+    onToggleChanged: function(key, checked) {
+      handleConfigFieldChange(key, checked ? 'ON' : 'OFF');
+      const cleanKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const itemEl = document.getElementById(`cfg-item-${cleanKey}`);
+      if (itemEl) {
+        const label = itemEl.querySelector('.config-toggle-label');
+        if (label) {
+          label.textContent = checked ? 'ENABLED' : 'DISABLED';
+          label.className = `config-toggle-label ${checked ? 'is-on' : 'is-off'}`;
+        }
+      }
+    },
+    onInputChanged: function(key, value) {
+      handleConfigFieldChange(key, value);
+    },
+    clearConfigSearch: function() {
+      state.configSearchQuery = '';
+      if (el.configSearch) el.configSearch.value = '';
+      if (el.btnConfigSearchClear) el.btnConfigSearchClear.style.display = 'none';
+      renderConfigView();
+    },
 
     filterStatsByNode: function(nodeNum) {
       state.statsNodeFilter = nodeNum;

@@ -67,7 +67,7 @@ public:
 
     // Encode an admin packet (Config or ModuleConfig)
     static std::string encode_admin_packet(
-        uint32_t from_node, uint32_t to_node, const std::string& modified_bytes, bool is_module);
+        uint32_t from_node, uint32_t to_node, const std::string& modified_bytes, bool is_module, uint32_t packet_id = 0);
 
     // --- decoders (radio -> client) --------------------------------------
 

@@ -126,7 +126,24 @@ void BluezClient::run_connect_flow() {
         }
         device_path_ = *found;
     }
-    device_id_ = device_path_;
+    
+    // Use canonical MAC address or spec name instead of BlueZ D-Bus path
+    auto mac_pos = device_path_.rfind("/dev_");
+    if (mac_pos != std::string::npos) {
+        std::string raw_mac = device_path_.substr(mac_pos + 5);
+        std::string norm_mac;
+        for (char c : raw_mac) {
+            if (c == '_') norm_mac += ':';
+            else norm_mac += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        if (!norm_mac.empty()) {
+            if (spec_.address.empty()) spec_.address = norm_mac;
+            device_id_ = norm_mac;
+        }
+    }
+    if (device_id_.empty()) {
+        device_id_ = !spec_.address.empty() ? spec_.address : spec_.name;
+    }
 
     if (!ensure_paired_and_connected(/*do_pair=*/agent_ != nullptr)) {
         return;

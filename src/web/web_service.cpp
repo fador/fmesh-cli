@@ -342,9 +342,17 @@ void WebService::register_routes() {
         for (const auto& id : dev_ids) {
             const NodeDb* db = mesh_service_.db_for(id);
             uint32_t my_node = db ? db->my_node_num() : 0;
+            auto rt = mesh_service_.find_device_runtime(id);
+            bool connected = rt && ((rt->client && rt->client->is_connected()) || (rt->stream && rt->stream->is_connected()));
+            std::string disp_name = mesh_service_.display_name_for(id);
+            std::string name = rt ? (!rt->spec.name.empty() ? rt->spec.name : (!rt->my_long_name.empty() ? rt->my_long_name : disp_name)) : disp_name;
+            std::string mac = rt ? (!rt->spec.address.empty() ? rt->spec.address : rt->id) : id;
             arr.push_back({
                 {"id", id},
-                {"display_name", mesh_service_.display_name_for(id)},
+                {"display_name", disp_name},
+                {"name", name},
+                {"mac", mac},
+                {"connected", connected},
                 {"my_node_num", my_node},
                 {"my_node_id", node_num_to_id(my_node)},
                 {"hw_model", mesh_service_.hw_model_for(id)},
@@ -697,23 +705,74 @@ void WebService::register_routes() {
     server_.get("/api/config", [this](const HttpRequest& req) {
         std::string device = req.get_query("device");
         if (device.empty()) {
-            auto ids = mesh_service_.device_ids();
-            if (!ids.empty()) device = ids.front();
+            device = active_device_id_;
+            if (device.empty()) {
+                auto ids = mesh_service_.device_ids();
+                if (!ids.empty()) device = ids.front();
+            }
         }
 
         auto lines = mesh_service_.config_lines_for(device);
         nlohmann::json arr = nlohmann::json::array();
+        nlohmann::json sections = nlohmann::json::object();
+        std::string current_section = "general";
+
         for (const auto& line : lines) {
+            if (line.rfind("--- ", 0) == 0) {
+                // Parse section header e.g. "--- LoRa ---" or "--- Module: MQTT ---"
+                std::string sec = line;
+                while (sec.rfind("---", 0) == 0) sec = sec.substr(3);
+                while (!sec.empty() && sec.back() == '-') sec.pop_back();
+                while (!sec.empty() && sec.front() == ' ') sec.erase(sec.begin());
+                while (!sec.empty() && sec.back() == ' ') sec.pop_back();
+                if (sec.rfind("Module: ", 0) == 0) sec = sec.substr(8);
+                std::string sec_lower = sec;
+                std::transform(sec_lower.begin(), sec_lower.end(), sec_lower.begin(), [](unsigned char c){ return std::tolower(c); });
+                current_section = sec_lower;
+                if (!sections.contains(current_section)) {
+                    sections[current_section] = nlohmann::json::array();
+                }
+                continue;
+            }
+
             size_t eq = line.find('=');
             if (eq != std::string::npos) {
                 std::string k = line.substr(0, eq);
                 std::string v = line.substr(eq + 1);
                 while (!k.empty() && k.back() == ' ') k.pop_back();
                 while (!v.empty() && v.front() == ' ') v.erase(v.begin());
-                arr.push_back({{"key", k}, {"value", v}});
+
+                std::string item_sec = current_section;
+                auto dot = k.find('.');
+                if (dot != std::string::npos) {
+                    item_sec = k.substr(0, dot);
+                }
+
+                std::string type = "string";
+                if (v == "ON" || v == "OFF" || v == "true" || v == "false") {
+                    type = "boolean";
+                } else if (!v.empty() && std::all_of(v.begin(), v.end(), [](char c){ return std::isdigit(static_cast<unsigned char>(c)) || c == '-'; })) {
+                    type = "number";
+                }
+
+                nlohmann::json item = {
+                    {"key", k},
+                    {"value", v},
+                    {"section", item_sec},
+                    {"type", type}
+                };
+                arr.push_back(item);
+                if (!sections.contains(item_sec)) {
+                    sections[item_sec] = nlohmann::json::array();
+                }
+                sections[item_sec].push_back(item);
             }
         }
-        return HttpResponse::json(200, {{"device", device}, {"config", arr}});
+        return HttpResponse::json(200, {
+            {"device", device},
+            {"config", arr},
+            {"sections", sections}
+        });
     });
 
     // POST /api/config
@@ -722,8 +781,42 @@ void WebService::register_routes() {
             auto j = nlohmann::json::parse(req.body);
             std::string device = j.value("device", "");
             if (device.empty()) {
-                auto ids = mesh_service_.device_ids();
-                if (!ids.empty()) device = ids.front();
+                device = active_device_id_;
+                if (device.empty()) {
+                    auto ids = mesh_service_.device_ids();
+                    if (!ids.empty()) device = ids.front();
+                }
+            }
+
+            // Check if batch update
+            if (j.contains("settings")) {
+                const auto& settings = j["settings"];
+                nlohmann::json updated = nlohmann::json::array();
+                bool all_ok = true;
+                if (settings.is_object()) {
+                    for (auto& [k, v] : settings.items()) {
+                        std::string val_str;
+                        if (v.is_boolean()) val_str = v.get<bool>() ? "true" : "false";
+                        else if (v.is_number()) val_str = v.dump();
+                        else if (v.is_string()) val_str = v.get<std::string>();
+                        else val_str = v.dump();
+
+                        bool ok = mesh_service_.set_config(device, k, val_str);
+                        updated.push_back({{"key", k}, {"value", val_str}, {"success", ok}});
+                        if (!ok) all_ok = false;
+                    }
+                } else if (settings.is_array()) {
+                    for (const auto& item : settings) {
+                        std::string k = item.value("key", "");
+                        std::string v = item.value("value", "");
+                        if (!k.empty()) {
+                            bool ok = mesh_service_.set_config(device, k, v);
+                            updated.push_back({{"key", k}, {"value", v}, {"success", ok}});
+                            if (!ok) all_ok = false;
+                        }
+                    }
+                }
+                return HttpResponse::json(200, {{"success", all_ok}, {"device", device}, {"updated", updated}});
             }
 
             std::string key = j.value("key", "");

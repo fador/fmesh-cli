@@ -557,17 +557,61 @@
       <section id="tab-config" class="tab-pane">
         <div class="config-layout">
           <div class="config-sidebar">
-            <h3>Connected Radios</h3>
+            <div class="config-sidebar-header">
+              <h3>Connected Radios</h3>
+              <span class="config-sidebar-count" id="config-devices-count">0 devices</span>
+            </div>
             <ul id="config-devices-list" class="config-devices-list"></ul>
           </div>
           <div class="config-editor-main">
             <div class="config-header">
-              <h2 id="config-device-title">Radio Configuration</h2>
-              <div class="config-filter">
-                <input type="text" id="config-search" placeholder="Filter config keys...">
+              <div class="config-header-left">
+                <h2 id="config-device-title">Radio Configuration</h2>
+                <div class="config-device-badges" id="config-device-badges">
+                  <!-- Badges for model, fw, connection status -->
+                </div>
+              </div>
+              <div class="config-header-actions">
+                <button id="btn-refresh-config" class="btn btn-secondary" title="Refresh from radio">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                  <span>Refresh</span>
+                </button>
+                <button id="btn-save-all-config" class="btn btn-primary" title="Save modified settings">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  <span>Save Changes</span>
+                </button>
               </div>
             </div>
-            <div class="config-table-container">
+
+            <!-- Section Category Filter Pills & Search -->
+            <div class="config-nav-toolbar">
+              <div class="config-category-pills" id="config-category-pills">
+                <button class="config-pill active" data-section="all">All</button>
+                <button class="config-pill" data-section="device">Device</button>
+                <button class="config-pill" data-section="lora">LoRa</button>
+                <button class="config-pill" data-section="position">Position</button>
+                <button class="config-pill" data-section="power">Power</button>
+                <button class="config-pill" data-section="network">Network</button>
+                <button class="config-pill" data-section="display">Display</button>
+                <button class="config-pill" data-section="bluetooth">Bluetooth</button>
+                <button class="config-pill" data-section="security">Security</button>
+                <button class="config-pill" data-section="modules">Modules</button>
+                <button class="config-pill" data-section="raw">Raw Table</button>
+              </div>
+              <div class="config-search-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <input type="text" id="config-search" placeholder="Filter settings by key or value...">
+                <button id="btn-config-search-clear" class="btn-clear-search" style="display:none;" title="Clear search">&times;</button>
+              </div>
+            </div>
+
+            <!-- Active sections / cards container -->
+            <div class="config-cards-container" id="config-cards-container">
+              <!-- Dynamically populated grouped category cards -->
+            </div>
+
+            <!-- Raw table view -->
+            <div class="config-table-container" id="config-raw-container" style="display:none;">
               <table class="config-table" id="config-table">
                 <thead>
                   <tr>
@@ -581,6 +625,13 @@
                 </tbody>
               </table>
             </div>
+
+            <div id="config-empty-state" class="config-empty-state" style="display:none;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+              <h3>No Configuration Available</h3>
+              <p>Connect to a Meshtastic radio or select a device to view and modify its settings.</p>
+            </div>
+
           </div>
         </div>
       </section>

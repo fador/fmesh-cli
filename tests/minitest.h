@@ -25,9 +25,10 @@ inline bool& failed_flag() {
     return f;
 }
 
-inline int run() {
+inline int run(const std::string& filter = "") {
     int passed = 0, failed = 0;
     for (auto& tc : registry()) {
+        if (!filter.empty() && tc.name.find(filter) == std::string::npos) continue;
         std::printf("[ RUN      ] %s\n", tc.name.c_str());
         failed_flag() = false;
         try {

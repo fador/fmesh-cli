@@ -99,6 +99,15 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_node_ts
     ON telemetry_history(node_num, ts);
 CREATE INDEX IF NOT EXISTS idx_telemetry_ts
     ON telemetry_history(ts);
+CREATE TABLE IF NOT EXISTS device_config(
+    device    TEXT NOT NULL,
+    section   TEXT NOT NULL,
+    key       TEXT NOT NULL,
+    value     TEXT NOT NULL,
+    PRIMARY KEY (device, section, key)
+);
+CREATE INDEX IF NOT EXISTS idx_device_config_device
+    ON device_config(device);
 )SQL";
 
 const char* kSelectMessagesPrefix =
@@ -460,6 +469,41 @@ std::optional<Node> Database::get_node_any_device(uint32_t node_num) {
     }
     sqlite3_finalize(st);
     return result;
+}
+
+void Database::upsert_device_config(const std::string& device, const std::string& section,
+                                   const std::string& key, const std::string& value) {
+    if (!db_ || device.empty() || key.empty()) return;
+    const char* sql = "INSERT INTO device_config(device, section, key, value) "
+                      "VALUES(?, ?, ?, ?) "
+                      "ON CONFLICT(device, section, key) DO UPDATE SET value=excluded.value";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return;
+    sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, section.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, key.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, value.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+    maybe_checkpoint();
+}
+
+std::vector<Database::DeviceConfigItem> Database::load_device_config(const std::string& device) {
+    std::vector<DeviceConfigItem> out;
+    if (!db_ || device.empty()) return out;
+    const char* sql = "SELECT section, key, value FROM device_config WHERE device=? ORDER BY section, key";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+    sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        DeviceConfigItem item;
+        if (auto* p = sqlite3_column_text(st, 0)) item.section = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 1)) item.key = reinterpret_cast<const char*>(p);
+        if (auto* p = sqlite3_column_text(st, 2)) item.value = reinterpret_cast<const char*>(p);
+        out.push_back(std::move(item));
+    }
+    sqlite3_finalize(st);
+    return out;
 }
 
 std::vector<WindowKey> Database::get_all_windows(const std::string& device) {

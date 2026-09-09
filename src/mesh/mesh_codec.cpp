@@ -16,6 +16,9 @@
 #include <google/protobuf/descriptor.h>
 #include <google/protobuf/reflection.h>
 
+#include <mutex>
+#include <random>
+
 namespace meshcli {
 
 using meshtastic::FromRadio;
@@ -54,14 +57,18 @@ bool MeshCodec::set_config_value(
     
     std::string module_name = key.substr(0, dot);
     std::string field_name = key.substr(dot + 1);
+
+    // Support common aliases
+    if (module_name == "ext_notif") module_name = "external_notification";
+    if (module_name == "canned_messages") module_name = "canned_message";
     
     meshtastic::Config config;
     meshtastic::ModuleConfig module_config;
     
     google::protobuf::Message* msg = nullptr;
     
-    config.ParseFromString(config_bytes);
-    module_config.ParseFromString(module_config_bytes);
+    if (!config_bytes.empty()) config.ParseFromString(config_bytes);
+    if (!module_config_bytes.empty()) module_config.ParseFromString(module_config_bytes);
     
     // Check if it's in Config
     const google::protobuf::Descriptor* config_desc = config.GetDescriptor();
@@ -97,12 +104,24 @@ bool MeshCodec::set_config_value(
             case google::protobuf::FieldDescriptor::CPPTYPE_UINT32:
                 refl->SetUInt32(msg, field, std::stoul(value));
                 break;
+            case google::protobuf::FieldDescriptor::CPPTYPE_INT64:
+                refl->SetInt64(msg, field, std::stoll(value));
+                break;
+            case google::protobuf::FieldDescriptor::CPPTYPE_UINT64:
+                refl->SetUInt64(msg, field, std::stoull(value));
+                break;
             case google::protobuf::FieldDescriptor::CPPTYPE_FLOAT:
                 refl->SetFloat(msg, field, std::stof(value));
                 break;
-            case google::protobuf::FieldDescriptor::CPPTYPE_BOOL:
-                refl->SetBool(msg, field, (value == "true" || value == "1"));
+            case google::protobuf::FieldDescriptor::CPPTYPE_DOUBLE:
+                refl->SetDouble(msg, field, std::stod(value));
                 break;
+            case google::protobuf::FieldDescriptor::CPPTYPE_BOOL: {
+                std::string v = value;
+                std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c){ return std::tolower(c); });
+                refl->SetBool(msg, field, (v == "true" || v == "1" || v == "on" || v == "yes"));
+                break;
+            }
             case google::protobuf::FieldDescriptor::CPPTYPE_STRING:
                 refl->SetString(msg, field, value);
                 break;
@@ -110,9 +129,27 @@ bool MeshCodec::set_config_value(
                 const google::protobuf::EnumDescriptor* enum_desc = field->enum_type();
                 const google::protobuf::EnumValueDescriptor* enum_val = enum_desc->FindValueByName(value);
                 if (!enum_val) {
-                    // Try parsing as int
-                    int int_val = std::stoi(value);
-                    enum_val = enum_desc->FindValueByNumber(int_val);
+                    std::string upper = value;
+                    std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c){ return std::toupper(c); });
+                    enum_val = enum_desc->FindValueByName(upper);
+                }
+                if (!enum_val) {
+                    for (int i = 0; i < enum_desc->value_count(); ++i) {
+                        const auto* ev = enum_desc->value(i);
+                        std::string ev_name = ev->name();
+                        std::string upper = value;
+                        std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char c){ return std::toupper(c); });
+                        if (ev_name == upper || ev_name.find(upper) != std::string::npos) {
+                            enum_val = ev;
+                            break;
+                        }
+                    }
+                }
+                if (!enum_val) {
+                    try {
+                        int int_val = std::stoi(value);
+                        enum_val = enum_desc->FindValueByNumber(int_val);
+                    } catch (...) {}
                 }
                 if (!enum_val) return false;
                 refl->SetEnum(msg, field, enum_val);
@@ -126,16 +163,30 @@ bool MeshCodec::set_config_value(
     }
     
     if (out_is_module) {
-        out_modified_bytes = module_config.SerializeAsString();
+        meshtastic::ModuleConfig single_mod;
+        const auto* target_f = single_mod.GetDescriptor()->FindFieldByName(module_name);
+        if (target_f) {
+            single_mod.GetReflection()->MutableMessage(&single_mod, target_f)->CopyFrom(*msg);
+            out_modified_bytes = single_mod.SerializeAsString();
+        } else {
+            out_modified_bytes = module_config.SerializeAsString();
+        }
     } else {
-        out_modified_bytes = config.SerializeAsString();
+        meshtastic::Config single_cfg;
+        const auto* target_f = single_cfg.GetDescriptor()->FindFieldByName(module_name);
+        if (target_f) {
+            single_cfg.GetReflection()->MutableMessage(&single_cfg, target_f)->CopyFrom(*msg);
+            out_modified_bytes = single_cfg.SerializeAsString();
+        } else {
+            out_modified_bytes = config.SerializeAsString();
+        }
     }
     
     return true;
 }
 
 std::string MeshCodec::encode_admin_packet(
-    uint32_t from_node, uint32_t to_node, const std::string& modified_bytes, bool is_module)
+    uint32_t from_node, uint32_t to_node, const std::string& modified_bytes, bool is_module, uint32_t packet_id)
 {
     meshtastic::AdminMessage admin;
     if (is_module) {
@@ -145,6 +196,14 @@ std::string MeshCodec::encode_admin_packet(
     }
     
     meshtastic::MeshPacket pkt;
+    if (packet_id == 0) {
+        static std::mt19937 g_rng{std::random_device{}()};
+        static std::mutex g_rng_mu;
+        std::lock_guard<std::mutex> lk(g_rng_mu);
+        packet_id = g_rng();
+        if (packet_id == 0) packet_id = 1;
+    }
+    pkt.set_id(packet_id);
     pkt.set_from(from_node);
     pkt.set_to(to_node);
     pkt.set_want_ack(true);
@@ -640,12 +699,18 @@ std::vector<std::string> MeshCodec::decode_config_lines(
             const auto& l = cfg.lora();
             add("--- LoRa ---");
             add_bool("lora.use_preset", l.use_preset());
+            add_str("lora.modem_preset", meshtastic::Config_LoRaConfig_ModemPreset_Name(l.modem_preset()));
+            add_str("lora.region", meshtastic::Config_LoRaConfig_RegionCode_Name(l.region()));
             add_int("lora.tx_power", l.tx_power());
             add_int("lora.channel_num", l.channel_num());
             add_int("lora.frequency_offset", l.frequency_offset());
             add_int("lora.bandwidth", l.bandwidth());
             add_int("lora.spread_factor", l.spread_factor());
             add_int("lora.coding_rate", l.coding_rate());
+            add_int("lora.hop_limit", l.hop_limit());
+            add_bool("lora.tx_enabled", l.tx_enabled());
+            add_bool("lora.override_duty_cycle", l.override_duty_cycle());
+            add_bool("lora.sx126x_rx_boosted_gain", l.sx126x_rx_boosted_gain());
         }
         if (cfg.has_bluetooth()) {
             const auto& bt = cfg.bluetooth();
@@ -654,6 +719,14 @@ std::vector<std::string> MeshCodec::decode_config_lines(
             add_int("bluetooth.fixed_pin", static_cast<int64_t>(bt.fixed_pin()));
             add_str("bluetooth.mode",
                     meshtastic::Config_BluetoothConfig_PairingMode_Name(bt.mode()));
+        }
+        if (cfg.has_security()) {
+            const auto& s = cfg.security();
+            add("--- Security ---");
+            add_bool("security.is_managed", s.is_managed());
+            add_bool("security.serial_enabled", s.serial_enabled());
+            add_bool("security.debug_log_api_enabled", s.debug_log_api_enabled());
+            add_bool("security.admin_channel_enabled", s.admin_channel_enabled());
         }
     }
     return out;
