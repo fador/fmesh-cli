@@ -31,6 +31,8 @@
     myNodeId: '',
     nodeMarkers: new Map(),     // node_num -> Leaflet Marker
     nodeTrails: new Map(),      // node_num -> Leaflet Polyline
+    locationHistoryRows: [],    // cached GPS history rows from /api/locations
+    selectedNodeNumForMap: null,// node_num currently highlighted/selected on map
     rfLinks: [],                // array of raw link objects from /api/links
     rfLinkPolylines: [],        // array of Leaflet Polylines
     hasInitialMapFit: false,    // true once the map has initially fit bounds to nodes
@@ -272,6 +274,16 @@
     layerGroupTrails = L.layerGroup().addTo(map);
     layerGroupPacketAnim = L.layerGroup().addTo(map);
     layerGroupNodes = L.layerGroup().addTo(map);
+
+    // Deselect node/track when clicking on empty map canvas
+    map.on('click', () => {
+      if (state.selectedNodeNumForMap != null) {
+        state.selectedNodeNumForMap = null;
+        if (el.mapNodeDrawer) el.mapNodeDrawer.classList.add('collapsed');
+        if (el.mapBackdrop) el.mapBackdrop.classList.remove('visible');
+        renderLocationTrails();
+      }
+    });
 
     // Re-render co-located marker positions on zoom so pixel separation remains consistent
     map.on('zoomend', () => {
@@ -577,13 +589,16 @@
       const res = await fetch(`/api/locations?since=${sinceTs}&limit=1000`);
       if (!res.ok) return;
       const rows = await res.json();
-      renderLocationTrails(rows);
+      state.locationHistoryRows = rows || [];
+      renderLocationTrails();
     } catch (err) {
       console.error('Error fetching locations:', err);
     }
   }
 
-  function renderLocationTrails(rows) {
+  function renderLocationTrails(providedRows) {
+    if (providedRows) state.locationHistoryRows = providedRows;
+    const rows = state.locationHistoryRows;
     if (!map || !layerGroupTrails) return;
     layerGroupTrails.clearLayers();
     state.nodeTrails.clear();
@@ -593,33 +608,144 @@
     // Group locations by node_num
     const byNode = new Map();
     rows.forEach(r => {
-      if (r.latitude !== 0 && r.longitude !== 0) {
+      if (r.latitude != null && r.longitude != null && r.latitude !== 0 && r.longitude !== 0) {
         if (!byNode.has(r.node_num)) byNode.set(r.node_num, []);
-        byNode.get(r.node_num).push([r.latitude, r.longitude]);
+        byNode.get(r.node_num).push({
+          lat: r.latitude,
+          lng: r.longitude,
+          alt: r.altitude,
+          ts: r.ts
+        });
       }
     });
 
     const colors = ['#06b6d4', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#3b82f6'];
-    let idx = 0;
+    const selectedNum = state.selectedNodeNumForMap;
 
-    byNode.forEach((points, nodeNum) => {
-      if (points.length < 2) return;
-      const color = colors[idx++ % colors.length];
-      const poly = L.polyline(points, {
-        color: color,
-        weight: 3,
-        opacity: 0.8
-      }).addTo(layerGroupTrails);
+    // Collect all nodes with tracks
+    const trackEntries = Array.from(byNode.entries());
 
+    // Sort entries so that the selected track is rendered last (on top of others)
+    trackEntries.sort((a, b) => {
+      if (a[0] === selectedNum) return 1;
+      if (b[0] === selectedNum) return -1;
+      return 0;
+    });
+
+    let colorIdx = 0;
+    const nodeColors = new Map();
+    trackEntries.forEach(([nodeNum]) => {
+      if (!nodeColors.has(nodeNum)) {
+        nodeColors.set(nodeNum, colors[colorIdx++ % colors.length]);
+      }
+    });
+
+    trackEntries.forEach(([nodeNum, rawPoints]) => {
+      // Chronological sort
+      const points = [...rawPoints].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      const isSelected = Boolean(selectedNum != null && selectedNum === nodeNum);
+      const color = nodeColors.get(nodeNum) || '#06b6d4';
       const node = state.nodes.get(nodeNum);
       const name = node ? (node.long_name || node.short_name) : `!${nodeNum.toString(16)}`;
-      poly.bindTooltip(`Track: ${escapeHtml(name)} (${points.length} points)`);
-      state.nodeTrails.set(nodeNum, poly);
+
+      // 1. Render Track Polyline
+      if (points.length >= 2) {
+        const latLngs = points.map(p => [p.lat, p.lng]);
+        const poly = L.polyline(latLngs, {
+          color: color,
+          weight: isSelected ? 6 : (selectedNum ? 2.5 : 3.5),
+          opacity: isSelected ? 1.0 : (selectedNum ? 0.35 : 0.8),
+          lineCap: 'round',
+          lineJoin: 'round',
+          className: isSelected ? 'track-polyline track-polyline-selected' : 'track-polyline'
+        }).addTo(layerGroupTrails);
+
+        poly.bindTooltip(`
+          <div class="track-tooltip">
+            <div style="font-weight:700;">Track: ${escapeHtml(name)}</div>
+            <div style="font-size:0.75rem; color:#94a3b8;">${points.length} GPS points</div>
+            ${isSelected ? '<div style="font-size:0.7rem; color:#38bdf8; font-weight:600; margin-top:2px;">★ Selected Track</div>' : ''}
+          </div>
+        `);
+
+        poly.on('click', (e) => {
+          if (e && e.originalEvent) L.DomEvent.stopPropagation(e);
+          const targetNode = state.nodes.get(nodeNum) || { node_num: nodeNum, short_name: `!${nodeNum.toString(16)}` };
+          selectNodeForMap(targetNode);
+        });
+
+        if (isSelected) {
+          poly.bringToFront();
+        }
+
+        state.nodeTrails.set(nodeNum, poly);
+      }
+
+      // 2. Render actual points as circles that can be seen
+      points.forEach((pt, pIdx) => {
+        const isStart = pIdx === 0;
+        const isEnd = pIdx === points.length - 1;
+
+        // Selected track points are bold, prominent, high-contrast circles
+        const radius = isSelected ? (isEnd || isStart ? 7 : 5.5) : 3.5;
+        const strokeColor = isSelected ? '#ffffff' : color;
+        const strokeWidth = isSelected ? (isEnd ? 3 : 2) : 1;
+        const fillColor = isSelected ? (isEnd ? '#22c55e' : (isStart ? '#3b82f6' : color)) : color;
+        const fillOpacity = isSelected ? 1.0 : (selectedNum ? 0.35 : 0.7);
+
+        const pointMarker = L.circleMarker([pt.lat, pt.lng], {
+          radius: radius,
+          color: strokeColor,
+          weight: strokeWidth,
+          fillColor: fillColor,
+          fillOpacity: fillOpacity,
+          className: isSelected ? 'track-point-marker selected-track-point' : 'track-point-marker'
+        }).addTo(layerGroupTrails);
+
+        const timeStr = pt.ts ? new Date(pt.ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Unknown time';
+        const dateStr = pt.ts ? new Date(pt.ts * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+        const altStr = (pt.alt != null && pt.alt !== 0) ? `<div class="track-point-alt"><strong>Altitude:</strong> ${pt.alt} m</div>` : '';
+        const pointLabel = isStart ? 'Start Point' : (isEnd ? 'Latest Point' : `Point #${pIdx + 1}`);
+
+        pointMarker.bindTooltip(`
+          <div class="track-point-tooltip">
+            <div class="track-point-header">${escapeHtml(name)} • ${pointLabel}</div>
+            <div class="track-point-time" style="color:${isSelected ? (isEnd ? '#22c55e' : (isStart ? '#38bdf8' : color)) : color};">
+              ${dateStr} ${timeStr}
+            </div>
+            <div class="track-point-coords">${pt.lat.toFixed(5)}, ${pt.lng.toFixed(5)}</div>
+            ${altStr}
+          </div>
+        `, {
+          direction: 'top',
+          offset: [0, -6]
+        });
+
+        pointMarker.on('mouseover', () => {
+          pointMarker.setRadius(radius + 2);
+          pointMarker.setStyle({ weight: strokeWidth + 1 });
+        });
+        pointMarker.on('mouseout', () => {
+          pointMarker.setRadius(radius);
+          pointMarker.setStyle({ weight: strokeWidth });
+        });
+
+        pointMarker.on('click', (e) => {
+          if (e && e.originalEvent) L.DomEvent.stopPropagation(e);
+          const targetNode = state.nodes.get(nodeNum) || { node_num: nodeNum, short_name: `!${nodeNum.toString(16)}` };
+          selectNodeForMap(targetNode);
+        });
+
+        if (isSelected) {
+          pointMarker.bringToFront();
+        }
+      });
     });
   }
 
   function selectNodeForMap(node) {
     state.selectedNodeNumForMap = node.node_num;
+    renderLocationTrails();
     el.mapNodeDrawer.classList.remove('collapsed');
     if (el.mapBackdrop && window.innerWidth <= 768) {
       el.mapBackdrop.classList.add('visible');
@@ -633,6 +759,8 @@
     const humidity = node.relative_humidity != null ? `${node.relative_humidity.toFixed(1)} %` : 'N/A';
     const pressure = node.barometric_pressure != null ? `${node.barometric_pressure.toFixed(1)} hPa` : 'N/A';
     const channelUtil = node.channel_util != null ? `${node.channel_util.toFixed(1)} %` : 'N/A';
+    const nodePts = (state.locationHistoryRows || []).filter(r => r.node_num === node.node_num && r.latitude !== 0 && r.longitude !== 0);
+    const trackInfo = nodePts.length > 0 ? `<div class="stat-box"><span class="stat-label">GPS Track</span><span class="stat-value" style="color:var(--accent-cyan); font-size:0.9rem;">${nodePts.length} pts</span></div>` : '';
 
     el.drawerNodeDetails.innerHTML = `
       <div class="node-drawer-card">
@@ -672,6 +800,7 @@
             <span class="stat-label">Channel Util</span>
             <span class="stat-value">${channelUtil}</span>
           </div>
+          ${trackInfo}
         </div>
 
         <div class="drawer-actions">
@@ -2390,6 +2519,7 @@
       el.mapNodeDrawer.classList.add('collapsed');
       if (el.mapBackdrop) el.mapBackdrop.classList.remove('visible');
       state.selectedNodeNumForMap = null;
+      renderLocationTrails();
     });
 
     // Mobile Chat Back Button
@@ -2435,6 +2565,8 @@
       el.packetActivityHud?.classList.remove('open');
       el.mapNodeDrawer?.classList.add('collapsed');
       el.mapBackdrop?.classList.remove('visible');
+      state.selectedNodeNumForMap = null;
+      renderLocationTrails();
     });
 
     // Nodes search & sort

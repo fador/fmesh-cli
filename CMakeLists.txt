@@ -320,6 +320,7 @@ if(WIN32)
 endif()
 target_include_directories(fmesh-cli-tests PRIVATE src ${GENERATED_PROTO_DIR} tests)
 add_test(NAME fmesh-cli-tests COMMAND fmesh-cli-tests)
+set_tests_properties(fmesh-cli-tests PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 # Live integration test (requires a real paired device; not part of ctest).
 add_executable(fmesh-cli-live tests/test_live_send.cpp src/app/config.cpp)
