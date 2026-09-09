@@ -1292,6 +1292,105 @@ body {
   border-bottom-right-radius: var(--radius-sm);
 }
 
+.chat-message-bubble-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-width: 75%;
+}
+
+.chat-message-row.outgoing .chat-message-bubble-wrapper {
+  align-items: flex-end;
+}
+
+.chat-message-row.incoming .chat-message-bubble-wrapper {
+  align-items: flex-start;
+}
+
+.chat-reply-quote {
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-bottom: 0.25rem;
+  font-style: italic;
+}
+
+.chat-message-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.chat-reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: var(--bg-surface-elevated, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
+  border-radius: 12px;
+  font-size: 0.75rem;
+  cursor: default;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.chat-reaction-chip:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: scale(1.05);
+}
+
+.chat-reaction-chip .reaction-emoji {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.chat-reaction-chip .reaction-count {
+  font-weight: 600;
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+}
+
+.chat-reaction-actions {
+  position: absolute;
+  top: -14px;
+  display: none;
+  background: var(--bg-surface, #1e2430);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
+  border-radius: 20px;
+  padding: 2px 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  z-index: 10;
+  gap: 2px;
+}
+
+.chat-message-row.incoming .chat-reaction-actions {
+  left: 8px;
+}
+
+.chat-message-row.outgoing .chat-reaction-actions {
+  right: 8px;
+}
+
+.chat-message-bubble-wrapper:hover .chat-reaction-actions {
+  display: flex;
+}
+
+.btn-quick-react {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: 10px;
+  transition: transform 0.1s ease, background 0.1s ease;
+  line-height: 1;
+}
+
+.btn-quick-react:hover {
+  transform: scale(1.25);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .chat-composer {
   padding: 1rem 1.5rem;
   background: var(--bg-surface);

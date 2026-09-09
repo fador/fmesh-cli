@@ -101,7 +101,9 @@ public:
                        uint32_t to_node,
                        uint32_t channel_idx,
                        const std::string& text,
-                       bool want_ack);
+                       bool want_ack = true,
+                       uint32_t reply_id = 0,
+                       uint32_t emoji = 0);
 
     // Send a traceroute request packet. Returns the packet_id used (0 on failure).
     uint32_t send_traceroute(const std::string& device_id,

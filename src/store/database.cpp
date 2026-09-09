@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS messages(
     rx_rssi       INTEGER,
     hop_start     INTEGER,
     hop_limit     INTEGER,
-    relay_node    INTEGER
+    relay_node    INTEGER,
+    reply_id      INTEGER,
+    emoji         INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_messages_window
     ON messages(device, window_kind, window_target, ts);
@@ -110,9 +112,51 @@ CREATE INDEX IF NOT EXISTS idx_device_config_device
     ON device_config(device);
 )SQL";
 
+static std::string normalize_db_device(const std::string& raw) {
+    if (raw.empty()) return {};
+    auto pos = raw.rfind("/dev_");
+    if (pos != std::string::npos) {
+        std::string s = raw.substr(pos + 5);
+        std::string mac;
+        for (char c : s) {
+            if (c == '_') mac += ':';
+            else mac += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        return mac;
+    }
+    if (raw.rfind("dev_", 0) == 0 && raw.size() == 21) {
+        std::string s = raw.substr(4);
+        std::string mac;
+        for (char c : s) {
+            if (c == '_') mac += ':';
+            else mac += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        return mac;
+    }
+    bool is_mac = true;
+    int colons = 0;
+    std::string norm_mac;
+    for (char c : raw) {
+        if (c == ':' || c == '-' || c == '_') {
+            norm_mac += ':';
+            colons++;
+        } else if (std::isxdigit(static_cast<unsigned char>(c))) {
+            norm_mac += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        } else {
+            is_mac = false;
+            break;
+        }
+    }
+    if (is_mac && colons == 5 && norm_mac.size() == 17) {
+        return norm_mac;
+    }
+    return raw;
+}
+
 const char* kSelectMessagesPrefix =
     "SELECT rowid,device,window_kind,window_target,direction,from_node,to_node,"
-    "channel_idx,text,ts,packet_id,ack_state,rx_snr,rx_rssi,hop_start,hop_limit,relay_node "
+    "channel_idx,text,ts,packet_id,ack_state,rx_snr,rx_rssi,hop_start,hop_limit,relay_node,"
+    "reply_id,emoji "
     "FROM messages ";
 
 const char* kSelectTelemetryPrefix =
@@ -139,6 +183,8 @@ StoredMessage read_message_row(sqlite3_stmt* st) {
     m.hop_start = static_cast<uint32_t>(sqlite3_column_int64(st, 14));
     m.hop_limit = static_cast<uint32_t>(sqlite3_column_int64(st, 15));
     m.relay_node = static_cast<uint32_t>(sqlite3_column_int64(st, 16));
+    m.reply_id = static_cast<uint32_t>(sqlite3_column_int64(st, 17));
+    m.emoji = static_cast<uint32_t>(sqlite3_column_int64(st, 18));
     return m;
 }
 
@@ -201,6 +247,76 @@ bool Database::open(const std::string& path) {
     sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN hop_start INTEGER;", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN hop_limit INTEGER;", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN relay_node INTEGER;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN reply_id INTEGER;", nullptr, nullptr, nullptr);
+    sqlite3_exec(db_, "ALTER TABLE messages ADD COLUMN emoji INTEGER;", nullptr, nullptr, nullptr);
+
+    // Migration: normalize historical device identifiers (e.g. /org/bluez/.../dev_XX_XX... or dev_XX_XX...)
+    const std::vector<std::string> simple_tables = {
+        "messages", "location_history", "telemetry_history", "packet_log"
+    };
+    for (const auto& tbl : simple_tables) {
+        std::string q = "SELECT DISTINCT device FROM " + tbl + " WHERE device LIKE '%dev_%';";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db_, q.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+            std::vector<std::pair<std::string, std::string>> renames;
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                if (auto* p = sqlite3_column_text(st, 0)) {
+                    std::string orig = reinterpret_cast<const char*>(p);
+                    std::string norm = normalize_db_device(orig);
+                    if (!norm.empty() && norm != orig) {
+                        renames.push_back({orig, norm});
+                    }
+                }
+            }
+            sqlite3_finalize(st);
+            for (const auto& [orig, norm] : renames) {
+                std::string upd = "UPDATE " + tbl + " SET device = ? WHERE device = ?;";
+                sqlite3_stmt* ust = nullptr;
+                if (sqlite3_prepare_v2(db_, upd.c_str(), -1, &ust, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_text(ust, 1, norm.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(ust, 2, orig.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(ust);
+                    sqlite3_finalize(ust);
+                }
+            }
+        }
+    }
+    const std::vector<std::string> pk_tables = {
+        "channels", "nodes", "device_config"
+    };
+    for (const auto& tbl : pk_tables) {
+        std::string q = "SELECT DISTINCT device FROM " + tbl + " WHERE device LIKE '%dev_%';";
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db_, q.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+            std::vector<std::pair<std::string, std::string>> renames;
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                if (auto* p = sqlite3_column_text(st, 0)) {
+                    std::string orig = reinterpret_cast<const char*>(p);
+                    std::string norm = normalize_db_device(orig);
+                    if (!norm.empty() && norm != orig) {
+                        renames.push_back({orig, norm});
+                    }
+                }
+            }
+            sqlite3_finalize(st);
+            for (const auto& [orig, norm] : renames) {
+                std::string upd = "UPDATE OR IGNORE " + tbl + " SET device = ? WHERE device = ?;";
+                sqlite3_stmt* ust = nullptr;
+                if (sqlite3_prepare_v2(db_, upd.c_str(), -1, &ust, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_text(ust, 1, norm.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_bind_text(ust, 2, orig.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(ust);
+                    sqlite3_finalize(ust);
+                }
+                std::string del = "DELETE FROM " + tbl + " WHERE device = ?;";
+                if (sqlite3_prepare_v2(db_, del.c_str(), -1, &ust, nullptr) == SQLITE_OK) {
+                    sqlite3_bind_text(ust, 1, orig.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(ust);
+                    sqlite3_finalize(ust);
+                }
+            }
+        }
+    }
     // Migration: ensure telemetry_history exists
     sqlite3_exec(db_, "CREATE TABLE IF NOT EXISTS telemetry_history("
                        "rowid INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -509,14 +625,22 @@ std::vector<Database::DeviceConfigItem> Database::load_device_config(const std::
 std::vector<WindowKey> Database::get_all_windows(const std::string& device) {
     std::vector<WindowKey> out;
     if (!db_) return out;
+    std::string norm_d = normalize_db_device(device);
+    std::string under_d = norm_d;
+    std::replace(under_d.begin(), under_d.end(), ':', '_');
+
     const char* sql = "SELECT DISTINCT window_kind, window_target FROM messages "
-                      "WHERE (device=? OR ?='' OR device='' OR device LIKE '%' || ? OR ? LIKE '%' || device)";
+                      "WHERE (device=? OR ?='' OR device='' OR device=? OR device=? "
+                      "OR device LIKE '%' || ? || '%' OR device LIKE '%' || ? || '%' OR ? LIKE '%' || device)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_text(st, 1, device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 3, device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 4, device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, norm_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, under_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, norm_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 6, under_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 7, device.c_str(), -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW) {
         WindowKey w;
         w.device = device;
@@ -534,8 +658,8 @@ int64_t Database::insert_message(const StoredMessage& m) {
     if (!db_) return 0;
     const char* sql =
         "INSERT INTO messages(device,window_kind,window_target,direction,from_node,to_node,"
-        "channel_idx,text,ts,packet_id,ack_state,rx_snr,rx_rssi,hop_start,hop_limit,relay_node) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+        "channel_idx,text,ts,packet_id,ack_state,rx_snr,rx_rssi,hop_start,hop_limit,relay_node,reply_id,emoji) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
     sqlite3_bind_text(st, 1, m.device.c_str(), -1, SQLITE_TRANSIENT);
@@ -554,6 +678,8 @@ int64_t Database::insert_message(const StoredMessage& m) {
     sqlite3_bind_int64(st, 14, m.hop_start);
     sqlite3_bind_int64(st, 15, m.hop_limit);
     sqlite3_bind_int64(st, 16, m.relay_node);
+    sqlite3_bind_int64(st, 17, m.reply_id);
+    sqlite3_bind_int64(st, 18, m.emoji);
     int64_t rowid = 0;
     if (sqlite3_step(st) == SQLITE_DONE) rowid = sqlite3_last_insert_rowid(db_);
     sqlite3_finalize(st);
@@ -576,19 +702,27 @@ void Database::update_ack_state(int64_t rowid, const std::string& ack_state) {
 std::vector<StoredMessage> Database::recent_messages(const WindowKey& w, int limit) {
     std::vector<StoredMessage> out;
     if (!db_) return out;
+    std::string norm_d = normalize_db_device(w.device);
+    std::string under_d = norm_d;
+    std::replace(under_d.begin(), under_d.end(), ':', '_');
+
     std::string sql = std::string(kSelectMessagesPrefix) +
-        "WHERE (device=? OR ?='' OR device='' OR device LIKE '%' || ? OR ? LIKE '%' || device) "
+        "WHERE (device=? OR ?='' OR device='' OR device=? OR device=? "
+        "OR device LIKE '%' || ? || '%' OR device LIKE '%' || ? || '%' OR ? LIKE '%' || device) "
         "AND window_kind=? AND window_target=? "
         "ORDER BY ts DESC LIMIT ?";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_text(st, 1, w.device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, w.device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 3, w.device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 4, w.device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 5, w.kind.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 6, w.target);
-    sqlite3_bind_int(st, 7, limit);
+    sqlite3_bind_text(st, 3, norm_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, under_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, norm_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 6, under_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 7, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 8, w.kind.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 9, w.target);
+    sqlite3_bind_int(st, 10, limit);
     while (sqlite3_step(st) == SQLITE_ROW) {
         out.push_back(read_message_row(st));
     }
@@ -798,20 +932,28 @@ std::vector<Database::LocationRow> Database::get_recent_node_locations(uint64_t 
 std::vector<StoredMessage> Database::get_messages_paginated(const WindowKey& w, int limit, int offset) {
     std::vector<StoredMessage> out;
     if (!db_) return out;
+    std::string norm_d = normalize_db_device(w.device);
+    std::string under_d = norm_d;
+    std::replace(under_d.begin(), under_d.end(), ':', '_');
+
     std::string sql = std::string(kSelectMessagesPrefix) +
-        "WHERE (device=? OR ?='' OR device='' OR device LIKE '%' || ? OR ? LIKE '%' || device) "
+        "WHERE (device=? OR ?='' OR device='' OR device=? OR device=? "
+        "OR device LIKE '%' || ? || '%' OR device LIKE '%' || ? || '%' OR ? LIKE '%' || device) "
         "AND window_kind=? AND window_target=? "
         "ORDER BY ts DESC LIMIT ? OFFSET ?";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return out;
     sqlite3_bind_text(st, 1, w.device.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, w.device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 3, w.device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 4, w.device.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 5, w.kind.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 6, w.target);
-    sqlite3_bind_int(st, 7, limit);
-    sqlite3_bind_int(st, 8, offset);
+    sqlite3_bind_text(st, 3, norm_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, under_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, norm_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 6, under_d.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 7, w.device.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 8, w.kind.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 9, w.target);
+    sqlite3_bind_int(st, 10, limit);
+    sqlite3_bind_int(st, 11, offset);
     while (sqlite3_step(st) == SQLITE_ROW) {
         out.push_back(read_message_row(st));
     }

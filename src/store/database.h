@@ -44,6 +44,8 @@ struct StoredMessage {
     uint32_t hop_start = 0;
     uint32_t hop_limit = 0;
     uint32_t relay_node = 0;
+    uint32_t reply_id = 0;
+    uint32_t emoji = 0;
 };
 
 // SQLite-backed persistence. One DB file holds nodes, channels, messages,

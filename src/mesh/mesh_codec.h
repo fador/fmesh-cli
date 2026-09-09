@@ -44,9 +44,11 @@ public:
         uint32_t to_node,
         uint32_t channel_idx,
         const std::string& text,
-        bool want_ack,
-        uint32_t hop_limit,
-        const std::vector<uint8_t>& pki_pubkey);
+        bool want_ack = true,
+        uint32_t hop_limit = 0,
+        const std::vector<uint8_t>& pki_pubkey = {},
+        uint32_t reply_id = 0,
+        uint32_t emoji = 0);
 
     // Build a ToRadio{packet=MeshPacket{...}} carrying a RouteDiscovery traceroute request.
     static std::string encode_traceroute_packet(

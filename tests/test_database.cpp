@@ -701,5 +701,85 @@ TEST_F(DatabaseTest, GetRecentTelemetryAndMaxTs) {
     EXPECT_EQ(after[0].node_num, 0x2222u);
 }
 
+TEST_F(DatabaseTest, StoredMessageReactionFields) {
+    StoredMessage m;
+    m.device = "EB:48:10:B7:40:72";
+    m.window_kind = "channel";
+    m.window_target = 0;
+    m.direction = "in";
+    m.from_node = 0x1234;
+    m.to_node = kBroadcastNodeNum;
+    m.channel_idx = 0;
+    m.text = "❤️";
+    m.ts = 1700000000;
+    m.packet_id = 999;
+    m.reply_id = 888;
+    m.emoji = 10084;
+    int64_t rowid = db_.insert_message(m);
+    EXPECT_GT(rowid, 0);
+
+    WindowKey wk{"EB:48:10:B7:40:72", "channel", 0};
+    auto msgs = db_.recent_messages(wk);
+    ASSERT_EQ(msgs.size(), 1u);
+    EXPECT_EQ(msgs[0].reply_id, 888u);
+    EXPECT_EQ(msgs[0].emoji, 10084u);
+    EXPECT_EQ(msgs[0].text, "❤️");
+
+    auto found = db_.find_by_packet_id(999);
+    ASSERT_TRUE(found.has_value());
+    EXPECT_EQ(found->reply_id, 888u);
+    EXPECT_EQ(found->emoji, 10084u);
+}
+
+TEST_F(DatabaseTest, DeviceNormalizationAndCrossFormatMatching) {
+    // 1. Insert historical message using BlueZ D-Bus path
+    StoredMessage old_msg;
+    old_msg.device = "/org/bluez/hci0/dev_EB_48_10_B7_40_72";
+    old_msg.window_kind = "channel";
+    old_msg.window_target = 0;
+    old_msg.direction = "in";
+    old_msg.from_node = 0x1111;
+    old_msg.to_node = kBroadcastNodeNum;
+    old_msg.channel_idx = 0;
+    old_msg.text = "Historical message 1";
+    old_msg.ts = 1000;
+    old_msg.packet_id = 101;
+    db_.insert_message(old_msg);
+
+    // 2. Insert new reaction using canonical MAC
+    StoredMessage new_rxn;
+    new_rxn.device = "EB:48:10:B7:40:72";
+    new_rxn.window_kind = "channel";
+    new_rxn.window_target = 0;
+    new_rxn.direction = "in";
+    new_rxn.from_node = 0x2222;
+    new_rxn.to_node = kBroadcastNodeNum;
+    new_rxn.channel_idx = 0;
+    new_rxn.text = "👍";
+    new_rxn.ts = 2000;
+    new_rxn.packet_id = 102;
+    new_rxn.reply_id = 101;
+    new_rxn.emoji = 128077;
+    db_.insert_message(new_rxn);
+
+    // 3. Querying with canonical MAC should return BOTH messages (neither disappeared!)
+    WindowKey wk{"EB:48:10:B7:40:72", "channel", 0};
+    auto msgs = db_.get_messages_paginated(wk, 50, 0);
+    ASSERT_EQ(msgs.size(), 2u);
+    EXPECT_EQ(msgs[0].text, "Historical message 1");
+    EXPECT_EQ(msgs[1].text, "👍");
+    EXPECT_EQ(msgs[1].reply_id, 101u);
+
+    // 4. Close and re-open to trigger the migration loop
+    db_.close();
+    ASSERT_TRUE(db_.open(db_path_));
+
+    // After migration, the historical message's device was updated to canonical format
+    auto msgs_after = db_.get_messages_paginated(wk, 50, 0);
+    ASSERT_EQ(msgs_after.size(), 2u);
+    EXPECT_EQ(msgs_after[0].device, "EB:48:10:B7:40:72");
+    EXPECT_EQ(msgs_after[1].device, "EB:48:10:B7:40:72");
+}
+
 
 

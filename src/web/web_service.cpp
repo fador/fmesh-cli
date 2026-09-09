@@ -88,7 +88,9 @@ nlohmann::json message_to_json(const StoredMessage& m) {
         {"hop_start", m.hop_start},
         {"hop_limit", m.hop_limit},
         {"hops", hops},
-        {"relay_node", m.relay_node}
+        {"relay_node", m.relay_node},
+        {"reply_id", m.reply_id},
+        {"emoji", m.emoji}
     };
 }
 
@@ -607,12 +609,36 @@ void WebService::register_routes() {
             uint32_t channel_idx = j.value("channel_idx", 0);
             std::string text = j.value("text", "");
             bool want_ack = j.value("want_ack", true);
+            uint32_t reply_id = j.value("reply_id", 0);
+            uint32_t emoji = j.value("emoji", 0);
 
-            if (text.empty()) {
+            if (text.empty() && emoji == 0) {
                 return HttpResponse::bad_request("Empty message text");
             }
+            if (text.empty() && emoji != 0) {
+                if (emoji > 1) {
+                    uint32_t cp = emoji;
+                    if (cp <= 0x7F) {
+                        text += static_cast<char>(cp);
+                    } else if (cp <= 0x7FF) {
+                        text += static_cast<char>(0xC0 | ((cp >> 6) & 0x1F));
+                        text += static_cast<char>(0x80 | (cp & 0x3F));
+                    } else if (cp <= 0xFFFF) {
+                        text += static_cast<char>(0xE0 | ((cp >> 12) & 0x0F));
+                        text += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                        text += static_cast<char>(0x80 | (cp & 0x3F));
+                    } else if (cp <= 0x10FFFF) {
+                        text += static_cast<char>(0xF0 | ((cp >> 18) & 0x07));
+                        text += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+                        text += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+                        text += static_cast<char>(0x80 | (cp & 0x3F));
+                    }
+                } else if (emoji == 1) {
+                    text = "👍";
+                }
+            }
 
-            uint32_t packet_id = mesh_service_.send_text(device, to_node, channel_idx, text, want_ack);
+            uint32_t packet_id = mesh_service_.send_text(device, to_node, channel_idx, text, want_ack, reply_id, emoji);
             if (packet_id == 0) {
                 return HttpResponse::error("Failed to transmit message");
             }

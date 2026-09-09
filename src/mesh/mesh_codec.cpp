@@ -222,7 +222,9 @@ std::string MeshCodec::encode_text_packet(
     const std::string& text,
     bool want_ack,
     uint32_t hop_limit,
-    const std::vector<uint8_t>& pki_pubkey) {
+    const std::vector<uint8_t>& pki_pubkey,
+    uint32_t reply_id,
+    uint32_t emoji) {
 
     ToRadio tr;
     auto* pkt = tr.mutable_packet();
@@ -235,6 +237,8 @@ std::string MeshCodec::encode_text_packet(
     auto* data = pkt->mutable_decoded();
     data->set_portnum(PortNum::TEXT_MESSAGE_APP);
     data->set_payload(text);
+    if (reply_id != 0) data->set_reply_id(reply_id);
+    if (emoji != 0) data->set_emoji(emoji);
 
     if (!pki_pubkey.empty()) {
         pkt->set_pki_encrypted(true);
@@ -330,6 +334,26 @@ Channel channel_from_proto(const meshtastic::Channel& c) {
     return ch;
 }
 
+static std::string codepoint_to_utf8(uint32_t cp) {
+    std::string s;
+    if (cp <= 0x7F) {
+        s += static_cast<char>(cp);
+    } else if (cp <= 0x7FF) {
+        s += static_cast<char>(0xC0 | ((cp >> 6) & 0x1F));
+        s += static_cast<char>(0x80 | (cp & 0x3F));
+    } else if (cp <= 0xFFFF) {
+        s += static_cast<char>(0xE0 | ((cp >> 12) & 0x0F));
+        s += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        s += static_cast<char>(0x80 | (cp & 0x3F));
+    } else if (cp <= 0x10FFFF) {
+        s += static_cast<char>(0xF0 | ((cp >> 18) & 0x07));
+        s += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+        s += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+        s += static_cast<char>(0x80 | (cp & 0x3F));
+    }
+    return s;
+}
+
 std::optional<MeshEvent> decode_packet(
     const DeviceId& device, const MeshPacket& pkt) {
     // We only surface decoded (i.e. decrypted-by-radio) packets to the UI.
@@ -355,10 +379,16 @@ std::optional<MeshEvent> decode_packet(
         ev.relay_node = pkt.relay_node();
         ev.broadcast = (pkt.to() == kBroadcastNodeNum || pkt.to() == 0);
         ev.want_ack = pkt.want_ack();
+        ev.reply_id = d.reply_id();
+        ev.emoji = d.emoji();
         if (d.portnum() == PortNum::ALERT_APP) {
             ev.text = "[ALERT] " + d.payload();
         } else if (d.portnum() == PortNum::DETECTION_SENSOR_APP) {
             ev.text = "[SENSOR] " + d.payload();
+        } else if (d.payload().empty() && d.emoji() > 1) {
+            ev.text = codepoint_to_utf8(d.emoji());
+        } else if (d.payload().empty() && d.emoji() == 1) {
+            ev.text = "👍";
         } else {
             ev.text = d.payload();
         }

@@ -404,7 +404,9 @@ uint32_t MeshService::send_text(const std::string& device_id,
                                 uint32_t to_node,
                                 uint32_t channel_idx,
                                 const std::string& text,
-                                bool want_ack) {
+                                bool want_ack,
+                                uint32_t reply_id,
+                                uint32_t emoji) {
     bool is_virtual = (device_id.find("virtual:") == 0);
     std::string virtual_stream = virtual_stream_for(device_id);
     std::string virtual_target = virtual_original_for(device_id);
@@ -428,7 +430,8 @@ uint32_t MeshService::send_text(const std::string& device_id,
         if (peer && peer->has_public_key) pubkey = peer->public_key;
     }
     auto bytes = MeshCodec::encode_text_packet(pid, to_node, channel_idx,
-                                               text, want_ack, 0, pubkey);
+                                               text, want_ack, 0, pubkey,
+                                               reply_id, emoji);
                                                
     if (is_virtual) {
         if (sync_manager_) {
@@ -442,7 +445,21 @@ uint32_t MeshService::send_text(const std::string& device_id,
     // Persist the outgoing message.
     StoredMessage m;
     m.device = device_id;
-    if (to_node == kBroadcastNodeNum) {
+    m.reply_id = reply_id;
+    m.emoji = emoji;
+    if (reply_id != 0) {
+        auto parent = db_.find_by_packet_id(reply_id);
+        if (parent) {
+            m.window_kind = parent->window_kind;
+            m.window_target = parent->window_target;
+        } else if (to_node == kBroadcastNodeNum) {
+            m.window_kind = "channel";
+            m.window_target = channel_idx;
+        } else {
+            m.window_kind = "dm";
+            m.window_target = to_node;
+        }
+    } else if (to_node == kBroadcastNodeNum) {
         m.window_kind = "channel";
         m.window_target = channel_idx;
     } else {
@@ -1132,7 +1149,25 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
             if (is_duplicate(e.from_node, e.packet_id)) {
                 StoredMessage dup;
                 dup.device = e.device;
-                if (e.broadcast) {
+                dup.reply_id = e.reply_id;
+                dup.emoji = e.emoji;
+                if (e.reply_id != 0) {
+                    auto parent = db_.find_by_packet_id(e.reply_id);
+                    if (parent) {
+                        dup.window_kind = parent->window_kind;
+                        dup.window_target = parent->window_target;
+                    } else if (e.broadcast) {
+                        dup.window_kind = "channel";
+                        dup.window_target = e.channel_idx;
+                    } else {
+                        dup.window_kind = "dm";
+                        uint32_t peer = e.from_node;
+                        if (rt->my_node_num && e.from_node == rt->my_node_num) {
+                            peer = e.to_node;
+                        }
+                        dup.window_target = peer;
+                    }
+                } else if (e.broadcast) {
                     dup.window_kind = "channel";
                     dup.window_target = e.channel_idx;
                 } else {
@@ -1163,7 +1198,25 @@ void MeshService::handle_event(const std::shared_ptr<DeviceRuntime>& rt, MeshEve
             // Persist inbound message.
             StoredMessage m;
             m.device = e.device;
-            if (e.broadcast) {
+            m.reply_id = e.reply_id;
+            m.emoji = e.emoji;
+            if (e.reply_id != 0) {
+                auto parent = db_.find_by_packet_id(e.reply_id);
+                if (parent) {
+                    m.window_kind = parent->window_kind;
+                    m.window_target = parent->window_target;
+                } else if (e.broadcast) {
+                    m.window_kind = "channel";
+                    m.window_target = e.channel_idx;
+                } else {
+                    m.window_kind = "dm";
+                    uint32_t peer = e.from_node;
+                    if (rt->my_node_num && e.from_node == rt->my_node_num) {
+                        peer = e.to_node;
+                    }
+                    m.window_target = peer;
+                }
+            } else if (e.broadcast) {
                 m.window_kind = "channel";
                 m.window_target = e.channel_idx;
             } else {

@@ -70,6 +70,8 @@ struct EvTextReceived {
     bool broadcast = false;
     bool want_ack = false;
     bool duplicate = false;
+    uint32_t reply_id = 0;
+    uint32_t emoji = 0;
     std::string text;
 };
 

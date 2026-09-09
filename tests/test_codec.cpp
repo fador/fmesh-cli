@@ -74,6 +74,49 @@ TEST(MeshCodec, DecodeTextReceived) {
     EXPECT_EQ(t->rx_time, 1700000000u);
 }
 
+TEST(MeshCodec, EncodeAndDecodeReactionWithPayload) {
+    auto bytes = MeshCodec::encode_text_packet(
+        0x5555, kBroadcastNodeNum, 0, "❤️", false, 3, {}, 0x1111, 10084);
+    meshtastic::ToRadio tr;
+    ASSERT_TRUE(tr.ParseFromString(bytes));
+    EXPECT_EQ(tr.packet().decoded().reply_id(), 0x1111u);
+    EXPECT_EQ(tr.packet().decoded().emoji(), 10084u);
+    EXPECT_EQ(tr.packet().decoded().payload(), "❤️");
+
+    meshtastic::FromRadio fr;
+    *fr.mutable_packet() = tr.packet();
+    fr.mutable_packet()->set_from(0x9999);
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* t = std::get_if<EvTextReceived>(&*ev);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->reply_id, 0x1111u);
+    EXPECT_EQ(t->emoji, 10084u);
+    EXPECT_EQ(t->text, "❤️");
+}
+
+TEST(MeshCodec, DecodeReactionWithCodepointOnly) {
+    meshtastic::FromRadio fr;
+    auto* pkt = fr.mutable_packet();
+    pkt->set_from(0x8888);
+    pkt->set_to(kBroadcastNodeNum);
+    pkt->set_id(0x6666);
+    pkt->mutable_decoded()->set_portnum(meshtastic::PortNum::TEXT_MESSAGE_APP);
+    pkt->mutable_decoded()->set_reply_id(0x2222);
+    pkt->mutable_decoded()->set_emoji(128077); // UTF-32 👍 (0x1F44D)
+    pkt->mutable_decoded()->set_payload("");  // empty payload
+
+    uint32_t config_id = 0;
+    auto ev = MeshCodec::decode_from_radio(fr.SerializeAsString(), "dev1", config_id);
+    ASSERT_TRUE(ev.has_value());
+    auto* t = std::get_if<EvTextReceived>(&*ev);
+    ASSERT_NE(t, nullptr);
+    EXPECT_EQ(t->reply_id, 0x2222u);
+    EXPECT_EQ(t->emoji, 128077u);
+    EXPECT_EQ(t->text, "👍");
+}
+
 TEST(MeshCodec, DecodePositionPacket) {
     meshtastic::FromRadio fr;
     auto* pkt = fr.mutable_packet();

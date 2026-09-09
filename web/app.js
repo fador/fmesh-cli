@@ -1037,7 +1037,26 @@
       return;
     }
 
-    el.chatMessagesContainer.innerHTML = messages.map(m => {
+    // Group reactions by reply_id
+    const reactionsByParent = new Map();
+    const packetIdSet = new Set(messages.map(m => m.packet_id).filter(Boolean));
+
+    messages.forEach(m => {
+      if (m.reply_id && m.emoji) {
+        if (!reactionsByParent.has(m.reply_id)) {
+          reactionsByParent.set(m.reply_id, []);
+        }
+        reactionsByParent.get(m.reply_id).push(m);
+      }
+    });
+
+    const rowsHtml = messages.map(m => {
+      const isReaction = Boolean(m.reply_id && m.emoji);
+      // If this reaction belongs to a message present in current view, attach to parent rather than rendering separate row
+      if (isReaction && packetIdSet.has(m.reply_id)) {
+        return '';
+      }
+
       const isOut = m.direction === 'out';
       const senderNode = state.nodes.get(m.from_node);
       let senderName = '';
@@ -1101,6 +1120,53 @@
         }
       }
 
+      // Reactions attached to this message
+      let reactionsHtml = '';
+      if (m.packet_id && reactionsByParent.has(m.packet_id)) {
+        const reactions = reactionsByParent.get(m.packet_id);
+        const counts = new Map();
+        reactions.forEach(r => {
+          const char = r.text || '👍';
+          const rSender = state.nodes.get(r.from_node);
+          const rName = rSender ? (rSender.short_name || rSender.long_name || ('!' + r.from_node.toString(16))) : ('!' + (r.from_node ? r.from_node.toString(16) : 'unknown'));
+          if (!counts.has(char)) counts.set(char, { count: 0, senders: [] });
+          const entry = counts.get(char);
+          entry.count++;
+          entry.senders.push(rName);
+        });
+        reactionsHtml = `
+          <div class="chat-message-reactions">
+            ${Array.from(counts.entries()).map(([char, data]) => `
+              <span class="chat-reaction-chip" title="Reacted by: ${escapeHtml(data.senders.join(', '))}">
+                <span class="reaction-emoji">${escapeHtml(char)}</span>
+                <span class="reaction-count">${data.count}</span>
+              </span>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      // Quick reaction action bar on hover
+      let reactionActionsHtml = '';
+      if (m.packet_id) {
+        reactionActionsHtml = `
+          <div class="chat-reaction-actions">
+            <button class="btn-quick-react" onclick="window.meshApp.sendReaction(${m.packet_id}, 128077, '👍', ${m.from_node || 0})" title="React 👍">👍</button>
+            <button class="btn-quick-react" onclick="window.meshApp.sendReaction(${m.packet_id}, 10084, '❤️', ${m.from_node || 0})" title="React ❤️">❤️</button>
+            <button class="btn-quick-react" onclick="window.meshApp.sendReaction(${m.packet_id}, 128514, '😂', ${m.from_node || 0})" title="React 😂">😂</button>
+            <button class="btn-quick-react" onclick="window.meshApp.sendReaction(${m.packet_id}, 128558, '😮', ${m.from_node || 0})" title="React 😮">😮</button>
+            <button class="btn-quick-react" onclick="window.meshApp.sendReaction(${m.packet_id}, 127881, '🎉', ${m.from_node || 0})" title="React 🎉">🎉</button>
+          </div>
+        `;
+      }
+
+      let replyQuoteHtml = '';
+      if (m.reply_id && !m.emoji) {
+        replyQuoteHtml = `<div class="chat-reply-quote">↳ Reply to message #${m.reply_id.toString(16)}</div>`;
+      } else if (isReaction && !packetIdSet.has(m.reply_id)) {
+        replyQuoteHtml = `<div class="chat-reply-quote">↳ Reaction to message #${m.reply_id.toString(16)}</div>`;
+      }
+
       return `
         <div class="chat-message-row ${isOut ? 'outgoing' : 'incoming'}">
           <div class="chat-message-meta">
@@ -1109,13 +1175,19 @@
             ${ackBadge}
             ${sigBadge}
           </div>
-          <div class="chat-message-bubble">
-            ${escapeHtml(m.text)}
+          <div class="chat-message-bubble-wrapper">
+            <div class="chat-message-bubble">
+              ${replyQuoteHtml}
+              ${escapeHtml(m.text || '')}
+            </div>
+            ${reactionsHtml}
+            ${reactionActionsHtml}
           </div>
         </div>
       `;
     }).join('');
 
+    el.chatMessagesContainer.innerHTML = rowsHtml;
     scrollToChatBottom();
   }
 
@@ -3084,6 +3156,36 @@
         el.chatContainer.classList.add('chat-active');
       }
       loadMessages();
+    },
+
+    sendReaction: async function(packetId, emojiCode, emojiChar, targetNode) {
+      if (!packetId) return;
+      try {
+        const payload = {
+          device: state.activeDeviceId,
+          reply_id: packetId,
+          emoji: emojiCode,
+          text: emojiChar || '',
+          want_ack: true
+        };
+        if (state.selectedTarget.kind === 'channel') {
+          payload.channel_idx = state.selectedTarget.target;
+          payload.to_node = 0xFFFFFFFF;
+        } else {
+          payload.channel_idx = 0;
+          payload.to_node = state.selectedTarget.target;
+        }
+        const res = await fetch('/api/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          await loadMessages();
+        }
+      } catch (err) {
+        console.error('Failed to send reaction:', err);
+      }
     },
 
     focusOnMap: function(nodeNum) {
