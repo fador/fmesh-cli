@@ -118,6 +118,7 @@ file(MAKE_DIRECTORY "${GENERATED_PROTO_DIR}/meshtastic")
 set(PROTOC_ARGS
     "--proto_path=${PROTO_ROOT}"
     "--cpp_out=${GENERATED_PROTO_DIR}"
+    "--experimental_allow_proto3_optional"
 )
 if(protobuf_SOURCE_DIR)
     list(APPEND PROTOC_ARGS "--proto_path=${protobuf_SOURCE_DIR}/src")
