@@ -129,7 +129,7 @@ TEST(MeshCodec, EncodeDisconnect) {
     ASSERT_FALSE(bytes.empty());
     meshtastic::ToRadio tr;
     ASSERT_TRUE(tr.ParseFromString(bytes));
-    EXPECT_TRUE(tr.has_disconnect());
+    EXPECT_EQ(tr.payload_variant_case(), meshtastic::ToRadio::kDisconnect);
     EXPECT_TRUE(tr.disconnect());
 }
 
