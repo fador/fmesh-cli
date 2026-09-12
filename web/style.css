@@ -320,22 +320,28 @@ body {
   font-size: 0.8rem;
   color: var(--text-secondary);
   gap: 0.6rem;
+  transition: color 0.15s ease;
+}
+
+.toggle-control:hover {
+  color: var(--text-primary);
 }
 
 .toggle-control input {
   display: none;
 }
 
-.toggle-slider {
+.toggle-control .toggle-slider {
   width: 32px;
   height: 18px;
   background-color: var(--border-subtle);
   border-radius: 9999px;
   position: relative;
+  flex-shrink: 0;
   transition: background-color 0.2s;
 }
 
-.toggle-slider::after {
+.toggle-control .toggle-slider::after {
   content: '';
   position: absolute;
   top: 2px;
@@ -3568,7 +3574,7 @@ body {
   height: 0;
 }
 
-.toggle-slider {
+.config-toggle-switch .toggle-slider {
   position: absolute;
   cursor: pointer;
   top: 0;
@@ -3581,7 +3587,7 @@ body {
   transition: all 0.25s ease;
 }
 
-.toggle-slider:before {
+.config-toggle-switch .toggle-slider:before {
   position: absolute;
   content: "";
   height: 16px;
