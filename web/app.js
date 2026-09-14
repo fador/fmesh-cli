@@ -241,6 +241,62 @@
   }
 
 
+  const MAP_PREFS_KEY = 'mesh_map_overlay_prefs';
+
+  function saveMapOverlayPrefs() {
+    try {
+      const prefs = {
+        showLinks: state.showLinks,
+        showPacketAnim: state.showPacketAnim,
+        showTrails: state.showTrails,
+        showLabels: state.showLabels,
+        darkMap: state.darkMap,
+        historyHours: state.historyHours
+      };
+      localStorage.setItem(MAP_PREFS_KEY, JSON.stringify(prefs));
+    } catch (e) {
+      // Ignore localStorage errors
+    }
+  }
+
+  function loadMapOverlayPrefs() {
+    try {
+      const raw = localStorage.getItem(MAP_PREFS_KEY);
+      if (!raw) return;
+      const prefs = JSON.parse(raw);
+      if (typeof prefs.showLinks === 'boolean') {
+        state.showLinks = prefs.showLinks;
+        if (el.layerToggleLinks) el.layerToggleLinks.checked = prefs.showLinks;
+      }
+      if (typeof prefs.showPacketAnim === 'boolean') {
+        state.showPacketAnim = prefs.showPacketAnim;
+        if (el.layerTogglePacketAnim) el.layerTogglePacketAnim.checked = prefs.showPacketAnim;
+      }
+      if (typeof prefs.showTrails === 'boolean') {
+        state.showTrails = prefs.showTrails;
+        if (el.layerToggleTrails) el.layerToggleTrails.checked = prefs.showTrails;
+      }
+      if (typeof prefs.showLabels === 'boolean') {
+        state.showLabels = prefs.showLabels;
+        if (el.layerToggleNames) el.layerToggleNames.checked = prefs.showLabels;
+      }
+      if (typeof prefs.darkMap === 'boolean') {
+        state.darkMap = prefs.darkMap;
+        if (el.layerToggleDarkMap) el.layerToggleDarkMap.checked = prefs.darkMap;
+      }
+      if (typeof prefs.historyHours === 'number') {
+        state.historyHours = prefs.historyHours;
+        const pills = document.querySelectorAll('#trail-time-pills .pill');
+        pills.forEach(pill => {
+          const hours = parseInt(pill.dataset.hours, 10);
+          pill.classList.toggle('active', hours === prefs.historyHours);
+        });
+      }
+    } catch (e) {
+      // Ignore JSON parse errors
+    }
+  }
+
   // ==========================================================================
   // OpenStreetMap Setup
   // ==========================================================================
@@ -249,6 +305,8 @@
       console.warn('Leaflet not loaded yet.');
       return;
     }
+
+    loadMapOverlayPrefs();
 
     // Default center (Helsinki coordinates or fallback)
     map = L.map('map', {
@@ -263,9 +321,9 @@
       }
     });
 
-    tileLayer = L.tileLayer(osmTileUrl, {
+    tileLayer = L.tileLayer(state.darkMap ? darkTileUrl : osmTileUrl, {
       maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
+      attribution: state.darkMap ? '&copy; OpenStreetMap &copy; CARTO' : '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
     L.control.attribution({ position: 'bottomright' }).addTo(map);
@@ -2545,11 +2603,13 @@
 
     el.layerToggleLinks?.addEventListener('change', () => {
       state.showLinks = el.layerToggleLinks.checked;
+      saveMapOverlayPrefs();
       renderRfLinks();
     });
 
     el.layerTogglePacketAnim?.addEventListener('change', () => {
       state.showPacketAnim = el.layerTogglePacketAnim.checked;
+      saveMapOverlayPrefs();
       if (!state.showPacketAnim && layerGroupPacketAnim) {
         layerGroupPacketAnim.clearLayers();
       }
@@ -2565,16 +2625,19 @@
 
     el.layerToggleTrails?.addEventListener('change', () => {
       state.showTrails = el.layerToggleTrails.checked;
+      saveMapOverlayPrefs();
       fetchLocationHistory();
     });
 
     el.layerToggleNames?.addEventListener('change', () => {
       state.showLabels = el.layerToggleNames.checked;
+      saveMapOverlayPrefs();
       renderMapNodes();
     });
 
     el.layerToggleDarkMap?.addEventListener('change', () => {
       state.darkMap = el.layerToggleDarkMap.checked;
+      saveMapOverlayPrefs();
       updateMapTiles(state.darkMap);
     });
 
@@ -2584,6 +2647,7 @@
       document.querySelectorAll('#trail-time-pills .pill').forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
       state.historyHours = parseInt(pill.dataset.hours, 10);
+      saveMapOverlayPrefs();
       fetchLocationHistory();
     });
 
