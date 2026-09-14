@@ -315,30 +315,50 @@ body {
 .toggle-control {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   user-select: none;
   font-size: 0.8rem;
   color: var(--text-secondary);
   gap: 0.6rem;
-  transition: color 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .toggle-control:hover {
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
+.toggle-control .toggle-label {
+  order: 1;
+  flex: 1;
+}
+
 .toggle-control input {
-  display: none;
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  pointer-events: none;
 }
 
 .toggle-control .toggle-slider {
+  order: 2;
   width: 32px;
   height: 18px;
   background-color: var(--border-subtle);
   border-radius: 9999px;
   position: relative;
   flex-shrink: 0;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, box-shadow 0.2s;
+}
+
+.toggle-control input:focus-visible + .toggle-slider {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
 }
 
 .toggle-control .toggle-slider::after {
