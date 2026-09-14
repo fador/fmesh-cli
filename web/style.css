@@ -268,6 +268,27 @@ body {
   padding: 1rem;
   width: 280px;
   box-shadow: var(--shadow-lg);
+  transition: all 0.25s ease;
+}
+
+.map-floating-panel.collapsed {
+  padding-bottom: 0.75rem;
+}
+
+.map-floating-panel.collapsed .panel-header {
+  margin-bottom: 0;
+}
+
+.map-floating-panel.collapsed .panel-body {
+  display: none;
+}
+
+.map-floating-panel .icon-chevron {
+  transition: transform 0.2s ease;
+}
+
+.map-floating-panel.collapsed .icon-chevron {
+  transform: rotate(-90deg);
 }
 
 .panel-header {
@@ -2320,6 +2341,10 @@ body {
 
   .btn-close-panel {
     display: block;
+  }
+
+  #btn-collapse-map-options {
+    display: none;
   }
 
   /* Packet Activity HUD as Bottom Sheet on Mobile */

@@ -64,6 +64,7 @@
     // Map
     mapContainer: document.getElementById('map'),
     btnRecenterMap: document.getElementById('btn-recenter-map'),
+    btnCollapseMapOptions: document.getElementById('btn-collapse-map-options'),
     mapFloatingPanel: document.getElementById('map-floating-panel'),
     btnToggleMapOptions: document.getElementById('btn-toggle-map-options'),
     btnCloseMapOptions: document.getElementById('btn-close-map-options'),
@@ -251,7 +252,8 @@
         showTrails: state.showTrails,
         showLabels: state.showLabels,
         darkMap: state.darkMap,
-        historyHours: state.historyHours
+        historyHours: state.historyHours,
+        panelCollapsed: el.mapFloatingPanel?.classList.contains('collapsed') || false
       };
       localStorage.setItem(MAP_PREFS_KEY, JSON.stringify(prefs));
     } catch (e) {
@@ -291,6 +293,9 @@
           const hours = parseInt(pill.dataset.hours, 10);
           pill.classList.toggle('active', hours === prefs.historyHours);
         });
+      }
+      if (typeof prefs.panelCollapsed === 'boolean' && el.mapFloatingPanel && window.innerWidth > 768) {
+        el.mapFloatingPanel.classList.toggle('collapsed', prefs.panelCollapsed);
       }
     } catch (e) {
       // Ignore JSON parse errors
@@ -2663,6 +2668,12 @@
       if (el.chatContainer) {
         el.chatContainer.classList.remove('chat-active');
       }
+    });
+
+    // Map Controls Panel Collapse
+    el.btnCollapseMapOptions?.addEventListener('click', () => {
+      el.mapFloatingPanel?.classList.toggle('collapsed');
+      saveMapOverlayPrefs();
     });
 
     // Mobile Map Controls Toggles
