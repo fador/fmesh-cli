@@ -228,6 +228,7 @@ bool Database::open(const std::string& path) {
         db_ = nullptr;
         return false;
     }
+    sqlite3_busy_timeout(db_, 5000);
     sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
     sqlite3_exec(db_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
     if (!exec(kSchemaSql)) {
