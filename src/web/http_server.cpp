@@ -190,11 +190,17 @@ void HttpServer::broadcast_sse(const std::string& event, const std::string& json
         frame += "event: " + event + "\n";
     }
     frame += "data: " + json_data + "\n\n";
+    broadcast_sse_raw(frame);
+}
 
+void HttpServer::broadcast_sse_raw(const std::string& raw_frame) {
     std::lock_guard<std::mutex> lock(conn_mu_);
     for (auto& conn : connections_) {
         if (conn && conn->state == ConnState::StreamingSse) {
-            conn->out_buf += frame;
+            std::lock_guard<std::mutex> conn_lock(conn->out_mu);
+            if (conn->out_buf.size() < 1024 * 1024) {
+                conn->out_buf += raw_frame;
+            }
         }
     }
 }
@@ -255,6 +261,7 @@ bool HttpServer::start(const std::string& host, int port) {
         bound_port_ = requested_port_;
     }
 
+    last_sse_keepalive_ = std::chrono::steady_clock::now();
     running_ = true;
     worker_thread_ = std::thread(&HttpServer::worker_loop, this);
 
@@ -318,6 +325,7 @@ void HttpServer::worker_loop() {
                 } else if (conn->state == ConnState::StreamingSse) {
                     // In SSE, check for socket errors / close via POLLIN, and POLLOUT if pending data
                     events |= net::kPollIn;
+                    std::lock_guard<std::mutex> conn_lock(conn->out_mu);
                     if (conn->out_written < conn->out_buf.size()) {
                         events |= net::kPollOut;
                     }
@@ -326,6 +334,13 @@ void HttpServer::worker_loop() {
                 poll_fds.push_back({conn->fd, events, 0});
                 active_conns.push_back(conn);
             }
+        }
+
+        // Periodic SSE keepalive heartbeat (every 15s)
+        auto now = std::chrono::steady_clock::now();
+        if (now - last_sse_keepalive_ >= std::chrono::seconds(15)) {
+            last_sse_keepalive_ = now;
+            broadcast_sse_raw(": keepalive\n\n");
         }
 
         int rc = net::poll_sockets(poll_fds, 50); // 50ms timeout
@@ -522,6 +537,7 @@ void HttpServer::process_request(Connection& conn) {
             "\r\n"
             ": connected\n\n";
 
+        std::lock_guard<std::mutex> conn_lock(conn.out_mu);
         conn.out_buf = std::move(raw);
         conn.out_written = 0;
         conn.state = ConnState::StreamingSse;
@@ -626,43 +642,55 @@ HttpResponse HttpServer::serve_static(const std::string& path) {
 }
 
 void HttpServer::handle_write(Connection& conn) {
-    if (conn.out_written >= conn.out_buf.size()) {
-        if (conn.state == ConnState::WritingResponse) {
-            // Finished sending standard HTTP response -> close connection
-            conn.state = ConnState::Closed;
-            net::close_socket(conn.fd);
-            conn.fd = kInvalidSocket;
-        } else if (conn.state == ConnState::StreamingSse) {
-            // Flushed all queued SSE messages
-            conn.out_buf.clear();
+    std::string chunk;
+    {
+        std::lock_guard<std::mutex> conn_lock(conn.out_mu);
+        if (conn.out_written >= conn.out_buf.size()) {
+            if (conn.state == ConnState::WritingResponse) {
+                // Finished sending standard HTTP response -> close connection
+                conn.state = ConnState::Closed;
+                net::close_socket(conn.fd);
+                conn.fd = kInvalidSocket;
+            } else if (conn.state == ConnState::StreamingSse) {
+                // Flushed all queued SSE messages
+                conn.out_buf.clear();
+                conn.out_written = 0;
+            }
+            return;
+        }
+
+        // For SSE streaming, compact already sent bytes so the buffer doesn't accumulate
+        if (conn.state == ConnState::StreamingSse && conn.out_written > 0) {
+            conn.out_buf.erase(0, conn.out_written);
             conn.out_written = 0;
         }
-        return;
+
+        chunk = conn.out_buf.substr(conn.out_written);
     }
 
-    size_t remaining = conn.out_buf.size() - conn.out_written;
-    const char* ptr = conn.out_buf.data() + conn.out_written;
-
-    int n = ::send(conn.fd, ptr, static_cast<int>(remaining), 0);
+    int n = ::send(conn.fd, chunk.data(), static_cast<int>(chunk.size()), 0);
     if (n <= 0) {
         if (n < 0 && net::is_would_block()) return;
         // Error on write -> close socket
+        std::lock_guard<std::mutex> conn_lock(conn.out_mu);
         conn.state = ConnState::Closed;
         net::close_socket(conn.fd);
         conn.fd = kInvalidSocket;
         return;
     }
 
-    conn.out_written += static_cast<size_t>(n);
-
-    if (conn.out_written >= conn.out_buf.size()) {
-        if (conn.state == ConnState::WritingResponse) {
-            conn.state = ConnState::Closed;
-            net::close_socket(conn.fd);
-            conn.fd = kInvalidSocket;
-        } else if (conn.state == ConnState::StreamingSse) {
-            conn.out_buf.clear();
-            conn.out_written = 0;
+    {
+        std::lock_guard<std::mutex> conn_lock(conn.out_mu);
+        conn.out_written += static_cast<size_t>(n);
+        if (conn.out_written >= conn.out_buf.size()) {
+            if (conn.state == ConnState::WritingResponse) {
+                conn.state = ConnState::Closed;
+                net::close_socket(conn.fd);
+                conn.fd = kInvalidSocket;
+            } else if (conn.state == ConnState::StreamingSse) {
+                conn.out_buf.clear();
+                conn.out_written = 0;
+            }
         }
     }
 }
