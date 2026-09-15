@@ -3074,10 +3074,17 @@
   // SSE Real-time Updates Pipeline
   // ==========================================================================
 
+  let sseReconnectTimer = null;
+  let sseEverConnected = false;
+
   function initSSE() {
     if (state.eventSource) {
       try { state.eventSource.close(); } catch (_) {}
       state.eventSource = null;
+    }
+    if (sseReconnectTimer) {
+      clearTimeout(sseReconnectTimer);
+      sseReconnectTimer = null;
     }
 
     try {
@@ -3089,12 +3096,31 @@
           el.liveIndicator.querySelector('.live-dot').className = 'live-dot active';
           el.liveStatusText.textContent = 'LIVE';
         }
+        if (sseEverConnected) {
+          // Reconnection catch-up: fetch any missed messages, nodes, and packet activity
+          fetchStatus();
+          fetchDevices();
+          fetchNodes();
+          fetchRecentPackets();
+          fetchConversations();
+          loadMessages();
+        }
+        sseEverConnected = true;
       };
 
       sse.onerror = () => {
         if (el.liveIndicator) {
           el.liveIndicator.querySelector('.live-dot').className = 'live-dot pulse';
           el.liveStatusText.textContent = 'RECONNECTING';
+        }
+        // If EventSource closed completely (e.g. server restart), trigger backoff retry
+        if (sse.readyState === EventSource.CLOSED) {
+          if (!sseReconnectTimer) {
+            sseReconnectTimer = setTimeout(() => {
+              sseReconnectTimer = null;
+              initSSE();
+            }, 3000);
+          }
         }
       };
 
@@ -3194,6 +3220,22 @@
         try {
           const raw = JSON.parse(e.data);
           handleRawPacket(raw);
+        } catch (err) {}
+      });
+
+      // 9. Device connected
+      sse.addEventListener('device_connected', (e) => {
+        try {
+          fetchStatus();
+          fetchDevices();
+        } catch (err) {}
+      });
+
+      // 10. Device disconnected
+      sse.addEventListener('device_disconnected', (e) => {
+        try {
+          fetchStatus();
+          fetchDevices();
         } catch (err) {}
       });
 
