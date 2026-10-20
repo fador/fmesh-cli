@@ -35,6 +35,12 @@ static std::string to_upper(std::string s) {
     return s;
 }
 
+// Helper: create a proxy to a BlueZ object. sdbus-c++ 2.x requires explicit
+// ServiceName/ObjectPath types (no implicit conversion from std::string).
+static std::unique_ptr<sdbus::IProxy> bluez_proxy(sdbus::IConnection& conn, const std::string& path) {
+    return sdbus::createProxy(conn, sdbus::ServiceName{"org.bluez"}, sdbus::ObjectPath{path});
+}
+
 BluezClient::BluezClient(BleDeviceSpec spec, EventSink sink)
     : spec_(std::move(spec)), sink_(std::move(sink)) {}
 
@@ -299,7 +305,7 @@ void BluezClient::emit_raw(const std::string& fromradio_bytes) {
 
 bool BluezClient::find_adapter() {
     try {
-        auto obj_mgr = sdbus::createProxy(*conn_, "org.bluez", "/");
+        auto obj_mgr = bluez_proxy(*conn_, "/");
         std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
         obj_mgr->callMethod("GetManagedObjects")
             .onInterface("org.freedesktop.DBus.ObjectManager")
@@ -319,7 +325,7 @@ bool BluezClient::find_adapter() {
 }
 
 std::optional<std::string> BluezClient::scan_for_device(int timeout_s) {
-    auto adapter = sdbus::createProxy(*conn_, "org.bluez", adapter_path_);
+    auto adapter = bluez_proxy(*conn_, adapter_path_);
     try {
         adapter->callMethod("StartDiscovery").onInterface("org.bluez.Adapter1");
     } catch (const sdbus::Error& e) {
@@ -336,7 +342,7 @@ std::optional<std::string> BluezClient::scan_for_device(int timeout_s) {
         std::this_thread::sleep_for(500ms);
         ++iter;
         LOG_DEBUG() << "scan iter " << iter << " running_=" << running_.load();
-        auto obj_mgr = sdbus::createProxy(*conn_, "org.bluez", "/");
+        auto obj_mgr = bluez_proxy(*conn_, "/");
         std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
         try {
             obj_mgr->callMethod("GetManagedObjects")
@@ -380,7 +386,7 @@ std::optional<std::string> BluezClient::scan_for_device(int timeout_s) {
 }
 
 bool BluezClient::ensure_paired_and_connected(bool do_pair) {
-    auto device = sdbus::createProxy(*conn_, "org.bluez", device_path_);
+    auto device = bluez_proxy(*conn_, device_path_);
 
     // Read current state — the device may not be immediately visible on
     // D-Bus right after scanning, so tolerate a transient ENXIO here.
@@ -495,7 +501,7 @@ bool BluezClient::ensure_paired_and_connected(bool do_pair) {
 
 bool BluezClient::discover_gatt() {
     // Enumerate managed objects under the device path and find our chars.
-    auto obj_mgr = sdbus::createProxy(*conn_, "org.bluez", "/");
+    auto obj_mgr = bluez_proxy(*conn_, "/");
     std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
     try {
         obj_mgr->callMethod("GetManagedObjects")
@@ -530,15 +536,15 @@ bool BluezClient::discover_gatt() {
                 << " logradio=" << (logradio_path_.empty() ? "(none)" : logradio_path_);
 
     // Cache proxies for the characteristics we'll use repeatedly.
-    toradio_proxy_   = sdbus::createProxy(*conn_, "org.bluez", toradio_path_);
-    fromradio_proxy_ = sdbus::createProxy(*conn_, "org.bluez", fromradio_path_);
+    toradio_proxy_   = bluez_proxy(*conn_, toradio_path_);
+    fromradio_proxy_ = bluez_proxy(*conn_, fromradio_path_);
     return true;
 }
 
 void BluezClient::subscribe_notifications() {
     // FROMNUM -> drain FROMRADIO.
     if (!fromnum_path_.empty()) {
-        fromnum_proxy_ = sdbus::createProxy(*conn_, "org.bluez", fromnum_path_);
+        fromnum_proxy_ = bluez_proxy(*conn_, fromnum_path_);
         try {
             fromnum_proxy_->callMethod("StartNotify").onInterface("org.bluez.GattCharacteristic1");
             LOG_DEBUG() << "FROMNUM StartNotify succeeded";
@@ -561,7 +567,7 @@ void BluezClient::subscribe_notifications() {
 
     // LOGRADIO (optional) -> emit log line events.
     if (!logradio_path_.empty()) {
-        logradio_proxy_ = sdbus::createProxy(*conn_, "org.bluez", logradio_path_);
+        logradio_proxy_ = bluez_proxy(*conn_, logradio_path_);
         try {
             logradio_proxy_->callMethod("StartNotify").onInterface("org.bluez.GattCharacteristic1");
         } catch (const sdbus::Error&) {}
@@ -631,7 +637,7 @@ std::string BluezClient::read_char_locked(const std::string& path) {
     std::unique_ptr<sdbus::IProxy> tmp;
     if (path == fromradio_path_ && fromradio_proxy_) ch = fromradio_proxy_.get();
     else if (!conn_) return {};
-    else { tmp = sdbus::createProxy(*conn_, "org.bluez", path); ch = tmp.get(); }
+    else { tmp = bluez_proxy(*conn_, path); ch = tmp.get(); }
     std::vector<uint8_t> result;
     std::map<std::string, sdbus::Variant> opts;
     opts["offset"] = sdbus::Variant{uint16_t(0)};  // enable long-read (Read Blob)
@@ -653,7 +659,7 @@ void BluezClient::write_char_locked(const std::string& path, const std::string& 
     std::unique_ptr<sdbus::IProxy> tmp;
     if (path == toradio_path_ && toradio_proxy_) ch = toradio_proxy_.get();
     else if (!conn_) return;
-    else { tmp = sdbus::createProxy(*conn_, "org.bluez", path); ch = tmp.get(); }
+    else { tmp = bluez_proxy(*conn_, path); ch = tmp.get(); }
     std::vector<uint8_t> v(bytes.begin(), bytes.end());
     std::map<std::string, sdbus::Variant> opts;
     opts["type"] = sdbus::Variant{std::string{"request"}};
@@ -676,7 +682,7 @@ void BleClient::scan_async(int timeout_s, std::function<void(const std::string&,
             
             // Find adapter
             std::string adapter_path;
-            auto obj_mgr = sdbus::createProxy(*conn, "org.bluez", "/");
+            auto obj_mgr = bluez_proxy(*conn, "/");
             std::map<sdbus::ObjectPath, std::map<std::string, std::map<std::string, sdbus::Variant>>> objects;
             obj_mgr->callMethod("GetManagedObjects")
                 .onInterface("org.freedesktop.DBus.ObjectManager")
@@ -694,7 +700,7 @@ void BleClient::scan_async(int timeout_s, std::function<void(const std::string&,
             }
 
             // Start discovery
-            auto adapter = sdbus::createProxy(*conn, "org.bluez", adapter_path);
+            auto adapter = bluez_proxy(*conn, adapter_path);
             adapter->callMethod("StartDiscovery").onInterface("org.bluez.Adapter1");
 
             auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(timeout_s);

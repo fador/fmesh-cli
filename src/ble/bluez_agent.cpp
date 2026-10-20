@@ -12,26 +12,27 @@ BluezAgent::~BluezAgent() { unregister(); }
 void BluezAgent::register_on(sdbus::IConnection& conn, const std::string& object_path) {
     path_ = object_path;
     conn_ = &conn;
-    object_ = sdbus::createObject(conn, path_);
+    object_ = sdbus::createObject(conn, sdbus::ObjectPath{path_});
 
-    object_->registerMethod("Release").onInterface("org.bluez.Agent1").implementedAs([this] { release(); });
-    object_->registerMethod("RequestPinCode").onInterface("org.bluez.Agent1")
-        .implementedAs([this](std::string device) { return request_pin_code(device); });
-    object_->registerMethod("DisplayPinCode").onInterface("org.bluez.Agent1")
-        .implementedAs([this](std::string device, std::string pincode) { display_pin_code(device, pincode); });
-    object_->registerMethod("RequestPasskey").onInterface("org.bluez.Agent1")
-        .implementedAs([this](std::string device) -> uint32_t { return request_passkey(device); });
-    object_->registerMethod("DisplayPasskey").onInterface("org.bluez.Agent1")
-        .implementedAs([this](std::string device, uint32_t passkey, uint16_t entered) { display_passkey(device, passkey, entered); });
-    object_->registerMethod("RequestConfirmation").onInterface("org.bluez.Agent1")
-        .implementedAs([this](std::string device, uint32_t passkey) { request_confirmation(device, passkey); });
-    object_->registerMethod("AuthorizeService").onInterface("org.bluez.Agent1")
-        .implementedAs([this](std::string device, std::string uuid) { authorize_service(device, uuid); });
-    object_->registerMethod("Cancel").onInterface("org.bluez.Agent1").implementedAs([this] { cancel(); });
-    object_->finishRegistration();
+    object_->addVTable(
+        sdbus::registerMethod("Release").implementedAs([this] { release(); }),
+        sdbus::registerMethod("RequestPinCode")
+            .implementedAs([this](std::string device) { return request_pin_code(device); }),
+        sdbus::registerMethod("DisplayPinCode")
+            .implementedAs([this](std::string device, std::string pincode) { display_pin_code(device, pincode); }),
+        sdbus::registerMethod("RequestPasskey")
+            .implementedAs([this](std::string device) -> uint32_t { return request_passkey(device); }),
+        sdbus::registerMethod("DisplayPasskey")
+            .implementedAs([this](std::string device, uint32_t passkey, uint16_t entered) { display_passkey(device, passkey, entered); }),
+        sdbus::registerMethod("RequestConfirmation")
+            .implementedAs([this](std::string device, uint32_t passkey) { request_confirmation(device, passkey); }),
+        sdbus::registerMethod("AuthorizeService")
+            .implementedAs([this](std::string device, std::string uuid) { authorize_service(device, uuid); }),
+        sdbus::registerMethod("Cancel").implementedAs([this] { cancel(); })
+    ).forInterface("org.bluez.Agent1");
 
     // RegisterAgent(path, capability)
-    auto agent_mgr = sdbus::createProxy(*conn_, "org.bluez", "/org/bluez");
+    auto agent_mgr = sdbus::createProxy(*conn_, sdbus::ServiceName{"org.bluez"}, sdbus::ObjectPath{"/org/bluez"});
     try {
         agent_mgr->callMethod("RegisterAgent")
             .onInterface("org.bluez.AgentManager1")
@@ -48,7 +49,7 @@ void BluezAgent::register_on(sdbus::IConnection& conn, const std::string& object
 
 void BluezAgent::unregister() {
     if (!conn_ || path_.empty()) return;
-    auto agent_mgr = sdbus::createProxy(*conn_, "org.bluez", "/org/bluez");
+    auto agent_mgr = sdbus::createProxy(*conn_, sdbus::ServiceName{"org.bluez"}, sdbus::ObjectPath{"/org/bluez"});
     try {
         agent_mgr->callMethod("UnregisterAgent")
             .onInterface("org.bluez.AgentManager1")
