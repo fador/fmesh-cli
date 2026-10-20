@@ -1,6 +1,15 @@
 #include "minitest.h"
 
+#ifndef _WIN32
+#include <csignal>
+#endif
+
 int main(int argc, char** argv) {
+#ifndef _WIN32
+    // Writes to closed sockets must not terminate the process (see main.cpp).
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
+
     std::string filter;
     if (argc > 1) {
         std::string arg = argv[1];

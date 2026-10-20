@@ -11,10 +11,19 @@
 #include <cstdio>
 #include <thread>
 
+#ifndef _WIN32
+#include <csignal>
+#endif
+
 using namespace meshcli;
 using namespace std::chrono_literals;
 
 int main(int argc, char** argv) {
+#ifndef _WIN32
+    // Writes to closed sockets must not terminate the process (see main.cpp).
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
+
     AppConfig cfg;
     if (!parse_args(argc, argv, cfg) || cfg.list_only) return 0;
     finalize_paths(cfg);
