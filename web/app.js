@@ -55,6 +55,7 @@
   // --- DOM Elements ---
   const el = {
     deviceSelect: document.getElementById('device-select'),
+    btnReconnectDevice: document.getElementById('btn-reconnect-device'),
     liveIndicator: document.getElementById('live-indicator'),
     liveStatusText: document.getElementById('live-status-text'),
     navTabs: document.getElementById('nav-tabs'),
@@ -2516,6 +2517,30 @@
       await fetchChannels();
       await loadMessages();
       await fetchRawPackets();
+    });
+
+    // Reconnect device button
+    el.btnReconnectDevice?.addEventListener('click', async () => {
+      const devId = state.activeDeviceId || el.deviceSelect?.value;
+      el.btnReconnectDevice.classList.add('spinning');
+      try {
+        const res = await fetch('/api/devices/reconnect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ device: devId })
+        });
+        const data = await res.json();
+        if (data.success) {
+          await fetchStatus();
+          await fetchDevices();
+        } else {
+          console.warn('Reconnect returned failure:', data);
+        }
+      } catch (err) {
+        console.error('Reconnect error:', err);
+      } finally {
+        setTimeout(() => el.btnReconnectDevice?.classList.remove('spinning'), 600);
+      }
     });
 
     // Telemetry node select, search, sort, filters, stepper

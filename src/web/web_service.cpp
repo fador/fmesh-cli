@@ -379,6 +379,37 @@ void WebService::register_routes() {
         return HttpResponse::bad_request("Missing device id");
     });
 
+    // POST /api/devices/reconnect
+    server_.post("/api/devices/reconnect", [this](const HttpRequest& req) {
+        std::string target_id;
+        try {
+            if (!req.body.empty()) {
+                auto j = nlohmann::json::parse(req.body);
+                target_id = j.value("device", "");
+            }
+        } catch (...) {}
+
+        if (target_id.empty()) {
+            target_id = active_device_id_;
+        }
+
+        if (target_id.empty()) {
+            auto ids = mesh_service_.device_ids();
+            if (!ids.empty()) target_id = ids.front();
+        }
+
+        if (target_id.empty()) {
+            return HttpResponse::bad_request("No radio device available to reconnect");
+        }
+
+        bool ok = mesh_service_.reconnect_device(target_id);
+        if (ok) {
+            return HttpResponse::json(200, {{"success", true}, {"device", target_id}, {"message", "Reconnected"}});
+        } else {
+            return HttpResponse::error("Failed to reconnect device " + target_id);
+        }
+    });
+
     // GET /api/nodes
     server_.get("/api/nodes", [this](const HttpRequest& req) {
         std::string filter_device = req.get_query("device");

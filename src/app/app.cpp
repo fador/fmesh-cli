@@ -13,6 +13,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <memory>
+#include <set>
 #include <thread>
 
 namespace meshcli {
@@ -139,13 +140,18 @@ int run_app(int argc, char** argv, MeshService& service) {
         LOG_INFO() << "headless mode running"
                    << (cfg.web_enabled ? " (web dashboard active, press Ctrl+C to stop)..." : " for 15 seconds...");
         auto start = std::chrono::steady_clock::now();
+        std::set<std::string> disconnected_devices;
+        auto last_reconnect_attempt = std::chrono::steady_clock::now();
+
         while (!g_got_sigint && (cfg.web_enabled || (std::chrono::steady_clock::now() - start < std::chrono::seconds(15)))) {
             wake.drain();
             for (auto& ev : queue.drain_all()) {
-                std::visit([](const auto& e) {
+                std::visit([&disconnected_devices](const auto& e) {
                     using T = std::decay_t<decltype(e)>;
-                    if constexpr (std::is_same_v<T, EvConnected>)
+                    if constexpr (std::is_same_v<T, EvConnected>) {
                         LOG_INFO() << "[event] Connected: " << e.display_name;
+                        disconnected_devices.erase(e.device);
+                    }
                     else if constexpr (std::is_same_v<T, EvMyInfo>)
                         LOG_INFO() << "[event] MyInfo: node=" << node_num_to_id(e.my_node_num);
                     else if constexpr (std::is_same_v<T, EvMetadata>)
@@ -164,8 +170,12 @@ int run_app(int argc, char** argv, MeshService& service) {
                         LOG_INFO() << "[event] Log: " << e.message;
                     else if constexpr (std::is_same_v<T, EvError>)
                         LOG_ERROR() << "[event] Error: " << e.message;
-                    else if constexpr (std::is_same_v<T, EvDisconnected>)
-                        LOG_WARN() << "[event] Disconnected: " << e.reason;
+                    else if constexpr (std::is_same_v<T, EvDisconnected>) {
+                        LOG_WARN() << "[event] Disconnected: " << e.reason << " (device=" << e.device << ")";
+                        if (!e.device.empty()) {
+                            disconnected_devices.insert(e.device);
+                        }
+                    }
                     else if constexpr (std::is_same_v<T, EvConfigLine>)
                         LOG_INFO() << "[event] Config: " << e.line.size() << " bytes";
                     else if constexpr (std::is_same_v<T, EvRawPacket>)
@@ -173,6 +183,25 @@ int run_app(int argc, char** argv, MeshService& service) {
                                    << " (" << e.hex.size() << " bytes)";
                 }, ev);
             }
+
+            // In persistent web mode, periodically attempt to reconnect disconnected devices
+            if (cfg.web_enabled && !disconnected_devices.empty()) {
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_reconnect_attempt >= std::chrono::seconds(5)) {
+                    last_reconnect_attempt = now;
+                    for (auto it = disconnected_devices.begin(); it != disconnected_devices.end(); ) {
+                        const std::string& dev = *it;
+                        LOG_INFO() << "Attempting auto-reconnect for " << dev << "...";
+                        if (service.reconnect_device(dev)) {
+                            LOG_INFO() << "Successfully reconnected " << dev;
+                            it = disconnected_devices.erase(it);
+                        } else {
+                            ++it;
+                        }
+                    }
+                }
+            }
+
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         // Dump node DB summary.
