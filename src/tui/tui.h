@@ -50,6 +50,25 @@ private:
     void render_input(int row, int width);
     void process_events();
     void handle_event(const MeshEvent& ev);
+
+    // Event handlers
+    void on_event(const EvConnected& e);
+    void on_event(const EvDisconnected& e);
+    void on_event(const EvMyInfo& e);
+    void on_event(const EvMetadata& e);
+    void on_event(const EvConfigComplete& e);
+    void on_event(const EvNodeUpdated& e);
+    void on_event(const EvChannelUpdated& e);
+    void on_event(const EvTextReceived& e);
+    void on_event(const EvAckReceived& e);
+    void on_event(const EvLogLine& e);
+    void on_event(const EvError& e);
+    void on_event(const EvRawPacket& e);
+    void on_event(const EvBleDeviceFound& e);
+    void on_event(const EvTracerouteReceived& e);
+    template <typename T>
+    void on_event(const T&) {}
+
     std::string connection_info() const;
     void maybe_reconnect();
     void save_device_spec(const BleDeviceSpec& spec);
