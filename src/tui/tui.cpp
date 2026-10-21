@@ -1631,234 +1631,259 @@ void TuiApp::process_events() {
 }
 
 void TuiApp::handle_event(const MeshEvent& ev) {
-    std::visit([this](const auto& e) {
-        using T = std::decay_t<decltype(e)>;
-        if constexpr (std::is_same_v<T, EvConnected>) {
-            wm_.append_status("*** Connected to " + e.display_name, tui_color::INFO);
-            if (active_device_.empty()) {
-                active_device_ = e.device;
-            }
-            auto devs = service_.device_ids();
-            if (devs.size() > 1) {
-                wm_.ensure_nodelist("*");
-            } else {
-                wm_.ensure_nodelist(e.device);
-            }
-            if (const auto* db = service_.db_for(e.device)) {
-                for (const auto& ch : db->channels()) {
-                    if (ch.role != "DISABLED") {
-                        std::string name = ch.name;
-                        if (name.empty() && ch.role == "PRIMARY") name = "Primary";
-                        wm_.ensure_channel(e.device, ch.index, name);
-                    }
-                }
-            }
-            auto windows = service_.database().get_all_windows(e.device);
-            if (windows.empty()) windows = service_.database().get_all_windows("");
-            for (const auto& w : windows) {
-                if (w.kind == "channel") {
-                    std::string name = "";
-                    if (const auto* db = service_.db_for(e.device)) {
-                        auto ch = db->channel(w.target);
-                        if (ch && !ch->name.empty()) name = ch->name;
-                    }
-                    if (name.empty() && w.target == 0) name = "Primary";
-                    wm_.ensure_channel(e.device, w.target, name);
-                } else if (w.kind == "dm") {
-                    std::string nick = "";
-                    if (const auto* db = service_.db_for(e.device)) {
-                        auto n = db->get(w.target);
-                        if (n) nick = n->short_name.empty() ? n->long_name : n->short_name;
-                    }
-                    wm_.ensure_dm(e.device, w.target, nick);
-                }
-            }
-        } else if constexpr (std::is_same_v<T, EvDisconnected>) {
-            wm_.append_status("*** Disconnected: " + e.reason, tui_color::ERROR);
-            if (e.device == active_device_) {
-                auto devices = service_.device_ids();
-                active_device_.clear();
-                for (const auto& id : devices) {
-                    if (id != e.device) { active_device_ = id; break; }
-                }
-            }
-            if (reconnect_attempts_.find(e.device) == reconnect_attempts_.end()) {
-                reconnect_attempts_[e.device] = 0;
-                s_last_reconnect_attempt = std::time(nullptr);
-                wm_.append_status("*** Auto-reconnect for " + e.device + " in " +
-                                  std::to_string(reconnect_delay_s_) + "s...",
-                                  tui_color::INFO);
-            }
-        } else if constexpr (std::is_same_v<T, EvMyInfo>) {
-            wm_.append_status("*** My node: " + node_num_to_id(e.my_node_num), tui_color::INFO);
-        } else if constexpr (std::is_same_v<T, EvMetadata>) {
-            wm_.append_status("*** Firmware: " + e.firmware_version +
-                               "  HW: " + e.hw_model, tui_color::INFO);
-        } else if constexpr (std::is_same_v<T, EvConfigComplete>) {
-            wm_.append_status(e.rebooted ? "*** Config complete (device rebooted)"
-                                          : "*** Config complete",
-                              tui_color::INFO);
-        } else if constexpr (std::is_same_v<T, EvNodeUpdated>) {
-            const NodeDb* db = service_.db_for(e.device);
-            std::string nick = e.node.short_name.empty()
-                                   ? e.node.long_name : e.node.short_name;
-            if (nick.empty() && db) {
-                auto existing = db->get(e.node.node_num);
-                if (existing) {
-                    nick = existing->short_name.empty() ? existing->long_name : existing->short_name;
-                }
-            }
-            std::string old_nick = e.old_short_name.empty()
-                                       ? e.old_long_name : e.old_short_name;
+    std::visit([this](const auto& e) { on_event(e); }, ev);
+}
 
-            if (e.is_new) {
-                std::string display_name = e.node.long_name.empty() ? nick : e.node.long_name;
-                if (display_name.empty()) display_name = e.node.node_id;
-                wm_.append_status("*** Node joined: " + display_name +
-                                  " (" + e.node.node_id + ")", tui_color::INFO);
-                if (!nick.empty()) {
-                    wm_.rebuild_all_nicks(e.device, e.node.node_num, "", nick);
-                }
-            } else if (!nick.empty() && old_nick != nick) {
-                if (!old_nick.empty()) {
-                    wm_.append_status("*** Node renamed: " + old_nick + " -> " + nick +
-                                      " (" + e.node.node_id + ")", tui_color::INFO);
-                }
-                wm_.rebuild_all_nicks(e.device, e.node.node_num, old_nick, nick);
-            }
-
-            if (!nick.empty()) {
-                wm_.update_dm_nick(e.device, e.node.node_num, nick);
-            }
-            // Clamp nodelist cursor if viewing this device.
-            if (nodelist_device_ == e.device && db) {
-                int total = static_cast<int>(db->all().size());
-                if (nodelist_cursor_ >= total && total > 0)
-                    nodelist_cursor_ = total - 1;
-            }
-        } else if constexpr (std::is_same_v<T, EvChannelUpdated>) {
-            std::string name = e.channel.name;
-            if (e.channel.role != "DISABLED") {
-                wm_.ensure_channel(e.device, e.channel.index, name);
-            } else {
-                wm_.update_channel_name(e.device, e.channel.index, name);
-            }
-            wm_.append_status("*** Channel " + std::to_string(e.channel.index) +
-                              ": " + (name.empty() ? "(unnamed)" : name) +
-                              " [" + e.channel.role + "]", tui_color::INFO);
-        } else if constexpr (std::is_same_v<T, EvTextReceived>) {
-            const NodeDb* db = service_.db_for(e.device);
-            wm_.append_text(e.device, e.from_node, e.to_node, e.channel_idx,
-                            e.broadcast, e.text, e.rx_time, db,
-                            e.rx_snr, e.hop_start, e.hop_limit,
-                            e.rx_rssi, e.relay_node);
-        } else if constexpr (std::is_same_v<T, EvAckReceived>) {
-            std::string ack_text = "*** ACK " + std::to_string(e.packet_id) +
-                (e.success ? " OK" : " FAIL: " + e.error_reason);
-            int ack_color = e.success ? tui_color::INFO : tui_color::ERROR;
-            auto m = service_.database().find_by_packet_id(e.packet_id);
-            if (m && !m->window_kind.empty()) {
-                wm_.append_meta(m->device, m->window_kind, m->window_target,
-                                ack_text, ack_color);
-            }
-            wm_.append_status(ack_text, ack_color);
-        } else if constexpr (std::is_same_v<T, EvLogLine>) {
-            if (!e.message.empty())
-                wm_.append_status("[" + e.source + "] " + e.message, tui_color::META);
-        } else if constexpr (std::is_same_v<T, EvError>) {
-            wm_.append_status("*** Error: " + e.message, tui_color::ERROR);
-        } else if constexpr (std::is_same_v<T, EvRawPacket>) {
-            int idx = wm_.ensure_raw(e.device);
-            Window& w = *wm_.windows()[idx - 1];
-            char tsbuf[16];
-            std::time_t secs = static_cast<std::time_t>(e.ts / 1000);
-            std::tm tm{};
-            #ifdef _WIN32
-            ::localtime_s(&tm, &secs);
-#else
-            ::localtime_r(&secs, &tm);
-#endif
-            std::snprintf(tsbuf, sizeof(tsbuf), "%02d:%02d:%02d",
-                          tm.tm_hour, tm.tm_min, tm.tm_sec);
-            Line header;
-            header.text = "[" + std::string(tsbuf) + "] " + e.summary +
-                          "  " + std::to_string(e.hex.size()) + " bytes";
-            header.is_meta = true;
-            header.color_pair = tui_color::CHANNEL;
-            w.append_line(header);
-            std::istringstream iss(e.hex);
-            std::string hline;
-            while (std::getline(iss, hline)) {
-                Line hexline;
-                hexline.text = "  " + hline;
-                hexline.color_pair = tui_color::META;
-                w.append_line(hexline);
-            }
-            if (idx != wm_.current_index()) w.bump_activity(1);
-            else { w.mark_read(); w.scroll_to_bottom(); }
-        } else if constexpr (std::is_same_v<T, EvBleDeviceFound>) {
-            if (e.scan_complete) {
-                scan_complete_ = true;
-            } else {
-                // Deduplicate on the TUI thread (safe, single-threaded access).
-                bool dup = false;
-                for (const auto& existing : scan_entries_) {
-                    if (existing.address == e.address) { dup = true; break; }
-                }
-                if (!dup) {
-                    BleScanEntry entry;
-                    entry.name = e.name;
-                    entry.address = e.address;
-                    entry.device_path = e.device;
-                    entry.rssi = e.rssi;
-                    scan_entries_.push_back(std::move(entry));
-                }
-            }
-        } else if constexpr (std::is_same_v<T, EvTracerouteReceived>) {
-            std::string header = "*** Traceroute response from " + node_num_to_id(e.from_node);
-            const NodeDb* db = service_.db_for(e.device);
-            if (db) {
-                if (auto fn = db->get(e.from_node)) {
-                    if (!fn->long_name.empty()) header += " (" + fn->long_name + ")";
-                }
-            }
-            wm_.append_status(header, tui_color::INFO);
-
-            auto resolve_name = [&](uint32_t num) -> std::string {
-                if (db) {
-                    if (auto node = db->get(num)) {
-                        if (!node->short_name.empty()) return node->short_name;
-                        if (!node->long_name.empty()) return node->long_name;
-                    }
-                }
-                return node_num_to_id(num);
-            };
-
-            std::string fwd = "  Route towards: " + resolve_name(e.to_node);
-            for (size_t i = 0; i < e.route.size(); ++i) {
-                fwd += " --> " + resolve_name(e.route[i]);
-                if (i < e.snr_towards.size()) {
-                    char sbuf[16];
-                    std::snprintf(sbuf, sizeof(sbuf), " (%.1fdB)", e.snr_towards[i]);
-                    fwd += sbuf;
-                }
-            }
-            wm_.append_status(fwd, tui_color::CHANNEL);
-
-            if (!e.route_back.empty()) {
-                std::string back = "  Route back: " + resolve_name(e.from_node);
-                for (size_t i = 0; i < e.route_back.size(); ++i) {
-                    back += " --> " + resolve_name(e.route_back[i]);
-                    if (i < e.snr_back.size()) {
-                        char sbuf[16];
-                        std::snprintf(sbuf, sizeof(sbuf), " (%.1fdB)", e.snr_back[i]);
-                        back += sbuf;
-                    }
-                }
-                wm_.append_status(back, tui_color::CHANNEL);
+void TuiApp::on_event(const EvConnected& e) {
+    wm_.append_status("*** Connected to " + e.display_name, tui_color::INFO);
+    if (active_device_.empty()) {
+        active_device_ = e.device;
+    }
+    auto devs = service_.device_ids();
+    if (devs.size() > 1) {
+        wm_.ensure_nodelist("*");
+    } else {
+        wm_.ensure_nodelist(e.device);
+    }
+    if (const auto* db = service_.db_for(e.device)) {
+        for (const auto& ch : db->channels()) {
+            if (ch.role != "DISABLED") {
+                std::string name = ch.name;
+                if (name.empty() && ch.role == "PRIMARY") name = "Primary";
+                wm_.ensure_channel(e.device, ch.index, name);
             }
         }
-    }, ev);
+    }
+    auto windows = service_.database().get_all_windows(e.device);
+    if (windows.empty()) windows = service_.database().get_all_windows("");
+    for (const auto& w : windows) {
+        if (w.kind == "channel") {
+            std::string name = "";
+            if (const auto* db = service_.db_for(e.device)) {
+                auto ch = db->channel(w.target);
+                if (ch && !ch->name.empty()) name = ch->name;
+            }
+            if (name.empty() && w.target == 0) name = "Primary";
+            wm_.ensure_channel(e.device, w.target, name);
+        } else if (w.kind == "dm") {
+            std::string nick = "";
+            if (const auto* db = service_.db_for(e.device)) {
+                auto n = db->get(w.target);
+                if (n) nick = n->short_name.empty() ? n->long_name : n->short_name;
+            }
+            wm_.ensure_dm(e.device, w.target, nick);
+        }
+    }
+}
+
+void TuiApp::on_event(const EvDisconnected& e) {
+    wm_.append_status("*** Disconnected: " + e.reason, tui_color::ERROR);
+    if (e.device == active_device_) {
+        auto devices = service_.device_ids();
+        active_device_.clear();
+        for (const auto& id : devices) {
+            if (id != e.device) { active_device_ = id; break; }
+        }
+    }
+    if (reconnect_attempts_.find(e.device) == reconnect_attempts_.end()) {
+        reconnect_attempts_[e.device] = 0;
+        s_last_reconnect_attempt = std::time(nullptr);
+        wm_.append_status("*** Auto-reconnect for " + e.device + " in " +
+                          std::to_string(reconnect_delay_s_) + "s...",
+                          tui_color::INFO);
+    }
+}
+
+void TuiApp::on_event(const EvMyInfo& e) {
+    wm_.append_status("*** My node: " + node_num_to_id(e.my_node_num), tui_color::INFO);
+}
+
+void TuiApp::on_event(const EvMetadata& e) {
+    wm_.append_status("*** Firmware: " + e.firmware_version +
+                       "  HW: " + e.hw_model, tui_color::INFO);
+}
+
+void TuiApp::on_event(const EvConfigComplete& e) {
+    wm_.append_status(e.rebooted ? "*** Config complete (device rebooted)"
+                                  : "*** Config complete",
+                      tui_color::INFO);
+}
+
+void TuiApp::on_event(const EvNodeUpdated& e) {
+    const NodeDb* db = service_.db_for(e.device);
+    std::string nick = e.node.short_name.empty()
+                           ? e.node.long_name : e.node.short_name;
+    if (nick.empty() && db) {
+        auto existing = db->get(e.node.node_num);
+        if (existing) {
+            nick = existing->short_name.empty() ? existing->long_name : existing->short_name;
+        }
+    }
+    std::string old_nick = e.old_short_name.empty()
+                               ? e.old_long_name : e.old_short_name;
+
+    if (e.is_new) {
+        std::string display_name = e.node.long_name.empty() ? nick : e.node.long_name;
+        if (display_name.empty()) display_name = e.node.node_id;
+        wm_.append_status("*** Node joined: " + display_name +
+                          " (" + e.node.node_id + ")", tui_color::INFO);
+        if (!nick.empty()) {
+            wm_.rebuild_all_nicks(e.device, e.node.node_num, "", nick);
+        }
+    } else if (!nick.empty() && old_nick != nick) {
+        if (!old_nick.empty()) {
+            wm_.append_status("*** Node renamed: " + old_nick + " -> " + nick +
+                              " (" + e.node.node_id + ")", tui_color::INFO);
+        }
+        wm_.rebuild_all_nicks(e.device, e.node.node_num, old_nick, nick);
+    }
+
+    if (!nick.empty()) {
+        wm_.update_dm_nick(e.device, e.node.node_num, nick);
+    }
+    // Clamp nodelist cursor if viewing this device.
+    if (nodelist_device_ == e.device && db) {
+        int total = static_cast<int>(db->all().size());
+        if (nodelist_cursor_ >= total && total > 0)
+            nodelist_cursor_ = total - 1;
+    }
+}
+
+void TuiApp::on_event(const EvChannelUpdated& e) {
+    std::string name = e.channel.name;
+    if (e.channel.role != "DISABLED") {
+        wm_.ensure_channel(e.device, e.channel.index, name);
+    } else {
+        wm_.update_channel_name(e.device, e.channel.index, name);
+    }
+    wm_.append_status("*** Channel " + std::to_string(e.channel.index) +
+                      ": " + (name.empty() ? "(unnamed)" : name) +
+                      " [" + e.channel.role + "]", tui_color::INFO);
+}
+
+void TuiApp::on_event(const EvTextReceived& e) {
+    const NodeDb* db = service_.db_for(e.device);
+    wm_.append_text(e.device, e.from_node, e.to_node, e.channel_idx,
+                    e.broadcast, e.text, e.rx_time, db,
+                    e.rx_snr, e.hop_start, e.hop_limit,
+                    e.rx_rssi, e.relay_node);
+}
+
+void TuiApp::on_event(const EvAckReceived& e) {
+    std::string ack_text = "*** ACK " + std::to_string(e.packet_id) +
+        (e.success ? " OK" : " FAIL: " + e.error_reason);
+    int ack_color = e.success ? tui_color::INFO : tui_color::ERROR;
+    auto m = service_.database().find_by_packet_id(e.packet_id);
+    if (m && !m->window_kind.empty()) {
+        wm_.append_meta(m->device, m->window_kind, m->window_target,
+                        ack_text, ack_color);
+    }
+    wm_.append_status(ack_text, ack_color);
+}
+
+void TuiApp::on_event(const EvLogLine& e) {
+    if (!e.message.empty())
+        wm_.append_status("[" + e.source + "] " + e.message, tui_color::META);
+}
+
+void TuiApp::on_event(const EvError& e) {
+    wm_.append_status("*** Error: " + e.message, tui_color::ERROR);
+}
+
+void TuiApp::on_event(const EvRawPacket& e) {
+    int idx = wm_.ensure_raw(e.device);
+    Window& w = *wm_.windows()[idx - 1];
+    char tsbuf[16];
+    std::time_t secs = static_cast<std::time_t>(e.ts / 1000);
+    std::tm tm{};
+    #ifdef _WIN32
+    ::localtime_s(&tm, &secs);
+#else
+    ::localtime_r(&secs, &tm);
+#endif
+    std::snprintf(tsbuf, sizeof(tsbuf), "%02d:%02d:%02d",
+                  tm.tm_hour, tm.tm_min, tm.tm_sec);
+    Line header;
+    header.text = "[" + std::string(tsbuf) + "] " + e.summary +
+                  "  " + std::to_string(e.hex.size()) + " bytes";
+    header.is_meta = true;
+    header.color_pair = tui_color::CHANNEL;
+    w.append_line(header);
+    std::istringstream iss(e.hex);
+    std::string hline;
+    while (std::getline(iss, hline)) {
+        Line hexline;
+        hexline.text = "  " + hline;
+        hexline.color_pair = tui_color::META;
+        w.append_line(hexline);
+    }
+    if (idx != wm_.current_index()) w.bump_activity(1);
+    else { w.mark_read(); w.scroll_to_bottom(); }
+}
+
+void TuiApp::on_event(const EvBleDeviceFound& e) {
+    if (e.scan_complete) {
+        scan_complete_ = true;
+    } else {
+        // Deduplicate on the TUI thread (safe, single-threaded access).
+        bool dup = false;
+        for (const auto& existing : scan_entries_) {
+            if (existing.address == e.address) { dup = true; break; }
+        }
+        if (!dup) {
+            BleScanEntry entry;
+            entry.name = e.name;
+            entry.address = e.address;
+            entry.device_path = e.device;
+            entry.rssi = e.rssi;
+            scan_entries_.push_back(std::move(entry));
+        }
+    }
+}
+
+void TuiApp::on_event(const EvTracerouteReceived& e) {
+    std::string header = "*** Traceroute response from " + node_num_to_id(e.from_node);
+    const NodeDb* db = service_.db_for(e.device);
+    if (db) {
+        if (auto fn = db->get(e.from_node)) {
+            if (!fn->long_name.empty()) header += " (" + fn->long_name + ")";
+        }
+    }
+    wm_.append_status(header, tui_color::INFO);
+
+    auto resolve_name = [&](uint32_t num) -> std::string {
+        if (db) {
+            if (auto node = db->get(num)) {
+                if (!node->short_name.empty()) return node->short_name;
+                if (!node->long_name.empty()) return node->long_name;
+            }
+        }
+        return node_num_to_id(num);
+    };
+
+    std::string fwd = "  Route towards: " + resolve_name(e.to_node);
+    for (size_t i = 0; i < e.route.size(); ++i) {
+        fwd += " --> " + resolve_name(e.route[i]);
+        if (i < e.snr_towards.size()) {
+            char sbuf[16];
+            std::snprintf(sbuf, sizeof(sbuf), " (%.1fdB)", e.snr_towards[i]);
+            fwd += sbuf;
+        }
+    }
+    wm_.append_status(fwd, tui_color::CHANNEL);
+
+    if (!e.route_back.empty()) {
+        std::string back = "  Route back: " + resolve_name(e.from_node);
+        for (size_t i = 0; i < e.route_back.size(); ++i) {
+            back += " --> " + resolve_name(e.route_back[i]);
+            if (i < e.snr_back.size()) {
+                char sbuf[16];
+                std::snprintf(sbuf, sizeof(sbuf), " (%.1fdB)", e.snr_back[i]);
+                back += sbuf;
+            }
+        }
+        wm_.append_status(back, tui_color::CHANNEL);
+    }
 }
 
 void TuiApp::save_device_spec(const BleDeviceSpec& spec) {
